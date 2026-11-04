@@ -33,6 +33,31 @@
   <div class="leader" id="leader"></div>
 </div>
 
+<!-- 투타 대결 점수판 -->
+<div id="duelHud" class="duel hidden">
+  <div class="sb">
+    <table class="ls">
+      <thead><tr id="dHead"></tr></thead>
+      <tbody id="dRows"></tbody>
+    </table>
+    <div class="sb-side">
+      <div class="diamond" aria-label="주자"><i id="dB2"></i><i id="dB3"></i><i id="dB1"></i></div>
+      <div class="bso">
+        <div class="b"><span>B</span><i></i><i></i><i></i></div>
+        <div class="s"><span>S</span><i></i><i></i></div>
+        <div class="o"><span>O</span><i></i><i></i></div>
+      </div>
+    </div>
+    <div class="sb-pitch" id="dPitch"></div>
+  </div>
+  <div class="sb-foot"><span id="dMatch"></span><b id="dStatus"></b></div>
+</div>
+<div id="tracker" class="tracker hidden" aria-label="투구 위치(포수 시점)">
+  <div class="tk-zone"></div>
+  <div id="tkDots"></div>
+  <span class="tk-k">포수 시점</span>
+</div>
+
 <div id="join" class="join hidden">
   <img id="qrMini" alt="">
   <div><span class="join-k">참가</span><b id="codeMini">----</b></div>
@@ -64,9 +89,29 @@
   <div class="lobby">
     <div class="lobby-copy">
       <div class="eyebrow">PHONE CONTROLLER GAMES</div>
-      <h1 class="wordmark">HOME RUN<br>DERBY</h1>
-      <p class="lede">폰이 방망이가 됩니다. 1~4명이 10구씩 쳐서 홈런 수로 겨뤄요.</p>
-      <ol class="steps">
+      <h1 class="wordmark only-derby">HOME RUN<br>DERBY</h1>
+      <h1 class="wordmark only-duel">PITCHER<br>VS BATTER</h1>
+      <div class="modes" id="modes">
+        <button class="mode" data-mode="derby"><kbd>1</kbd><b>홈런 더비</b><span>1~4명 · 10구씩 쳐서 홈런 수로 겨뤄요</span></button>
+        <button class="mode" data-mode="duel"><kbd>2</kbd><b>투타 대결</b><span>2~4명 · 한 명은 폰으로 던지고, 한 명은 쳐요</span></button>
+      </div>
+      <p class="lede only-derby">폰이 방망이가 됩니다. 1~4명이 10구씩 쳐서 홈런 수로 겨뤄요.</p>
+      <p class="lede only-duel">한 명은 폰으로 던지고 한 명은 쳐요. 3아웃(최대 6타석)이면 공수 교대, 한 사람당 두 이닝씩 쳐서 득점으로 겨뤄요.</p>
+      <ol class="steps only-duel">
+        <li>
+          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="12" y="10" width="24" height="28" rx="3"/><path d="M12 19h24 M12 29h24 M20 10v28 M28 10v28"/><circle cx="31" cy="15" r="3"/></svg>
+          <div><b>투수: 코스를 정해요</b><span>폰의 존을 끌어서 던질 곳을 정해요. 존 밖은 볼이에요.</span></div>
+        </li>
+        <li>
+          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M10 34C14 18 24 10 38 10"/><circle cx="38" cy="10" r="4"/><path d="M30 36c3-4 8-6 12-5"/></svg>
+          <div><b>투수: 공처럼 던져요</b><span>세게 = 직구, 손목 비틀기 = 슬라이더, 앞으로 꺾기 = 커브, 손목 고정 = 포크볼.</span></div>
+        </li>
+        <li>
+          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 38C16 22 28 14 42 10"/><circle cx="38" cy="30" r="5"/><path d="M8 38l6-2 M8 38l2-6"/></svg>
+          <div><b>타자: 공이 오면 휘둘러요</b><span>존 밖 공은 참으면 볼, 4볼이면 볼넷이에요.</span></div>
+        </li>
+      </ol>
+      <ol class="steps only-derby">
         <li>
           <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="14" y="5" width="20" height="38" rx="4"/><path d="M20 15h8v8h-8z M20 27h3 M25 27h3v3 M20 31h3v3"/></svg>
           <div><b>QR을 찍어요</b><span>폰 카메라로 찍고 시작하기를 눌러요.</span></div>
@@ -81,7 +126,7 @@
         </li>
       </ol>
       <div class="slots" id="slots"></div>
-      <div class="hint"><kbd>Enter</kbd> 게임 시작 <span class="dot"></span> <kbd>Space</kbd> 키보드 스윙(시험용) <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
+      <div class="hint"><kbd>Enter</kbd> 게임 시작 <span class="dot"></span> <kbd>1</kbd> <kbd>2</kbd> 모드 <span class="dot"></span> <kbd>Space</kbd> 키보드 스윙 <span class="dot"></span> <kbd>P</kbd> 키보드 투구(시험용) <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
@@ -98,7 +143,7 @@
     <div class="eyebrow">FINAL</div>
     <h1 class="wordmark sm">경기 끝</h1>
     <div class="podium" id="podium"></div>
-    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b></div>
+    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b> <span class="dot"></span> <kbd>1</kbd> <kbd>2</kbd> 모드 바꾸기</div>
   </div>
 </section>
 

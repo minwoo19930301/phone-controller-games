@@ -18,8 +18,8 @@ const GAMES = {
   baseball: {
     title: '홈런 더비',
     play: '/play/',
-    fromController: ['swing', 'start_game', 'ready'],
-    fromDisplay: ['game_state', 'turn', 'pitch', 'result'],
+    fromController: ['swing', 'start_game', 'ready', 'throw', 'mode'],
+    fromDisplay: ['game_state', 'turn', 'pitch', 'result', 'role'],
     volatile: []
   },
   golf: {
@@ -35,6 +35,41 @@ const GAMES = {
     fromController: ['pose', 'swing', 'calibrate', 'start_game'],
     fromDisplay: ['game_state', 'cue', 'result'],
     volatile: ['pose']
+  },
+  saber: {
+    title: '광선검',
+    play: '/play/saber/',
+    fromController: ['pose', 'swing', 'calibrate', 'start_game'],
+    fromDisplay: ['game_state', 'cue', 'result', 'hit'],
+    volatile: ['pose']
+  },
+  fishing: {
+    title: '배스 낚시',
+    play: '/play/fishing/',
+    fromController: ['pose', 'cast', 'hookset', 'reel', 'calibrate', 'start_game'],
+    fromDisplay: ['game_state', 'bite', 'tension', 'result', 'cue'],
+    volatile: ['pose', 'reel']
+  },
+  tennis: {
+    title: '테니스',
+    play: '/play/tennis/',
+    fromController: ['pose', 'swing', 'calibrate', 'start_game'],
+    fromDisplay: ['game_state', 'cue', 'result'],
+    volatile: ['pose']
+  },
+  airhockey: {
+    title: '에어하키',
+    play: '/play/airhockey/',
+    fromController: ['move', 'start_game'],
+    fromDisplay: ['game_state', 'goal', 'hit'],
+    volatile: ['move']
+  },
+  putting: {
+    title: '퍼팅 챌린지',
+    play: '/play/putting/',
+    fromController: ['pose', 'aim', 'address', 'stroke', 'cancel', 'start_game'],
+    fromDisplay: ['game_state', 'result'],
+    volatile: ['pose', 'aim']
   }
 };
 

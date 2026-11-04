@@ -8,10 +8,13 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { ZONE } from './duel.js';
 
 const RD = Math.PI / 180;
 const Y = new THREE.Vector3(0, 1, 0);
 export const fenceDist = (deg) => 98 + 24 * Math.cos(2 * deg * RD);
+// 야수 자리 [x, z]: 1루수, 2루수, 유격수, 3루수, 좌익수, 중견수, 우익수
+export const FIELD_SPOTS = [[-20, 25], [-8.5, 37], [8.5, 37], [20, 25], [42, 80], [0, 93], [-42, 80]];
 const onArc = (deg, r, y = 0) => new THREE.Vector3(r * Math.sin(deg * RD), y, r * Math.cos(deg * RD));
 
 // ---------- 캔버스 텍스처 ----------
@@ -714,7 +717,7 @@ export function createScene(canvas) {
     } else {
       g.fillStyle = '#ffd23a';
       g.font = '400 64px Anton, Impact, sans-serif';
-      g.fillText('HOME RUN DERBY', w / 2, 70);
+      g.fillText(info.title || 'HOME RUN DERBY', w / 2, 70);
       g.fillStyle = info.color || '#ffffff';
       g.font = '800 150px "Pretendard Variable", Pretendard, sans-serif';
       g.fillText(info.name || 'PLAY BALL', w / 2, h * 0.52);
@@ -727,10 +730,26 @@ export function createScene(canvas) {
   drawBoard({ name: 'PLAY BALL', sub: 'QR을 찍고 참가하세요' });
 
   // 선수들
-  const pitcher = makePlayer({ jersey: '#b9bec7', cap: '#1d2e4f', socks: '#1d2e4f', glove: true });
-  pitcher.group.position.set(0, 0.25, 18.6);
-  pitcher.group.rotation.y = Math.PI;
-  scene.add(pitcher.group);
+  // 투수는 기본 회색 유니폼이고, 투타 대결에서는 던지는 사람 색으로 바꿉니다.
+  const PITCHER_LOOK = { jersey: '#b9bec7', cap: '#1d2e4f', socks: '#1d2e4f', glove: true };
+  let pitcher = null;
+  let pitcherColor;
+  function setPitcher(color) {
+    const want = color || null;
+    if (pitcher && want === pitcherColor) return;
+    pitcherColor = want;
+    if (pitcher) scene.remove(pitcher.group);
+    let look = PITCHER_LOOK;
+    if (want) {
+      const sock = new THREE.Color(want).multiplyScalar(0.55);
+      look = { jersey: want, cap: want, socks: `#${sock.getHexString()}`, glove: true };
+    }
+    pitcher = makePlayer(look);
+    pitcher.group.position.set(0, 0.25, 18.6);
+    pitcher.group.rotation.y = Math.PI;
+    scene.add(pitcher.group);
+  }
+  setPitcher(null);
 
   let batter = null;
   function setBatter(color) {
@@ -744,7 +763,6 @@ export function createScene(canvas) {
   }
   setBatter('#ff5a5f');
 
-  const FIELD_SPOTS = [[-20, 25], [-8.5, 37], [8.5, 37], [20, 25], [42, 80], [0, 93], [-42, 80]];
   const fielders = FIELD_SPOTS.map(([x, z]) => {
     const f = makePlayer({ jersey: '#1f3a66', cap: '#1f3a66', socks: '#14284a', glove: true });
     f.home = new THREE.Vector3(x, 0, z);
@@ -754,6 +772,72 @@ export function createScene(canvas) {
     scene.add(f.group);
     return f;
   });
+
+  // 투타 대결: 스트라이크 존 테두리와 지나간 공 자리 표시
+  const zone = new THREE.Group();
+  {
+    const mat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.5, depthWrite: false,
+      side: THREE.DoubleSide, toneMapped: false });
+    const faint = mat.clone();
+    faint.opacity = 0.16;
+    const t = 0.012;
+    const w = ZONE.x * 2;
+    const h = ZONE.hi - ZONE.lo;
+    const cy = (ZONE.hi + ZONE.lo) / 2;
+    const bar = (bw, bh, x, y, m) => {
+      const b = new THREE.Mesh(new THREE.PlaneGeometry(bw, bh), m);
+      b.position.set(x, y, 0.1);
+      zone.add(b);
+    };
+    bar(w + t, t, 0, ZONE.hi, mat);
+    bar(w + t, t, 0, ZONE.lo, mat);
+    bar(t, h, -ZONE.x, cy, mat);
+    bar(t, h, ZONE.x, cy, mat);
+    for (const k of [1, 2]) {
+      bar(t * 0.6, h, -ZONE.x + (w * k) / 3, cy, faint);
+      bar(w, t * 0.6, 0, ZONE.lo + (h * k) / 3, faint);
+    }
+  }
+  zone.visible = false;
+  scene.add(zone);
+  const markGeo = new THREE.CircleGeometry(0.037, 20);
+  const marks = [];
+  function markPitch(x, y, color) {
+    const m = new THREE.Mesh(markGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false,
+      side: THREE.DoubleSide, toneMapped: false }));
+    m.position.set(x, y, 0.09);
+    zone.add(m);
+    marks.push(m);
+  }
+  function clearMarks() {
+    for (const m of marks.splice(0)) {
+      zone.remove(m);
+      m.material.dispose();
+    }
+  }
+
+  // 투타 대결 주자. 베이스에서 다음 베이스 쪽으로 조금 나가 섭니다.
+  const BASE_SPOTS = [[-19.4, 19.4], [0, 38.8], [19.4, 19.4], [0, 0]];
+  const runners = [null, null, null];
+  function setRunners(bases, color) {
+    for (let i = 0; i < 3; i++) {
+      const want = bases && bases[i] ? color || '#ffffff' : null;
+      const cur = runners[i];
+      if (cur && cur.color === want) continue;
+      if (cur) scene.remove(cur.p.group);
+      runners[i] = null;
+      if (!want) continue;
+      const sock = new THREE.Color(want).multiplyScalar(0.55);
+      const p = makePlayer({ jersey: want, cap: want, socks: `#${sock.getHexString()}`, helmet: true });
+      const [x, z] = BASE_SPOTS[i];
+      const [nx, nz] = BASE_SPOTS[i + 1];
+      const d = Math.hypot(nx - x, nz - z);
+      p.group.position.set(x + ((nx - x) / d) * 1.8, 0, z + ((nz - z) / d) * 1.8);
+      p.group.rotation.y = Math.atan2(-p.group.position.x, -p.group.position.z);
+      scene.add(p.group);
+      runners[i] = { p, color: want };
+    }
+  }
 
   // 공
   const ball = new THREE.Mesh(new THREE.SphereGeometry(0.05, 24, 16), std('#ffffff', 0.5, { map: seamTex }));
@@ -951,6 +1035,11 @@ export function createScene(canvas) {
       f.pose(pose);
     }
 
+    // 주자
+    for (const r of runners) {
+      if (r) r.p.pose({ ...READY, hipY: 0.84 + Math.sin(now / 500 + r.p.group.position.x) * 0.01, lean: 0.3 });
+    }
+
     // 공
     if (v.ball === 'hand') {
       const hp = pr.R.clone().applyMatrix4(pitcher.group.matrixWorld);
@@ -1024,6 +1113,11 @@ export function createScene(canvas) {
     clearHit,
     fireworks,
     drawBoard,
+    setPitcher,
+    setRunners,
+    setZone: (on) => { zone.visible = Boolean(on); },
+    markPitch,
+    clearMarks,
     resetFollow: () => { followY = 0; }
   };
 }

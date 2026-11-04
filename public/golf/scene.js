@@ -261,7 +261,7 @@ function makeClub(clubId, playerColor) {
   return g;
 }
 
-function makeGolfer(color) {
+export function makeGolfer(color) {
   const g = new THREE.Group();
   const shirt = std(color, 0.7);
   const pants = std('#2c3442', 0.8);
@@ -411,7 +411,7 @@ function makeGolfer(color) {
 }
 
 // 한 순간의 클럽 방향(shaft, face)으로 골퍼 전체 자세를 만듭니다.
-function swingPose(shaft, phi) {
+export function swingPose(shaft, phi) {
   // 팔은 클럽보다 덜 돕니다(손목 코킹). phi 는 들어 올리면 음수.
   const alpha = phi < 0 ? phi * 0.58 : phi * 0.78;
   const arm = ADDR_ARM.clone().applyAxisAngle(ARM_AXIS, -alpha * RD);
