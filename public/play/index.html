@@ -62,6 +62,7 @@
     </div>
     <button id="btnGo" class="hidden">게임 시작</button>
     <button id="btnTest" class="ghost hidden">테스트 스윙 (센서 없음)</button>
+    <p id="sensorHelp" class="hidden" style="font-size:13px">센서로 치려면 — iPhone: Safari 를 앱 전환기에서 완전히 닫고 QR을 다시 찍은 뒤 동작 접근을 허용해요. Android: 주소창 자물쇠 → 사이트 설정 → 동작 센서 허용.</p>
   </div>
 </main>
 <script src="/socket.io/socket.io.js"></script>
@@ -78,7 +79,19 @@ if (!token) {
   try { localStorage.setItem('pcg-token', token); } catch (e) {}
 }
 
-const socket = io({ autoConnect: false, transports: ['websocket', 'polling'] });
+const socket = io({ autoConnect: false, transports: ['websocket', 'polling'], tryAllTransports: true });
+// 끊겨 있으면 보내지 않습니다(다시 붙을 때 join 보다 먼저 흘러가 버려짐).
+function send(event, data) {
+  if (!socket.connected) return false;
+  socket.emit('c2d', { event, data });
+  return true;
+}
+let noRoomTries = 0;
+// 큰 화면이 이 폰이 살아 있는지 알 수 있게 1초마다 신호를 보냅니다.
+setInterval(() => { if (me) send('ready', {}); }, 1000);
+function keepAwake() {
+  if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
+}
 let me = null;
 let state = { phase: 'lobby' };
 let started = false;
@@ -147,38 +160,54 @@ function buzz(ms) {
 // ---------- 스윙 감지 ----------
 // 회전 속도(도/초)가 문턱을 넘으면 스윙 시작으로 보고, 직후 120ms 동안 가장 센 값을 힘으로 씁니다.
 const TRIGGER_DEG = 380;
-const COOLDOWN_MS = 700;
+const COOLDOWN_MS = 600;
+const REAL_SWING_DEG = 650; // 창 안 최댓값이 이보다 작으면 준비 동작으로 보고 버립니다
+const ACC_TRIGGER = 22; // 자이로가 없는 폰은 가속도로 잡습니다(m/s²)
 let swingAt = 0;
 let window_ = null;
+let hasGyro = false;
 
 function onMotion(e) {
   const r = e.rotationRate;
   const acc = e.acceleration;
-  if (!r && !acc) return;
+  const gyro = r && (r.alpha != null || r.beta != null || r.gamma != null);
+  if (gyro) hasGyro = true;
+  if (!gyro && !(acc && acc.x != null)) return;
+  // 자이로가 있거나 가속도가 들어올 때만 센서가 있다고 봅니다.
   gotMotion = true;
-  const rot = r ? Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0) : 0;
+  const rot = gyro ? Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0) : 0;
   const a = acc ? Math.hypot(acc.x || 0, acc.y || 0, acc.z || 0) : 0;
   const now = performance.now();
   if (window_) {
+    if (rot > window_.rot || (!hasGyro && a > window_.acc)) window_.peakT = now;
     window_.rot = Math.max(window_.rot, rot);
     window_.acc = Math.max(window_.acc, a);
     return;
   }
-  if (rot > TRIGGER_DEG && now - swingAt > COOLDOWN_MS) {
+  const trig = hasGyro ? rot > TRIGGER_DEG : a > ACC_TRIGGER;
+  if (trig && now - swingAt > COOLDOWN_MS) {
     swingAt = now;
-    window_ = { start: now, rot, acc: a };
+    window_ = { start: now, peakT: now, rot, acc: a };
     setTimeout(() => {
       const w = window_;
       window_ = null;
+      // 백스윙·로드 같은 느린 동작이면 보내지 않고 쿨다운도 풀어서 진짜 스윙을 놓치지 않게 합니다.
+      const real = hasGyro ? w.rot > REAL_SWING_DEG : w.acc > ACC_TRIGGER + 6;
+      if (!real) {
+        swingAt = 0;
+        return;
+      }
       // 회전 1500도/초, 가속 35m/s² 정도면 아주 센 스윙입니다.
-      const p = Math.min(1, 0.55 * Math.min(1, (w.rot - TRIGGER_DEG) / 1100) + 0.45 * Math.min(1, w.acc / 35));
-      sendSwing(Math.max(0.15, p), performance.now() - w.start, Math.round(w.rot));
-    }, 120);
+      const rotPart = hasGyro ? Math.min(1, (w.rot - TRIGGER_DEG) / 1100) : Math.min(1, w.acc / 40);
+      const p = Math.min(1, 0.55 * rotPart + 0.45 * Math.min(1, w.acc / 35));
+      // 판정 시각은 가장 세게 돈 순간(정점)으로 보냅니다.
+      sendSwing(Math.max(0.15, p), performance.now() - w.peakT, Math.round(w.rot));
+    }, 90);
   }
 }
 
 function sendSwing(power, ago, peak) {
-  socket.emit('c2d', { event: 'swing', data: { power, ago, rtt: rtt(), peak } });
+  send('swing', { power, ago, rtt: rtt(), peak });
   $('power').style.width = `${Math.round(power * 100)}%`;
   $('bat').style.transform = 'rotate(-35deg)';
   setTimeout(() => ($('bat').style.transform = ''), 250);
@@ -215,13 +244,27 @@ socket.on('connect', () => {
   socket.emit('join', { role: 'controller', room: ROOM, token });
 });
 socket.on('assigned', (p) => {
+  // 다른 종목 방이면 그 종목의 컨트롤러로 보냅니다.
+  if (p.game && p.game !== 'baseball') {
+    location.replace(`/play/${p.game}/?room=${ROOM}`);
+    return;
+  }
   me = p;
+  noRoomTries = 0;
   document.documentElement.style.setProperty('--c', p.color);
   $('badge').textContent = p.name;
   show('vPlay');
   render();
 });
-socket.on('no_room', () => message('방을 찾을 수 없어요', '큰 화면의 QR을 다시 찍어 주세요.'));
+socket.on('no_room', () => {
+  // 서버가 막 다시 떴으면 큰 화면이 같은 코드로 방을 다시 만들 때까지 잠깐 기다립니다.
+  if (noRoomTries++ < 15) {
+    message('방에 다시 연결하는 중', '잠시만 기다려 주세요.');
+    setTimeout(() => socket.connected && socket.emit('join', { role: 'controller', room: ROOM, token }), 2000);
+    return;
+  }
+  message('방을 찾을 수 없어요', '큰 화면의 QR을 다시 찍어 주세요.');
+});
 socket.on('room_full', () => message('4명이 꽉 찼어요', '빈자리가 생기면 다시 찍어 주세요.'));
 socket.on('replaced', () => message('다른 탭에서 열었어요', '마지막으로 연 화면에서 조작해요.'));
 socket.on('room_closed', () => message('방이 닫혔어요', '큰 화면의 새 QR을 찍어 주세요.'));
@@ -245,6 +288,8 @@ socket.on('result', (r) => {
 });
 
 $('btnStart').addEventListener('click', async () => {
+  // 화면 꺼짐 방지와 권한 요청은 탭 안에서 await 전에 바로 불러야 iPhone 에서 통합니다.
+  keepAwake();
   audio();
   // iPhone 은 탭 안에서 바로 권한을 물어야 합니다.
   const DM = window.DeviceMotionEvent;
@@ -255,17 +300,20 @@ $('btnStart').addEventListener('click', async () => {
     if (res !== 'granted') {
       $('btnTest').textContent = '동작 권한이 없어요 · 눌러서 스윙';
       $('btnTest').classList.remove('hidden');
+      $('sensorHelp').classList.remove('hidden');
     }
   }
   window.addEventListener('devicemotion', onMotion);
-  if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
   started = true;
   if (!ROOM) { message('방 코드가 없어요', '큰 화면의 QR을 찍어 주세요.'); return; }
   socket.connect();
   // 1.5초 동안 센서 값이 안 들어오면(PC, http 주소) 버튼으로 스윙합니다.
   setTimeout(() => { if (!gotMotion) $('btnTest').classList.remove('hidden'); }, 1500);
 });
-$('btnGo').addEventListener('click', () => socket.emit('c2d', { event: 'start_game' }));
+$('btnGo').addEventListener('click', () => {
+  keepAwake();
+  send('start_game', {});
+});
 $('btnTest').addEventListener('click', () => sendSwing(0.85, 0, 0));
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && started && navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});

@@ -70,7 +70,7 @@ const sfx = {
 };
 
 // ---------- 연결 ----------
-const socket = io({ transports: ['websocket', 'polling'] });
+const socket = io({ transports: ['websocket', 'polling'], tryAllTransports: true });
 let players = [];
 socket.on('connect', () => {
   let saved = null;
@@ -80,6 +80,8 @@ socket.on('connect', () => {
 socket.on('room', async (r) => {
   try { sessionStorage.setItem('pcg-golf-room', r.code); } catch (e) {}
   players = r.players;
+  // 서버가 다시 떠서 방이 새로 만들어졌으면 진행 중이던 경기는 이어 갈 수 없으니 대기실로 돌아갑니다.
+  if (r.fresh && game.phase !== 'lobby') backToLobby('서버가 다시 시작돼서 대기실로 돌아왔어요');
   $('code').textContent = r.code;
   $('codeMini').textContent = r.code;
   const res = await fetch(`/api/qr?room=${r.code}`).then((x) => x.json());
@@ -98,8 +100,18 @@ socket.on('players', (p) => {
 });
 socket.on('display_replaced', () => $('replaced').classList.remove('hidden'));
 socket.on('start_game', () => startGame());
+socket.on('cancel', (d) => {
+  if (!isTurn(d.slot) || (game.sub !== 'aim' && game.sub !== 'swing')) return;
+  game.sub = 'aim';
+  game.activity = performance.now();
+  view.resetSwing();
+  view.setAim(game.aim, PIN_DIST);
+  prompt(`${playerInfo(d.slot).name} 차례`, '폰에서 방향을 맞추고 어드레스를 눌러요');
+  pushState();
+});
 socket.on('aim', (d) => {
   if (!isTurn(d.slot) || game.sub !== 'aim') return;
+  game.activity = performance.now();
   game.aim = Math.max(-25, Math.min(25, Number(d.yaw) || 0));
   view.setAim(game.aim, PIN_DIST);
   renderShotInfo();
@@ -122,7 +134,8 @@ socket.on('address', (d) => {
   }
   view.address(d.shaft0 || [0.55, -0.83, 0]);
   game.sub = 'swing';
-  game.swingAt = performance.now();
+  game.activity = performance.now();
+  pushState();
   prompt('스윙하세요', '폰을 휘두르는 그대로 클럽이 움직여요');
   renderShotInfo();
 });
@@ -188,7 +201,7 @@ function pushState() {
   socket.emit('d2c', {
     event: 'game_state',
     data: {
-      phase: game.phase, turn: game.phase === 'playing' ? game.order[game.turn] : null,
+      phase: game.phase, sub: game.sub, turn: game.phase === 'playing' ? game.order[game.turn] : null,
       round: game.round, rounds: ROUNDS, pin: PIN_DIST, scores, shot: game.shot, lastSlot: game.lastSlot
     }
   });
@@ -238,6 +251,8 @@ function beginTurn() {
   game.club = '7i';
   game.flight = null;
   game.shot += 1;
+  game.activity = performance.now();
+  game.awaySince = null;
   view.resetSwing();
   view.setGolfer(p.color, game.club);
   view.setAim(0, PIN_DIST);
@@ -267,6 +282,57 @@ function nextTurn() {
     newWind();
   }
   beginTurn();
+}
+
+function backToLobby(why) {
+  game.phase = 'lobby';
+  game.sub = 'idle';
+  game.order = [];
+  game.scores = {};
+  view.setTrail(null);
+  view.setMarkers([]);
+  $('hud').classList.add('hidden');
+  $('join').classList.add('hidden');
+  $('shotPanel').classList.remove('on');
+  $('pinTag').classList.remove('on');
+  $('over').classList.add('hidden');
+  $('lobby').classList.remove('hidden');
+  prompt('', '');
+  if (why) callout(why, '', 'miss', 2600);
+  renderPlayers();
+  pushState();
+}
+
+// 차례인 사람이 사라졌거나 너무 오래 아무것도 안 하면 다음 사람으로 넘깁니다.
+function watchTurn(now) {
+  if (game.phase !== 'playing' || (game.sub !== 'aim' && game.sub !== 'swing')) return;
+  const slot = game.order[game.turn];
+  const p = players.find((x) => x.slot === slot);
+  if (!players.some((x) => x.connected)) {
+    if (!game.allGoneSince) game.allGoneSince = now;
+    if (now - game.allGoneSince > 20000) backToLobby('모든 폰의 연결이 끊겨 대기실로 돌아왔어요');
+    return;
+  }
+  game.allGoneSince = null;
+  if (!p || !p.connected) {
+    if (!game.awaySince) {
+      game.awaySince = now;
+      prompt(`${slot}P 연결을 기다려요`, '15초 안에 돌아오지 않으면 다음 사람 차례로 넘어가요');
+    }
+    if (now - game.awaySince > 15000) {
+      callout(`${slot}P 건너뜀`, '연결이 끊겼어요', 'miss', 1800);
+      nextTurn();
+    }
+    return;
+  }
+  if (game.awaySince) {
+    game.awaySince = null;
+    prompt(`${playerInfo(slot).name} 차례`, '폰에서 방향을 맞추고 어드레스를 눌러요');
+  }
+  if (now - game.activity > 75000) {
+    callout(`${slot}P 건너뜀`, '오래 기다려서 다음 차례로 넘어가요', 'miss', 1800);
+    nextTurn();
+  }
 }
 
 function endGame() {
@@ -431,6 +497,7 @@ function hitShot(d) {
   const r = simulate(shot);
   game.sub = 'flight';
   game.flight = { ...r, t0: performance.now(), shot, done: false };
+  pushState();
   const p = playerInfo(game.order[game.turn]);
   view.setTrail(r.pts, p.color);
   sfx.strike(Math.min(1, r.clubSpeed / 40));
@@ -565,6 +632,7 @@ function renderBoard() {
 let cutNext = false;
 function tick() {
   const now = performance.now();
+  watchTurn(now);
   let mode = 'lobby';
   let ball = null;
   let trailI = null;

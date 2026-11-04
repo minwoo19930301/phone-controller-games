@@ -21,7 +21,17 @@
     try { localStorage.setItem('pcg-token', token); } catch (e) {}
   }
 
-  const socket = io({ autoConnect: false, transports: ['websocket', 'polling'] });
+  const socket = io({ autoConnect: false, transports: ['websocket', 'polling'], tryAllTransports: true });
+  // 끊긴 동안 보낸 이벤트는 다시 붙을 때 join 보다 먼저 흘러가 버려지므로, 끊겨 있으면 보내지 않습니다.
+  function send(event, data, volatile) {
+    if (!socket.connected) return false;
+    (volatile ? socket.volatile : socket).emit('c2d', { event, data });
+    return true;
+  }
+  const isTouch = navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
+  let impactAt = 0;
+  let holdTimer = null;
+  let noRoomTries = 0;
   let me = null;
   let state = { phase: 'lobby' };
   let club = '7i';
@@ -69,31 +79,41 @@
   let basis = null; // { r, u, f, shaft0 }
   let last = null; // 마지막 원시 방향
   let rotNow = 0; // 회전 속도(도/초)
+  let hasGyro = false; // rotationRate 에 숫자가 들어오는 기기인지
   const toBasis = (v) => [dot(v, basis.r), dot(v, basis.u), dot(v, basis.f)];
 
-  const swing = { stage: 'ready', phi: 0, prev: null, prevT: 0, prevD: 0, top: 0, speed: 0, samples: [] };
+  const swing = { stage: 'ready', phi: 0, prev: null, prevT: 0, prevD: 0, top: 0, gyroPeak: 0, samples: [] };
   function resetSwing() {
-    Object.assign(swing, { stage: 'ready', phi: 0, prev: null, prevT: 0, prevD: 0, top: 0, speed: 0, samples: [] });
+    Object.assign(swing, { stage: 'ready', phi: 0, prev: null, prevT: 0, prevD: 0, top: 0, gyroPeak: 0, samples: [] });
   }
 
   function calibrate(v) {
     const u = [0, 1, 0];
-    let f = [v.face[0], 0, v.face[2]];
-    if (Math.hypot(f[0], f[2]) < 0.2) f = [-v.top[0], 0, -v.top[2]]; // 화면이 위나 아래를 보면 대충 앞쪽으로
-    f = norm(f);
-    const r = norm(cross(f, u));
+    // 기준축은 샤프트(폰 길이 방향)에서 구합니다. 그립을 조금 돌려 쥐어도 목표선이 틀어지지 않습니다.
+    // r = 공 쪽(골퍼가 보는 쪽), f = u × r = 목표 쪽(오른손잡이).
+    let r = [v.top[0], 0, v.top[2]];
+    if (Math.hypot(r[0], r[2]) < 0.2) {
+      // 샤프트가 거의 수직이면 화면 방향을 목표로 보고 대신 씁니다.
+      const f0 = norm([v.face[0], 0, v.face[2]]);
+      r = cross(f0, u);
+    }
+    r = norm(r);
+    const f = norm(cross(u, r));
     basis = { r, u, f };
     basis.shaft0 = toBasis(v.top);
+    // 페이스는 어드레스 때 화면 방향을 기준(0°)으로 잽니다.
+    const f0 = toBasis(v.face);
+    basis.faceYaw0 = Math.atan2(f0[0], f0[2]);
     basis.back = norm(cross(basis.shaft0, [0, 0, -1])); // 뒤로 들어 올리는 회전축
     resetSwing();
   }
 
   function onSample(v, t) {
     if (!basis) return;
+    if (mode !== 'swing') return;
     const s = toBasis(v.top);
     const fc = toBasis(v.face);
-    socket.emit('c2d', { event: 'pose', data: { s, fc } });
-    if (mode !== 'swing') return;
+    send('pose', { s, fc }, true);
     drawMeter(s);
 
     const d = angle(s, basis.shaft0) / RD;
@@ -102,10 +122,13 @@
       const step = angle(swing.prev, s) / RD;
       const dir = Math.sign(dot(cross(swing.prev, s), basis.back)) || 0;
       swing.phi -= dir * step;
-      const dt = Math.max(0.001, (t - swing.prevT) / 1000);
-      const rate = (-dir * step) / dt; // 도/초, 내려올 때 양수
-      swing.samples.push({ t, s, fc, d, rate });
+      swing.samples.push({ t, s, fc, d, phi: swing.phi });
       if (swing.samples.length > 8) swing.samples.shift();
+      // 진행 속도(도/초, 내려올 때 양수). iPhone 은 같은 값이 겹쳐 오거나 간격이 흔들려서
+      // 표본 하나 차이로 나누면 두 배로 튀므로, 3표본 떨어진 두 점 사이로 잽니다.
+      const k = swing.samples;
+      const old = k[Math.max(0, k.length - 4)];
+      const rate = (swing.phi - old.phi) / Math.max(0.012, (t - old.t) / 1000);
 
       if (swing.stage === 'ready' && swing.phi < -60) swing.stage = 'back';
       if (swing.stage === 'back') {
@@ -115,7 +138,7 @@
         if (d < 20 && rate < 250) resetSwing();
       }
       if (swing.stage === 'down') {
-        swing.speed = Math.max(swing.speed, rate, rotNow);
+        if (!hasGyro) swing.gyroPeak = Math.max(swing.gyroPeak, rate);
         // 어드레스 방향에 가장 가까워졌다가 멀어지기 시작하는 순간이 임팩트입니다.
         if ((swing.prevD < 45 && d > swing.prevD) || swing.phi > 40) impact();
       }
@@ -125,20 +148,33 @@
     swing.prevT = t;
   }
 
+  const lerp3 = (a, b, u) => [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
   function impact() {
     const k = swing.samples;
-    const a = k[k.length - 2] || k[k.length - 1];
-    const b = k[k.length - 1];
-    // 어드레스에 가장 가까웠던 바로 앞 표본을 임팩트로 씁니다.
-    const at = a.d <= b.d ? a : b;
-    const before = k[Math.max(0, k.indexOf(at) - 1)];
-    const vel = [at.s[0] - before.s[0], at.s[1] - before.s[1], at.s[2] - before.s[2]];
-    const face = Math.atan2(at.fc[0], at.fc[2]) / RD; // + 는 열림(오른쪽)
+    const n = k.length;
+    // 어드레스에 가장 가까웠던 순간을 세 표본(p0, p1, p2)의 포물선으로 보간합니다.
+    const p0 = k[Math.max(0, n - 3)];
+    const p1 = k[Math.max(0, n - 2)];
+    const p2 = k[n - 1];
+    const den = p0.d - 2 * p1.d + p2.d;
+    let u = den > 1e-6 ? (0.5 * (p0.d - p2.d)) / den : 0;
+    u = Math.max(-0.5, Math.min(0.5, u));
+    const fImp = u >= 0 ? lerp3(p1.fc, p2.fc, u) : lerp3(p0.fc, p1.fc, 1 + u);
+    const miss = Math.max(0, p1.d - 0.25 * (p0.d - p2.d) * u);
+    // 클럽 끝이 움직이는 방향은 양옆 표본의 중앙 차분으로 구합니다.
+    const vel = [p2.s[0] - p0.s[0], p2.s[1] - p0.s[1], p2.s[2] - p0.s[2]];
+    let face = (Math.atan2(fImp[0], fImp[2]) - basis.faceYaw0) / RD; // + 는 열림(오른쪽)
+    face = ((face + 540) % 360) - 180;
     const path = Math.atan2(vel[0], Math.abs(vel[2]) + 1e-6) / RD; // + 는 안에서 밖으로
-    const speed = Math.max(swing.speed, at.rate);
+    // 속도는 자이로(rotationRate) 최댓값을 씁니다. 자이로가 없으면 방향 차이로 잰 값.
+    const speed = swing.gyroPeak;
     swing.stage = 'done';
-    const data = { speed: Math.round(speed), face: +face.toFixed(1), path: +path.toFixed(1), miss: +at.d.toFixed(1), club, aim };
-    socket.emit('c2d', { event: 'impact', data });
+    const data = { speed: Math.round(speed), face: +face.toFixed(1), path: +path.toFixed(1), miss: +miss.toFixed(1), club, aim };
+    if (!send('impact', data)) {
+      lostConnection();
+      return;
+    }
+    impactAt = performance.now();
     if (navigator.vibrate) navigator.vibrate(60);
     ting();
     mode = 'result';
@@ -180,7 +216,11 @@
   }
   function onMotion(e) {
     const r = e.rotationRate;
-    if (r) rotNow = Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0);
+    if (r && (r.alpha != null || r.beta != null || r.gamma != null)) {
+      hasGyro = true;
+      rotNow = Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0);
+      if (swing.stage === 'down') swing.gyroPeak = Math.max(swing.gyroPeak, rotNow);
+    }
   }
 
   // ---------- 소리 ----------
@@ -227,12 +267,12 @@
     aim = Math.max(-25, Math.min(25, dragAim + ((e.clientX - dragX) / w) * 30));
     aim = Math.round(aim * 2) / 2;
     drawAim();
-    socket.emit('c2d', { event: 'aim', data: { yaw: aim } });
+    send('aim', { yaw: aim }, true);
   });
   const endDrag = () => {
     if (dragX == null) return;
     dragX = null;
-    socket.emit('c2d', { event: 'aim', data: { yaw: aim, done: true } });
+    send('aim', { yaw: aim, done: true });
   };
   $('pad').addEventListener('pointerup', endDrag);
   $('pad').addEventListener('pointercancel', endDrag);
@@ -247,7 +287,8 @@
       b.addEventListener('click', () => {
         club = c.id;
         drawClubs();
-        socket.emit('c2d', { event: 'club', data: { club } });
+        keepAwake();
+        send('club', { club });
       });
       box.appendChild(b);
     }
@@ -255,14 +296,17 @@
 
   // ---------- 어드레스 ----------
   $('btnAddress').addEventListener('click', () => {
+    keepAwake();
     if (!sensorOk) {
-      fakeSwing();
+      if (!isTouch || params.has('debug')) fakeSwing();
+      else sensorHelp();
       return;
     }
     mode = 'hold';
     show('vHold');
     let n = 3;
     $('holdN').textContent = n;
+    clearInterval(holdTimer);
     const tick = setInterval(() => {
       n -= 1;
       if (n > 0) {
@@ -271,15 +315,41 @@
         return;
       }
       clearInterval(tick);
+      if (mode !== 'hold') return;
       calibrate(last);
-      socket.emit('c2d', { event: 'address', data: { shaft0: basis.shaft0, club, aim } });
+      if (!send('address', { shaft0: basis.shaft0, club, aim })) {
+        lostConnection();
+        return;
+      }
       mode = 'swing';
       $('swingT').textContent = '스윙하세요';
       $('swingB').textContent = '천천히 들어 올렸다가 끝까지 휘둘러요.';
       show('vSwing');
       if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
+      ting();
     }, 1000);
+    holdTimer = tick;
   });
+  // 스윙이 안 잡히거나 자세가 틀어졌으면 다시 조준부터
+  $('btnRedo').addEventListener('click', () => {
+    clearInterval(holdTimer);
+    resetSwing();
+    send('cancel', {});
+    mode = 'wait';
+    render();
+  });
+
+  function lostConnection() {
+    mode = 'wait';
+    message('연결이 잠깐 끊겼어요', '다시 연결되면 조준 화면으로 돌아가요.');
+  }
+  function sensorHelp() {
+    message('동작 센서를 쓸 수 없어요',
+      'iPhone: Safari 를 앱 전환기에서 완전히 닫고 QR을 다시 찍은 뒤, 동작 접근을 허용해 주세요.\nAndroid: 주소창 자물쇠 → 사이트 설정 → 동작 센서를 허용해 주세요.');
+  }
+  function keepAwake() {
+    if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
+  }
 
   // 센서가 없는 PC 에서 시험할 수 있게, 정해진 궤적으로 스윙을 흉내 냅니다.
   function fakeSwing() {
@@ -294,7 +364,8 @@
     basis = { r: [1, 0, 0], u: [0, 1, 0], f: [0, 0, 1], shaft0 };
     basis.back = norm(cross(shaft0, [0, 0, -1]));
     resetSwing();
-    socket.emit('c2d', { event: 'address', data: { shaft0, club, aim, fake: true } });
+    basis.faceYaw0 = 0;
+    send('address', { shaft0, club, aim, fake: true });
     mode = 'swing';
     show('vSwing');
     const t0 = performance.now();
@@ -329,6 +400,7 @@
     $('myStats').innerHTML = mine && mine.best != null
       ? `<span class="chip">최고 <b>${mine.best.toFixed(1)}m</b></span>` : '';
     if (state.phase === 'lobby' || state.phase === 'over') {
+      clearInterval(holdTimer);
       mode = 'wait';
       $('waitT').textContent = state.phase === 'over' ? '경기 끝' : '대기실';
       $('waitB').textContent = state.phase === 'over' ? '큰 화면에서 순위를 확인하세요.' : '모두 들어오면 게임 시작을 눌러요.';
@@ -340,6 +412,7 @@
     }
     $('btnGo').style.display = 'none';
     if (!myTurn) {
+      clearInterval(holdTimer);
       if (mode === 'result' && state.lastSlot === me.slot) return;
       mode = 'wait';
       $('waitT').textContent = state.turn ? `${state.turn}P 차례` : '대기';
@@ -347,7 +420,15 @@
       show('vWait');
       return;
     }
-    if (mode === 'hold' || mode === 'swing' || mode === 'result') return;
+    // 친 뒤 8초가 지나도 큰 화면이 아직 조준/스윙 단계면 임팩트가 사라진 것이니 다시 조준합니다.
+    const stale = mode === 'result' && (state.sub === 'aim' || state.sub === 'swing') && performance.now() - impactAt > 8000;
+    if (!stale && (mode === 'hold' || mode === 'swing' || mode === 'result')) return;
+    if (mode !== 'aim') {
+      // 새 차례: 큰 화면과 같은 값(핀 방향, 7번)에서 시작합니다.
+      aim = 0;
+      club = '7i';
+      resetSwing();
+    }
     mode = 'aim';
     $('aimInfo').textContent = state.pin ? `핀까지 ${state.pin}m` : '';
     drawAim();
@@ -359,15 +440,25 @@
   socket.on('connect', () => socket.emit('join', { role: 'controller', room: ROOM, token }));
   socket.on('assigned', (p) => {
     if (p.game !== 'golf') {
-      location.replace(`/play/?room=${ROOM}`);
+      location.replace(p.game === 'baseball' ? `/play/?room=${ROOM}` : `/play/${p.game}/?room=${ROOM}`);
       return;
     }
     me = p;
+    noRoomTries = 0;
+    if (mode === 'swing' || mode === 'hold') mode = 'wait';
     document.documentElement.style.setProperty('--c', p.color);
     $('me').textContent = p.name;
     render();
   });
-  socket.on('no_room', () => message('방을 찾을 수 없어요', '큰 화면의 QR을 다시 찍어 주세요.'));
+  socket.on('no_room', () => {
+    // 서버가 막 다시 떴으면 큰 화면이 같은 코드로 방을 다시 만들 때까지 잠깐 기다립니다.
+    if (noRoomTries++ < 15) {
+      message('방에 다시 연결하는 중', '잠시만 기다려 주세요.');
+      setTimeout(() => socket.connected && socket.emit('join', { role: 'controller', room: ROOM, token }), 2000);
+      return;
+    }
+    message('방을 찾을 수 없어요', '큰 화면의 QR을 다시 찍어 주세요.');
+  });
   socket.on('room_full', () => message('4명이 꽉 찼어요', '빈자리가 생기면 다시 찍어 주세요.'));
   socket.on('replaced', () => message('다른 탭에서 열었어요', '마지막으로 연 화면에서 조작해요.'));
   socket.on('room_closed', () => message('방이 닫혔어요', '큰 화면의 새 QR을 찍어 주세요.'));
@@ -387,8 +478,9 @@
   });
 
   $('btnStart').addEventListener('click', async () => {
+    // 화면 꺼짐 방지와 권한 요청은 탭 안에서 await 전에 바로 불러야 iPhone 에서 통합니다.
+    keepAwake();
     audio();
-    // iPhone 은 탭 안에서 바로 두 권한을 물어야 합니다.
     const asks = [];
     if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
       asks.push(DeviceOrientationEvent.requestPermission().catch(() => 'denied'));
@@ -396,10 +488,14 @@
     if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') {
       asks.push(DeviceMotionEvent.requestPermission().catch(() => 'denied'));
     }
-    await Promise.all(asks);
+    const answers = await Promise.all(asks);
     window.addEventListener('deviceorientation', onOrientation);
     window.addEventListener('devicemotion', onMotion);
-    if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
+    // 폰에서 거절되면 켜는 법을 안내합니다. 센서 없는 PC 는 시험 스윙으로 계속합니다.
+    if (answers.some((a) => a !== 'granted') && isTouch && !params.has('debug')) {
+      sensorHelp();
+      return;
+    }
     if (!ROOM) {
       message('방 코드가 없어요', '큰 화면의 QR을 찍어 주세요.');
       return;
@@ -407,12 +503,19 @@
     socket.connect();
     setTimeout(() => {
       if (!sensorOk) {
-        $('btnAddress').textContent = '센서 없음 · 시험 스윙';
-        debug('동작 센서 값이 들어오지 않아 시험 스윙으로 동작합니다');
+        if (isTouch && !params.has('debug')) {
+          $('btnAddress').textContent = '동작 센서 켜는 법 보기';
+        } else {
+          $('btnAddress').textContent = '센서 없음 · 시험 스윙';
+          debug('동작 센서 값이 들어오지 않아 시험 스윙으로 동작합니다');
+        }
       }
     }, 1500);
   });
-  $('btnGo').addEventListener('click', () => socket.emit('c2d', { event: 'start_game' }));
+  $('btnGo').addEventListener('click', () => {
+    keepAwake();
+    send('start_game', {});
+  });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
   });

@@ -75,7 +75,10 @@ const sfx = {
 };
 
 // ---------- 연결 ----------
-const socket = io({ transports: ['websocket', 'polling'] });
+const socket = io({ transports: ['websocket', 'polling'], tryAllTransports: true });
+// 폰마다 마지막으로 신호가 온 시각과, 스윙이 도착하기까지 걸린 지연(ms) 추정값
+const lastSeen = {};
+const lagEst = {};
 let players = [];
 const rtts = [];
 function displayRtt() {
@@ -100,6 +103,8 @@ socket.on('connect', () => {
 socket.on('room', async (r) => {
   try { sessionStorage.setItem('pcg-room', r.code); } catch (e) {}
   players = r.players;
+  // 서버가 다시 떠서 방이 새로 만들어졌으면 진행 중이던 경기는 대기실로 돌립니다.
+  if (r.fresh && game.phase !== 'lobby') backToLobby();
   $('code').textContent = r.code;
   $('codeMini').textContent = r.code;
   const res = await fetch(`/api/qr?room=${r.code}`).then((x) => x.json());
@@ -122,7 +127,34 @@ socket.on('players', (p) => {
 });
 socket.on('display_replaced', () => $('replaced').classList.remove('hidden'));
 socket.on('start_game', () => startGame());
-socket.on('swing', (d) => onSwing(d, false));
+socket.on('swing', (d) => {
+  lastSeen[d.slot] = performance.now();
+  onSwing(d, false);
+});
+socket.on('ready', (d) => { lastSeen[d.slot] = performance.now(); });
+
+function backToLobby() {
+  game.phase = 'lobby';
+  game.sub = 'idle';
+  game.pitch = null;
+  game.order = [];
+  game.scores = {};
+  view.clearHit();
+  $('hud').classList.add('hidden');
+  $('join').classList.add('hidden');
+  $('over').classList.add('hidden');
+  $('stats').classList.remove('on');
+  $('timing').classList.remove('on');
+  $('lobby').classList.remove('hidden');
+  renderPlayers();
+  pushState();
+}
+// 서버보다 빨리 끊김을 알아채려고, 1초마다 오는 폰 신호가 3.5초 넘게 없으면 끊긴 것으로 봅니다.
+function alive(slot) {
+  if (!playerInfo(slot).connected) return false;
+  const t = lastSeen[slot];
+  return t == null || performance.now() - t < 3500;
+}
 
 function playerInfo(slot) {
   return players.find((p) => p.slot === slot) || { slot, name: `${slot}P`, color: '#8a96a8', connected: false };
@@ -265,7 +297,7 @@ function pickPitch() {
 
 function nextPitch(now) {
   const slot = batter();
-  if (!playerInfo(slot).connected) {
+  if (!alive(slot)) {
     // 타자 폰이 끊겼으면 잠깐 기다렸다가 다음 타자로 넘깁니다.
     if (!game.pitch || game.pitch.waitingSince == null) {
       game.pitch = { waitingSince: now };
@@ -295,15 +327,18 @@ function nextPitch(now) {
 function onSwing(d, local) {
   if (game.phase !== 'playing' || d.slot !== batter() || game.sub !== 'pitch') return;
   const pt = game.pitch;
-  if (!pt || pt.swing || pt.resolved || pt.release == null) return;
+  if (!pt || pt.resolved || pt.release == null) return;
   const arrived = performance.now();
   // 폰에서 휘두른 순간 = 도착 시각 - 폰 쪽 지연 - 화면 쪽 지연
   const lag = local ? 0 : (Number(d.ago) || 0) + (Number(d.rtt) || 80) / 2 + displayRtt() / 2;
+  if (!local) lagEst[d.slot] = Math.min(800, lag);
   const at = arrived - lag;
   // 공을 놓기 전 스윙은 연습 스윙으로 보고 넘깁니다.
   if (at < pt.release) return;
   const err = (at - pt.cross) / 1000;
   const hit = Math.abs(err) <= HIT_WINDOW;
+  // 이미 받은 스윙이 있으면, 공이 오는 순간에 더 가까운 쪽을 씁니다.
+  if (pt.swing && Math.abs(pt.swing.err) <= Math.abs(err)) return;
   pt.swing = {
     at, err, hit, shown: arrived,
     power: Math.max(0.1, Math.min(1, Number(d.power) || 0.5)),
@@ -515,7 +550,9 @@ function tick() {
     if (game.sub === 'idle' && now >= game.waitUntil) nextPitch(now);
     else if (game.sub === 'pitch') {
       const pt = game.pitch;
-      const decideAt = pt.swing ? Math.max(pt.cross, pt.swing.shown) : pt.cross + 260;
+      // 스윙이 늦게 도착할 수 있으니(원거리 서버) 스윙이 없거나 너무 빠른 헛스윙이면 예상 지연만큼 더 기다립니다.
+      const grace = HIT_WINDOW * 1000 + 90 + (lagEst[batter()] ?? 300) + 60;
+      const decideAt = pt.swing && pt.swing.hit ? Math.max(pt.cross, pt.swing.shown) : pt.cross + grace;
       if (!pt.resolved && now >= decideAt) resolvePitch(now);
     } else if (game.sub === 'after' && now >= game.waitUntil) finishPitch(now);
     else if (game.sub === 'hit' && game.hit && game.hit.landed && now - game.hit.landedAt > 2600) finishPitch(now);

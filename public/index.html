@@ -25,6 +25,7 @@
   a.card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,.35); }
   a.card::before { content: ""; position: absolute; inset: 0; background: var(--bg); z-index: -1; }
   .baseball { --bg: radial-gradient(500px 260px at 70% 10%, rgba(255,240,200,.35), transparent 70%), linear-gradient(180deg, #0c1a33 0%, #1b3b2a 70%, #2c6e3a 100%); }
+  .pingpong { --bg: radial-gradient(420px 260px at 50% 0%, rgba(255,255,255,.28), transparent 70%), linear-gradient(180deg, #1b2f6b 0%, #18306e 45%, #5a1d22 75%, #3b1416 100%); }
   .golf { --bg: radial-gradient(500px 260px at 80% 0%, rgba(255,250,220,.6), transparent 70%), linear-gradient(180deg, #7fb4e6 0%, #b9d9ef 45%, #5d9c4f 70%, #3f7d3a 100%); }
   .card .tag { position: absolute; top: 24px; left: 28px; font-size: 13px; font-weight: 800; letter-spacing: .14em;
     padding: 6px 12px; border-radius: 999px; background: rgba(0,0,0,.35); backdrop-filter: blur(6px); }
@@ -58,6 +59,15 @@
       <h2>CLOSEST TO THE PIN</h2>
       <div class="ko">골프 니어핀</div>
       <div class="desc">폰이 골프채가 됩니다. 휘두르는 궤적 그대로 클럽이 움직이고, 방향은 터치로 맞춰요.</div>
+    </a>
+    <a class="card pingpong" href="/pingpong/">
+      <span class="tag">1~4인 · 화면 분할</span>
+      <svg viewBox="0 0 100 100" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round">
+        <ellipse cx="44" cy="40" rx="24" ry="26" fill="#d62f3a" stroke="none"/><path d="M58 60l16 20"/><circle cx="78" cy="30" r="6" fill="#fff" stroke="none"/>
+      </svg>
+      <h2>TABLE TENNIS</h2>
+      <div class="ko">탁구</div>
+      <div class="desc">1인칭으로 탁구채만 보여요. 공이 오기 직전 슬로우가 걸리고, 브러시하듯 치면 스핀이 걸려요.</div>
     </a>
   </div>
   <footer>폰 동작 센서는 https 주소에서만 켜져요.</footer>

@@ -85,8 +85,15 @@ async function main() {
   assert.strictEqual(again.rejoined, true);
   assert.strictEqual(gs.phase, 'playing', '다시 들어온 폰은 지금 경기 상태를 바로 받아야 함');
 
-  // 유예 시간이 지나면 자리가 비고, 새 폰이 그 자리를 받음
+  // 경기 중에는 끊겨도 자리를 잡아 둠
   phones[3].disconnect();
+  await wait(500);
+  const late = mk();
+  late.emit('join', { role: 'controller', room: roomA.code, token: 'token-8-abcdef' });
+  await once(late, 'room_full');
+
+  // 경기가 끝나면 유예 시간 뒤 자리가 비고, 새 폰이 그 자리를 받음
+  dA.emit('d2c', { event: 'game_state', data: { phase: 'over' } });
   await wait(500);
   const newbie = mk();
   newbie.emit('join', { role: 'controller', room: roomA.code, token: 'token-9-abcdef' });
@@ -114,6 +121,35 @@ async function main() {
   let swingInGolf = false;
   dG.on('swing', () => { swingInGolf = true; });
   g1.emit('c2d', { event: 'swing', data: {} });
+
+  // 잘못된 종목 이름(프로토타입 키)으로 서버가 죽지 않음
+  const evil = mk();
+  evil.emit('join', { role: 'display', game: 'constructor' });
+  const er = await once(evil, 'room');
+  assert.strictEqual(er.game, 'baseball');
+  evil.emit('d2c', { event: 'x' });
+  evil.emit('d2c', { event: { toString: 1 } });
+
+  // 사라진 방 코드로 화면이 다시 들어오면 같은 코드로 새 방을 만듦(서버 재시작 흉내)
+  const ghost = mk();
+  ghost.emit('join', { role: 'display', game: 'golf', room: 'WXYZ' });
+  const gr = await once(ghost, 'room');
+  assert.strictEqual(gr.code, 'WXYZ');
+  assert.strictEqual(gr.fresh, true);
+
+  // 자리를 비운 뒤에도 같은 토큰은 원래 자리로 돌아옴
+  const p1 = mk();
+  p1.emit('join', { role: 'controller', room: 'WXYZ', token: 'back-1-abcdef' });
+  await once(p1, 'assigned');
+  const p2 = mk();
+  p2.emit('join', { role: 'controller', room: 'WXYZ', token: 'back-2-abcdef' });
+  assert.strictEqual((await once(p2, 'assigned')).slot, 2);
+  p1.disconnect();
+  p2.disconnect();
+  await wait(500);
+  const p2b = mk();
+  p2b.emit('join', { role: 'controller', room: 'WXYZ', token: 'back-2-abcdef' });
+  assert.strictEqual((await once(p2b, 'assigned')).slot, 2, '먼저 돌아온 2P 가 1번 자리를 가져가면 안 됨');
 
   // ping
   const t = await new Promise((r) => dA2.emit('ping_rtt', 42, r));

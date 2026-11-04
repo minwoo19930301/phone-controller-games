@@ -28,6 +28,13 @@ const GAMES = {
     fromController: ['pose', 'aim', 'club', 'address', 'impact', 'start_game', 'cancel'],
     fromDisplay: ['game_state', 'result', 'calibrated'],
     volatile: ['pose', 'aim']
+  },
+  pingpong: {
+    title: '탁구',
+    play: '/play/pingpong/',
+    fromController: ['pose', 'swing', 'calibrate', 'start_game'],
+    fromDisplay: ['game_state', 'cue', 'result'],
+    volatile: ['pose']
   }
 };
 
@@ -82,7 +89,9 @@ app.get('/api/qr', async (req, res) => {
 });
 
 const httpServer = http.createServer(app);
-const io = new Server(httpServer, { pingInterval: 10000, pingTimeout: 8000 });
+// 폰이 조용히 끊긴 것(LTE 음영, 화면 잠금)을 빨리 알아채도록 하트비트를 짧게 둡니다.
+const io = new Server(httpServer, { pingInterval: 6000, pingTimeout: 5000 });
+const CODE_RE = /^[A-HJ-NP-Z2-9]{4}$/;
 
 function publicPlayer(entry) {
   return { ...PLAYER_SLOTS[entry.slot], connected: entry.connected };
@@ -108,13 +117,23 @@ function scheduleRoomCleanup(room) {
   }, ROOM_TTL_MS);
 }
 
+function makeRoom(code, game) {
+  // tokens: 방이 살아 있는 동안 폰 토큰 → 자리 번호. 자리를 비운 뒤 돌아와도 원래 자리를 먼저 줍니다.
+  const room = { code, game, slots: new Map(), tokens: new Map(), displayId: null, lastState: { phase: 'lobby' } };
+  rooms.set(code, room);
+  return room;
+}
+
 function registerDisplay(socket, payload) {
-  const game = GAMES[payload.game] ? payload.game : 'baseball';
-  let room = rooms.get(cleanCode(payload.room));
+  const game = typeof payload.game === 'string' && Object.hasOwn(GAMES, payload.game) ? payload.game : 'baseball';
+  const saved = cleanCode(payload.room);
+  let room = rooms.get(saved);
+  let fresh = false;
   // 같은 방 코드로 다시 열면(새로고침) 그 방을 이어받습니다.
+  // 서버가 다시 떠서 방이 사라졌으면 같은 코드로 새로 만들어, 폰들이 같은 QR 로 돌아올 수 있게 합니다.
   if (!room || room.game !== game) {
-    room = { code: newCode(), game, slots: new Map(), displayId: null, lastState: { phase: 'lobby' } };
-    rooms.set(room.code, room);
+    fresh = true;
+    room = !room && CODE_RE.test(saved) ? makeRoom(saved, game) : makeRoom(newCode(), game);
   }
   clearTimeout(room.cleanup);
   if (room.displayId && room.displayId !== socket.id) {
@@ -129,7 +148,7 @@ function registerDisplay(socket, payload) {
   room.lastState = { phase: 'lobby' };
   socket.data = { role: 'display', room: room.code };
   socket.join(`${room.code}:display`);
-  socket.emit('room', { code: room.code, game, players: playerList(room), max: MAX_PLAYERS });
+  socket.emit('room', { code: room.code, game, fresh, players: playerList(room), max: MAX_PLAYERS });
   io.to(`${room.code}:controllers`).emit('display_status', { connected: true });
 }
 
@@ -156,11 +175,10 @@ function registerController(socket, payload) {
     }
   } else {
     let free = null;
-    for (let s = 1; s <= MAX_PLAYERS; s++) {
-      if (!room.slots.has(s)) {
-        free = s;
-        break;
-      }
+    const before = token ? room.tokens.get(token) : null;
+    if (before && !room.slots.has(before)) free = before;
+    for (let s = 1; s <= MAX_PLAYERS && !free; s++) {
+      if (!room.slots.has(s)) free = s;
     }
     if (!free) {
       socket.emit('room_full', { max: MAX_PLAYERS });
@@ -168,6 +186,7 @@ function registerController(socket, payload) {
     }
     entry = { slot: free, token: token || `anon-${socket.id}` };
     room.slots.set(free, entry);
+    room.tokens.set(entry.token, free);
   }
   entry.socketId = socket.id;
   entry.connected = true;
@@ -181,45 +200,56 @@ function registerController(socket, payload) {
   broadcastPlayers(room);
 }
 
+// 이벤트 처리기 하나가 예외를 던져도 프로세스가 죽지 않게 감쌉니다.
+function safe(fn) {
+  return (...a) => {
+    try {
+      fn(...a);
+    } catch (err) {
+      console.error('[socket handler]', err);
+    }
+  };
+}
+
 io.on('connection', (socket) => {
   // 지연 측정용. 폰과 화면이 각자 서버까지 왕복 시간을 잽니다.
   socket.on('ping_rtt', (t, ack) => typeof ack === 'function' && ack(t));
 
-  socket.on('join', (payload) => {
+  socket.on('join', safe((payload) => {
     if (!payload || typeof payload !== 'object') return;
     if (payload.role === 'display') registerDisplay(socket, payload);
     else if (payload.role === 'controller') registerController(socket, payload);
-  });
+  }));
 
   // 폰 -> 화면: 보낸 폰의 자리 번호를 붙여서 그 방 화면에만 전달합니다.
-  socket.on('c2d', (msg) => {
+  socket.on('c2d', safe((msg) => {
     const { role, room: code, slot } = socket.data || {};
     const room = rooms.get(code);
     if (role !== 'controller' || !room || !msg) return;
     const entry = room.slots.get(slot);
     if (!entry || entry.socketId !== socket.id) return;
-    if (!GAMES[room.game].fromController.includes(msg.event)) return;
+    if (typeof msg.event !== 'string' || !GAMES[room.game].fromController.includes(msg.event)) return;
     const data = msg.data && typeof msg.data === 'object' ? { ...msg.data } : {};
     data.slot = slot;
     const target = io.to(`${code}:display`);
     (GAMES[room.game].volatile.includes(msg.event) ? target.volatile : target).emit(msg.event, data);
-  });
+  }));
 
   // 화면 -> 폰: slot 이 있으면 그 폰에만, 없으면 방 안의 모든 폰에 보냅니다.
-  socket.on('d2c', (msg) => {
+  socket.on('d2c', safe((msg) => {
     const { role, room: code } = socket.data || {};
     const room = rooms.get(code);
     if (role !== 'display' || !room || room.displayId !== socket.id || !msg) return;
-    if (!GAMES[room.game].fromDisplay.includes(msg.event)) return;
+    if (typeof msg.event !== 'string' || !GAMES[room.game].fromDisplay.includes(msg.event)) return;
     if (msg.event === 'game_state' && msg.data && typeof msg.data.phase === 'string') {
       room.lastState = { ...msg.data };
     }
     const slot = Number(msg.slot);
     const target = PLAYER_SLOTS[slot] ? `${code}:slot:${slot}` : `${code}:controllers`;
     io.to(target).emit(msg.event, msg.data || {});
-  });
+  }));
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', safe(() => {
     const { role, room: code, slot } = socket.data || {};
     const room = rooms.get(code);
     if (!room) return;
@@ -234,12 +264,19 @@ io.on('connection', (socket) => {
     if (!entry || entry.socketId !== socket.id) return;
     entry.connected = false;
     entry.socketId = null;
-    entry.timer = setTimeout(() => {
+    // 경기 중에는 자리를 지우지 않고 계속 잡아 둡니다(화면이 그 차례를 건너뜀). 경기가 끝난 뒤에 비웁니다.
+    const release = () => {
+      if (entry.connected || room.slots.get(slot) !== entry) return;
+      if (room.lastState.phase === 'playing') {
+        entry.timer = setTimeout(release, RESERVE_MS);
+        return;
+      }
       room.slots.delete(slot);
       broadcastPlayers(room);
-    }, RESERVE_MS);
+    };
+    entry.timer = setTimeout(release, RESERVE_MS);
     broadcastPlayers(room);
-  });
+  }));
 });
 
 if (require.main === module) {

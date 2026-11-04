@@ -3,6 +3,7 @@ services:
     name: phone-controller-games
     runtime: node
     plan: free
+    region: singapore
     buildCommand: npm ci --omit=dev
     startCommand: npm start
     healthCheckPath: /healthz
