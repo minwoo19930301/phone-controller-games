@@ -29,6 +29,13 @@ const PLAYER_SLOTS = {
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
+// 3D 엔진과 글꼴은 npm 패키지에서 바로 내보냅니다. 외부 CDN 에 기대지 않습니다.
+const mod = (p) => path.join(__dirname, 'node_modules', p);
+const longCache = { maxAge: '7d', immutable: true };
+app.use('/vendor/three', express.static(mod('three/build'), longCache));
+app.use('/vendor/three-addons', express.static(mod('three/examples/jsm'), longCache));
+app.use('/vendor/pretendard', express.static(mod('pretendard/dist/web'), longCache));
+app.use('/vendor/anton', express.static(mod('@fontsource/anton'), longCache));
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 
 // 방 코드는 헷갈리는 글자(0/O, 1/I)를 뺀 4글자입니다.
