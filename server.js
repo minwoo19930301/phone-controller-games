@@ -11,12 +11,23 @@ const RESERVE_MS = Number(process.env.RESERVE_MS || 15000);
 // 큰 화면이 사라진 방은 이 시간 뒤에 지웁니다. 화면을 새로고침해도 같은 방으로 돌아올 수 있습니다.
 const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 10 * 60 * 1000);
 
-// 종목별로 오가는 이벤트 목록. 새 종목은 여기에 한 줄 추가합니다.
+// 종목별로 오가는 이벤트 목록. 새 종목은 여기에 추가합니다.
+// volatile 은 자주 흘려보내는 값이라 밀리면 버려도 되는 이벤트입니다(최신 값만 의미가 있음).
+// play 는 폰이 여는 컨트롤러 주소입니다.
 const GAMES = {
   baseball: {
     title: '홈런 더비',
+    play: '/play/',
     fromController: ['swing', 'start_game', 'ready'],
-    fromDisplay: ['game_state', 'turn', 'pitch', 'result']
+    fromDisplay: ['game_state', 'turn', 'pitch', 'result'],
+    volatile: []
+  },
+  golf: {
+    title: '골프 니어핀',
+    play: '/play/golf/',
+    fromController: ['pose', 'aim', 'club', 'address', 'impact', 'start_game', 'cancel'],
+    fromDisplay: ['game_state', 'result', 'calibrated'],
+    volatile: ['pose', 'aim']
   }
 };
 
@@ -62,9 +73,10 @@ function cleanToken(token) {
 
 app.get('/api/qr', async (req, res) => {
   const code = cleanCode(req.query.room);
-  if (!rooms.has(code)) return res.status(404).json({ error: 'room not found' });
+  const room = rooms.get(code);
+  if (!room) return res.status(404).json({ error: 'room not found' });
   const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
-  const url = `${proto}://${req.headers.host}/play/?room=${code}`;
+  const url = `${proto}://${req.headers.host}${GAMES[room.game].play}?room=${code}`;
   const qr = await QRCode.toDataURL(url, { margin: 1, width: 360 });
   res.json({ url, qr, secure: proto === 'https' });
 });
@@ -189,7 +201,8 @@ io.on('connection', (socket) => {
     if (!GAMES[room.game].fromController.includes(msg.event)) return;
     const data = msg.data && typeof msg.data === 'object' ? { ...msg.data } : {};
     data.slot = slot;
-    io.to(`${code}:display`).emit(msg.event, data);
+    const target = io.to(`${code}:display`);
+    (GAMES[room.game].volatile.includes(msg.event) ? target.volatile : target).emit(msg.event, data);
   });
 
   // 화면 -> 폰: slot 이 있으면 그 폰에만, 없으면 방 안의 모든 폰에 보냅니다.

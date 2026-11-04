@@ -99,6 +99,22 @@ async function main() {
   assert.strictEqual(r2.code, roomA.code);
   assert.strictEqual(r2.players.length, 4);
 
+  // 골프 방: 컨트롤러 주소와 이벤트 목록이 종목별로 갈림
+  const dG = mk();
+  dG.emit('join', { role: 'display', game: 'golf' });
+  const roomG = await once(dG, 'room');
+  assert.strictEqual(roomG.game, 'golf');
+  const qrG = await fetch(`${url}/api/qr?room=${roomG.code}`).then((r) => r.json());
+  assert.ok(qrG.url.endsWith(`/play/golf/?room=${roomG.code}`));
+  const g1 = mk();
+  g1.emit('join', { role: 'controller', room: roomG.code, token: 'golf-1-abcdef' });
+  assert.strictEqual((await once(g1, 'assigned')).game, 'golf');
+  g1.emit('c2d', { event: 'pose', data: { s: [0, -1, 0] } });
+  assert.deepStrictEqual((await once(dG, 'pose')).s, [0, -1, 0]);
+  let swingInGolf = false;
+  dG.on('swing', () => { swingInGolf = true; });
+  g1.emit('c2d', { event: 'swing', data: {} });
+
   // ping
   const t = await new Promise((r) => dA2.emit('ping_rtt', 42, r));
   assert.strictEqual(t, 42);
@@ -107,6 +123,7 @@ async function main() {
   assert.ok(!leaked, '다른 방 화면으로 새면 안 됨');
   assert.ok(!bad, '허용 안 된 이벤트가 전달됨');
   assert.ok(!wrong, '다른 자리 폰에 전달됨');
+  assert.ok(!swingInGolf, '골프 방에 야구 이벤트가 전달됨');
 
   sockets.forEach((s) => s.close());
   httpServer.close();
