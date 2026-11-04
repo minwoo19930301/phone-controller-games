@@ -278,7 +278,7 @@
       $('swingB').textContent = '천천히 들어 올렸다가 끝까지 휘둘러요.';
       show('vSwing');
       if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
-    }, 600);
+    }, 1000);
   });
 
   // 센서가 없는 PC 에서 시험할 수 있게, 정해진 궤적으로 스윙을 흉내 냅니다.
