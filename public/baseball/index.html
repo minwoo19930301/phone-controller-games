@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>홈런 더비</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="batter"><span id="hBadge" class="badge">1P</span><span id="hLeft"></span></div>
+  <div id="board" class="board"></div>
+</div>
+
+<div id="callout" class="callout"></div>
+<div id="dist" class="dist"></div>
+
+<div id="joinMini" class="joinMini hidden">
+  <img id="qrMini" alt="참가 QR">
+  <span id="codeMini"></span>
+</div>
+
+<section id="lobby" class="overlay">
+  <div class="panel">
+    <div class="left">
+      <h1>홈런 더비</h1>
+      <p class="sub">폰이 방망이가 됩니다. 1~4명이 10구씩 쳐서 홈런 수로 겨뤄요.</p>
+      <ol>
+        <li>폰 카메라로 QR을 찍고 <b>시작하기</b>를 눌러요.</li>
+        <li>폰을 두 손으로 세로로 쥐고 타석에 선 것처럼 서요.</li>
+        <li>공이 홈플레이트에 오는 순간 크게 휘둘러요.</li>
+      </ol>
+      <div id="players" class="players"></div>
+      <p class="keys"><b>Enter</b> 게임 시작 · <b>Space</b> 키보드로 스윙(시험용)</p>
+    </div>
+    <div class="right">
+      <img id="qr" alt="참가 QR">
+      <div class="code" id="code">····</div>
+      <div class="url" id="url"></div>
+      <div class="warn hidden" id="warn">이 주소는 http라서 폰 센서가 동작하지 않아요. https(Render) 주소로 열어 주세요.</div>
+    </div>
+  </div>
+</section>
+
+<section id="over" class="overlay hidden">
+  <div class="panel single">
+    <h1>경기 끝</h1>
+    <div id="rank" class="rank"></div>
+    <p class="keys"><b>Enter</b> 또는 폰의 <b>다시 하기</b></p>
+  </div>
+</section>
+
+<div id="replaced" class="overlay hidden"><div class="panel single"><h1>다른 화면에서 열었어요</h1><p class="sub">이 방은 마지막으로 연 화면에서 이어져요.</p></div></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

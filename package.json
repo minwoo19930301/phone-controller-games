@@ -1,0 +1,23 @@
+{
+  "name": "phone-controller-games",
+  "version": "0.1.0",
+  "private": true,
+  "description": "스마트폰을 컨트롤러로 쓰는 큰 화면 모션 게임 (첫 종목: 홈런 더비)",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node scripts/test-rooms.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
