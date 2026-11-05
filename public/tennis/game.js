@@ -360,7 +360,17 @@ function handFor(m, pl, pos) {
   return lat > -0.35 ? 'fore' : 'back';
 }
 
+// 슬로우 켜고 끄기: 대기실 버튼이나 L 키, 주소에 ?noslow. 이 화면 브라우저에 기억합니다.
+let slowOn = !params.has('noslow');
+try { if (localStorage.getItem('tennis.slow') === 'off') slowOn = false; } catch {}
+function setSlow(on) {
+  slowOn = on;
+  try { localStorage.setItem('tennis.slow', on ? 'on' : 'off'); } catch {}
+  const b = $('slowBtn');
+  if (b) { b.textContent = on ? '슬로우 켜짐' : '슬로우 꺼짐'; b.classList.toggle('off', !on); }
+}
 function slowTarget(m) {
+  if (!slowOn) return 1;
   const p = m.plan;
   if (!p || p.decided || !(p.human || p.bot)) return 1;
   return p.t - m.clock.gt < SLOW_LEAD ? SLOW : 1;
@@ -368,6 +378,7 @@ function slowTarget(m) {
 // 경기 시간 dG 가 흐르는 데 걸릴 실제 ms. 슬로우 중이거나 배율이 SLOW 로 내려가는 중이라고 봅니다.
 function realMsUntil(m, dG) {
   const s = m.clock.scale;
+  if (!slowOn) return (dG / Math.max(s, SLOW)) * 1000;
   const k = Math.max(0, s - SLOW) * SLOW_TAU; // 배율이 SLOW 까지 내려가는 동안 덤으로 흐르는 경기 시간
   return (dG > k ? (dG - k) / SLOW : dG / Math.max(s, SLOW)) * 1000;
 }
@@ -1525,6 +1536,10 @@ function watchPlayers(now) {
 // 키보드(시험용): Enter 시작, Space 플랫, T 탑스핀, S 슬라이스(지금 칠 차례인 사람으로)
 // ================================================================
 window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyL' && game.phase !== 'playing') {
+    setSlow(!slowOn);
+    return;
+  }
   if (e.key === 'Enter') {
     if (game.phase !== 'playing') startGame();
     return;
@@ -1546,4 +1561,9 @@ requestAnimationFrame(tick);
 if (AUTOSTART && BOTS > 0) setTimeout(() => startGame(), 1200);
 
 // 디버그: 콘솔에서 상태 보기
+{
+  const b = $('slowBtn');
+  if (b) b.addEventListener('click', () => setSlow(!slowOn));
+  setSlow(slowOn);
+}
 window.__tennis = { game, view, onSwing, startGame, endGame, backToLobby, toGame, pointLabels, statusCall, lobbyPlayers, fastForward, SLOW, WINDOW };
