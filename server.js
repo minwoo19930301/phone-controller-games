@@ -46,6 +46,7 @@ const GAMES = {
   fishing: {
     title: '배스 낚시',
     play: '/play/fishing/',
+    gate: false,
     fromController: ['pose', 'cast', 'hookset', 'reel', 'calibrate', 'start_game'],
     fromDisplay: ['game_state', 'bite', 'tension', 'result', 'cue'],
     volatile: ['pose', 'reel']
@@ -140,6 +141,33 @@ function broadcastPlayers(room) {
   const payload = { players: playerList(room), max: MAX_PLAYERS };
   io.to(`${room.code}:display`).emit('players', payload);
   io.to(`${room.code}:controllers`).emit('players', payload);
+  // 사람이 들어오거나 나가면 준비 인원을 다시 셉니다(준비 안 한 사람이 나가면 바로 시작될 수 있음).
+  if (room.ready) {
+    for (const s of room.ready) if (!room.slots.get(s) || !room.slots.get(s).connected) room.ready.delete(s);
+    if (room.ready.size) checkReady(room);
+    else emitReady(room);
+  }
+}
+
+// 모두 준비: 폰의 start_game 은 바로 넘기지 않고, 연결된 사람이 모두 누르면 그때 화면에 한 번 넘깁니다.
+// gate:false 인 종목(늘 열린 낚시)은 예전처럼 바로 넘깁니다.
+function readyState(room) {
+  const live = [...room.slots.values()].filter((e) => e.connected).map((e) => e.slot);
+  const ready = live.filter((s) => room.ready.has(s));
+  return { ready, players: live, need: live.length };
+}
+function emitReady(room) {
+  const st = readyState(room);
+  io.to(`${room.code}:display`).emit('ready_state', st);
+  io.to(`${room.code}:controllers`).emit('ready_state', st);
+  return st;
+}
+function checkReady(room, data) {
+  const st = emitReady(room);
+  if (!st.need || st.ready.length < st.need) return;
+  room.ready.clear();
+  emitReady(room);
+  io.to(`${room.code}:display`).emit('start_game', data || { slot: st.ready[0] });
 }
 
 function scheduleRoomCleanup(room) {
@@ -154,7 +182,7 @@ function scheduleRoomCleanup(room) {
 
 function makeRoom(code, game) {
   // tokens: 방이 살아 있는 동안 폰 토큰 → 자리 번호. 자리를 비운 뒤 돌아와도 원래 자리를 먼저 줍니다.
-  const room = { code, game, slots: new Map(), tokens: new Map(), displayId: null, lastState: { phase: 'lobby' } };
+  const room = { code, game, slots: new Map(), tokens: new Map(), ready: new Set(), displayId: null, lastState: { phase: 'lobby' } };
   rooms.set(code, room);
   return room;
 }
@@ -266,6 +294,11 @@ io.on('connection', (socket) => {
     if (typeof msg.event !== 'string' || !GAMES[room.game].fromController.includes(msg.event)) return;
     const data = msg.data && typeof msg.data === 'object' ? { ...msg.data } : {};
     data.slot = slot;
+    if (msg.event === 'start_game' && GAMES[room.game].gate !== false) {
+      room.ready.add(slot);
+      checkReady(room, data);
+      return;
+    }
     const target = io.to(`${code}:display`);
     (GAMES[room.game].volatile.includes(msg.event) ? target.volatile : target).emit(msg.event, data);
   }));
@@ -278,6 +311,11 @@ io.on('connection', (socket) => {
     if (typeof msg.event !== 'string' || !GAMES[room.game].fromDisplay.includes(msg.event)) return;
     if (msg.event === 'game_state' && msg.data && typeof msg.data.phase === 'string') {
       room.lastState = { ...msg.data };
+      // 경기가 시작되면 준비 표시는 지웁니다(다음 판도 다시 모두 준비).
+      if (msg.data.phase === 'playing' && room.ready.size) {
+        room.ready.clear();
+        emitReady(room);
+      }
     }
     const slot = Number(msg.slot);
     const target = PLAYER_SLOTS[slot] ? `${code}:slot:${slot}` : `${code}:controllers`;

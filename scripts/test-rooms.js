@@ -151,6 +151,35 @@ async function main() {
   p2b.emit('join', { role: 'controller', room: 'WXYZ', token: 'back-2-abcdef' });
   assert.strictEqual((await once(p2b, 'assigned')).slot, 2, '먼저 돌아온 2P 가 1번 자리를 가져가면 안 됨');
 
+  // 모두 준비: 테니스 방에 둘이 있으면 한 명만 눌러서는 시작하지 않고, 둘 다 누르면 한 번 시작
+  const dT = mk();
+  dT.emit('join', { role: 'display', game: 'tennis' });
+  const roomT = await once(dT, 'room');
+  const t1 = mk();
+  t1.emit('join', { role: 'controller', room: roomT.code, token: 'ten-1-abcdef' });
+  await once(t1, 'assigned');
+  const t2 = mk();
+  t2.emit('join', { role: 'controller', room: roomT.code, token: 'ten-2-abcdef' });
+  await once(t2, 'assigned');
+  let starts = 0;
+  dT.on('start_game', () => { starts += 1; });
+  await wait(100);
+  const rsP = new Promise((r) => dT.on('ready_state', (d) => { if (d.ready.length) r(d); }));
+  t1.emit('c2d', { event: 'start_game', data: {} });
+  const rs = await rsP;
+  assert.deepStrictEqual([rs.ready, rs.need], [[1], 2]);
+  await wait(100);
+  assert.strictEqual(starts, 0, '한 명만 준비했는데 시작됨');
+  t2.emit('c2d', { event: 'start_game', data: {} });
+  await wait(150);
+  assert.strictEqual(starts, 1, '둘 다 준비하면 한 번 시작');
+  // 다시 한 명 준비 후 준비 안 한 사람이 나가면 바로 시작
+  t1.emit('c2d', { event: 'start_game', data: {} });
+  await wait(80);
+  t2.disconnect();
+  await wait(200);
+  assert.strictEqual(starts, 2, '준비 안 한 사람이 나가면 남은 사람끼리 시작');
+
   // ping
   const t = await new Promise((r) => dA2.emit('ping_rtt', 42, r));
   assert.strictEqual(t, 42);
