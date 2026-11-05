@@ -1,36 +1,81 @@
-// 배스 낚시: 화면·DOM 과 상관없는 계산만 모았습니다(호수 모양, 입질 시점, 물고기 고르기, 파이팅).
+// 배스 낚시: 화면·DOM 과 상관없는 계산만 모았습니다(호수 바닥 모양, 캐스팅 거리, 물고기 크기, 파이팅).
 // node 에서도 그대로 불러 시험할 수 있게 다른 모듈을 쓰지 않습니다.
+//
+// 좌표: 선착장 끝이 z = 0, 사람은 +z(호수 쪽)를 봅니다. 수면은 y = 0 입니다.
+// 세계 +x 가 화면 왼쪽입니다(카메라가 +z 를 보고 위가 +y 라서). 조준 각도는 + 가 오른쪽(세계 -x)입니다.
 
-export const SESSION_SEC = 180; // 한 판 3분
-export const OVERTIME_SEC = 25; // 시간이 끝났을 때 이미 걸린 물고기는 이만큼 더 싸울 수 있습니다
 export const LINE_PER_TURN = 0.8; // 핸들 한 바퀴에 감기는 줄(m)
 export const DRAG = 0.85; // 이 장력을 넘으면 드랙이 미끄러지며 줄이 풀립니다
 export const HOOK_WINDOW = 0.8; // 찌가 들어간 뒤 챔질할 수 있는 시간(초)
-export const LAND_DIST = 2.2; // 이 거리 안으로 끌어오면 뜰채에 담깁니다
+export const LAND_DIST = 2.2; // 이 거리 안으로 끌어오면 들어 올립니다
 export const MAX_LINE = 70; // 스풀에 감긴 줄 길이(m). 다 풀리면 끊어집니다
-export const CAST_MIN = 8;
-export const CAST_MAX = 38;
+export const CAST_MIN = 4; // 가장 약하게 던졌을 때 초릿대에서 찌까지(m)
+export const CAST_MAX = 30; // 가장 세게 던졌을 때
 export const AIM_MAX = 35; // 좌우 조준 한계(도)
+export const RETRIEVE_DONE = 3; // 찌가 초릿대에서 이 거리 안으로 들어오면 줄이 다 감긴 것
+export const BAIT_DEPTH = 0.55; // 찌 아래 미끼 깊이(m)
 
+const RD = Math.PI / 180;
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
-const smooth = (a, b, x) => {
+export const smooth = (a, b, x) => {
   const t = clamp((x - a) / (b - a), 0, 1);
   return t * t * (3 - 2 * t);
 };
 
-// ---------- 호수와 지형 ----------
-// 선착장은 z = -1.2 ~ 2.0, 사람은 +z(호수 쪽)를 봅니다. 세계 +x 가 화면 왼쪽입니다.
-export const LAKE = { cx: 0, cz: 55, ax: 58, az: 72 };
-export const SUN_AZ_RAD = 0.28; // 해 방향(정면에서 왼쪽으로)
-export const DOCK = { x0: -5.6, x1: 5.6, z0: -1.2, z1: 2.0, y: 0.72, walkW: 2.0, shoreZ: -19 };
+// ---------- 장소 ----------
+// 선착장 끝(사람이 서는 마루). 판은 x 방향, 다리는 -z 쪽 물가로 이어집니다.
+export const DOCK = { x0: -2.3, x1: 2.3, z0: -5.4, z1: 0, y: 0.55, walkW: 1.6, shoreZ: -13 };
+// 1인칭 눈: 마루에서 1.7m, 선착장 끝에서 조금 뒤. 아래로 18° 내려다봅니다.
+export const EYE = { x: 0, y: DOCK.y + 1.7, z: -1.85, pitch: 18, fov: 55 };
+// 낚시하는 물(물고기가 사는 곳)
+export const AREA = { x0: -14, x1: 14, z0: 2.2, z1: 32 };
+// 호수 물가: 앞쪽은 멀리(z ≈ 62), 좌우는 x ≈ ±22 의 작은 만입니다.
+export const LAKE = { cx: 0, cz: 24, ax: 23, az: 38 };
+// 해: 왼쪽(세계 +x) 조금 앞, 늦은 아침 높이. 물 위 반짝임이 화면 가운데를 가리지 않습니다.
+export const SUN = (() => {
+  const el = 40 * RD;
+  const az = 72 * RD; // +z 에서 +x 쪽으로
+  return { el, az, dir: [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)] };
+})();
 
-// 1 보다 작으면 물, 크면 땅. 가장자리를 조금씩 흔들어 자연스러운 호숫가를 만듭니다.
+// 1 보다 작으면 물, 크면 땅. 가장자리를 조금씩 흔들어 자연스러운 물가를 만듭니다.
 export function lakeQ(x, z) {
   const dx = (x - LAKE.cx) / LAKE.ax;
   const dz = (z - LAKE.cz) / LAKE.az;
   const a = Math.atan2(dz, dx);
-  const wob = 1 + 0.07 * Math.sin(3 * a + 0.6) + 0.045 * Math.sin(5 * a + 2.1) + 0.028 * Math.sin(9 * a + 0.3);
+  const wob = 1 + 0.06 * Math.sin(3 * a + 0.6) + 0.04 * Math.sin(5 * a + 2.1) + 0.025 * Math.sin(9 * a + 0.3);
   return Math.hypot(dx, dz) / wob;
+}
+
+// 수초가 자라는 얕은 턱, 가라앉은 통나무, 바위(물고기가 숨는 곳). scene 과 물고기 AI 가 같이 씁니다.
+export const SHELF = { x: 11, z: 10, rx: 5.5, rz: 6.5 };
+export const LOG = { x: -6.5, z: 13.5, len: 5.2, r: 0.2, yaw: 0.55 };
+export const ROCKS = [
+  { x: 4.2, z: 7.4, r: 0.55 }, { x: -9.6, z: 21.5, r: 0.9 }, { x: 8.4, z: 24.5, r: 0.75 }, { x: -2.6, z: 5.6, r: 0.38 },
+  { x: 12.4, z: 17.6, r: 0.6 }
+];
+export const LILY = [
+  { x: 12.8, z: 11.5, r: 2.4 }, { x: -13.2, z: 15.5, r: 2.8 }, { x: 15.5, z: 29, r: 3.4 }, { x: -14, z: 33, r: 3.2 }
+];
+// 물고기가 즐겨 머무는 곳(큰 놈일수록 이쪽을 좋아합니다)
+export const COVER = [
+  { x: LOG.x, z: LOG.z, r: 2.4 }, { x: SHELF.x - 1.5, z: SHELF.z, r: 3 }, { x: ROCKS[1].x, z: ROCKS[1].z, r: 2 },
+  { x: ROCKS[2].x, z: ROCKS[2].z, r: 2 }, { x: -11, z: 15.5, r: 2.4 }, { x: 11.5, z: 27, r: 2.6 }
+];
+
+// 물 깊이(+ = 수면 아래 m). 선착장 앞 1.2m 에서 멀리 갈수록 4m 남짓까지 깊어지고 물가에서 0 이 됩니다.
+export function bedDepth(x, z) {
+  const q = lakeQ(x, z);
+  const edge = smooth(1.0, 0.66, q);
+  if (edge <= 0) return 0;
+  let d = 1.15 + 3.0 * smooth(-2, 36, z);
+  // 수초 턱(왼쪽 앞)은 얕게
+  d -= 0.55 * Math.exp(-(((x - SHELF.x) / SHELF.rx) ** 2) - (((z - SHELF.z) / SHELF.rz) ** 2));
+  // 오른쪽 가운데의 깊은 웅덩이
+  d += 0.5 * Math.exp(-(((x + 7) / 6) ** 2) - (((z - 20) / 7) ** 2));
+  // 잔물결 같은 바닥 기복
+  d += 0.1 * Math.sin(x * 0.55 + Math.sin(z * 0.3) * 1.4) * Math.cos(z * 0.42 + 0.7) + 0.05 * Math.sin(x * 1.7 + z * 1.3);
+  return Math.max(0, d * Math.pow(edge, 0.75));
 }
 
 function hills(x, z) {
@@ -38,54 +83,57 @@ function hills(x, z) {
     0.1 * Math.sin(x * 0.15 - z * 0.12), 0, 1);
 }
 
+// 지형 높이(물속은 바닥, 물 밖은 둑과 언덕)
 export function terrainH(x, z) {
-  const s = lakeQ(x, z) - 1;
-  const ripple = 0.12 * Math.sin(x * 0.7 + Math.sin(z * 0.4)) * Math.cos(z * 0.55);
-  if (s < 0) return -3.2 * (1 - Math.exp(s * 10)) + ripple * smooth(-0.06, 0, s);
-  // 해 지는 쪽(정면 조금 왼쪽)은 낮은 골짜기로 열어 둡니다.
-  const az = Math.atan2(x, Math.max(1, z - LAKE.cz));
-  const valley = z > LAKE.cz ? Math.exp(-Math.pow((az - SUN_AZ_RAD) / 0.32, 2)) : 0;
-  const h = (s * 7 + hills(x, z) * smooth(0.04, 0.7, s) * 20) * (1 - 0.72 * valley) + ripple;
-  // 멀리 갈수록 너무 높아지지 않게(낮게 걸린 해를 가리지 않도록)
-  return h < 8 ? h : 8 + 28 * (1 - Math.exp(-(h - 8) / 28));
+  const q = lakeQ(x, z);
+  if (q < 1) return -bedDepth(x, z);
+  const s = q - 1;
+  const ripple = 0.08 * Math.sin(x * 0.7 + Math.sin(z * 0.4)) * Math.cos(z * 0.55);
+  // 둑은 낮게: 먼 물가 너머로 하늘과 먼 산이 보이게 합니다.
+  const h = s * 3.6 + hills(x, z) * smooth(0.03, 0.7, s) * 6 + ripple * smooth(0, 0.05, s);
+  return h < 6 ? h : 6 + 14 * (1 - Math.exp(-(h - 6) / 14));
 }
 
-// 연잎 군락(큰 배스가 숨는 곳)
-export const LILY = [
-  { x: 10.5, z: 17, r: 3.4 },
-  { x: -13, z: 27, r: 4.2 },
-  { x: 3.5, z: 41, r: 3.8 },
-  { x: -4.5, z: 58, r: 4.5 }
-];
+// 이 자리에서 물고기가 숨기 좋은 정도(0~1)
+export function coverAt(x, z) {
+  let c = 0;
+  for (const p of COVER) c = Math.max(c, 1 - smooth(p.r * 0.4, p.r * 1.6, Math.hypot(x - p.x, z - p.z)));
+  return c;
+}
 
-// 이 자리에 사는 물고기의 질(0~1): 연잎·갈대 근처, 그리고 멀수록 좋습니다.
-export function spotQuality(x, z) {
-  let cover = 0;
-  for (const c of LILY) {
-    const d = Math.hypot(x - c.x, z - c.z) - c.r;
-    cover = Math.max(cover, 1 - smooth(0, 7, d));
-  }
-  const q = lakeQ(x, z);
-  cover = Math.max(cover, 0.8 * smooth(0.72, 0.9, q) * (z > 6 ? 1 : 0));
-  const far = smooth(8, 36, Math.hypot(x, z));
-  return clamp(0.15 + 0.55 * cover + 0.3 * far, 0, 1);
+// 사람 수에 따른 낚싯대 자리(화면 가로 비율). 혼자면 오른손잡이처럼 가운데 오른쪽.
+export function laneFracs(n) {
+  if (n <= 1) return [0.62];
+  return Array.from({ length: n }, (_, i) => (i + 1) / (n + 1));
 }
 
 // 찌가 떨어질 곳. 너무 멀리 던져 물가를 넘어가면 물 안쪽으로 당겨 줍니다.
+export function castDist(power) {
+  return CAST_MIN + (CAST_MAX - CAST_MIN) * Math.pow(clamp(power, 0, 1), 0.85);
+}
 export function castTarget(tipX, tipZ, power, aimDeg) {
-  const p = clamp(power, 0, 1);
-  let dist = CAST_MIN + (CAST_MAX - CAST_MIN) * Math.pow(p, 0.85);
-  const aim = clamp(aimDeg, -AIM_MAX, AIM_MAX) * Math.PI / 180;
+  let dist = castDist(power);
+  const aim = clamp(aimDeg, -AIM_MAX, AIM_MAX) * RD;
   // + 조준은 오른쪽 = 세계 -x
   const dir = [-Math.sin(aim), Math.cos(aim)];
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 60; i++) {
     const x = tipX + dir[0] * dist;
     const z = tipZ + dir[1] * dist;
-    if (lakeQ(x, z) < 0.93 && terrainH(x, z) < -0.6) return { x, z, dist };
-    dist -= 0.8;
-    if (dist < 4) break;
+    if (lakeQ(x, z) < 0.86 && bedDepth(x, z) > 0.8) return { x, z, dist };
+    dist -= 0.6;
+    if (dist < CAST_MIN) break;
   }
-  return { x: tipX + dir[0] * 4, z: tipZ + dir[1] * 4, dist: 4 };
+  dist = CAST_MIN;
+  return { x: tipX + dir[0] * dist, z: tipZ + dir[1] * dist, dist };
+}
+// 거꾸로: 이 점에 떨어뜨리려면 몇 도로, 얼마나 세게
+export function aimFor(tipX, tipZ, x, z) {
+  const dx = x - tipX;
+  const dz = Math.max(0.5, z - tipZ);
+  const aim = clamp(Math.atan2(-dx, dz) / RD, -AIM_MAX, AIM_MAX);
+  const dist = clamp(Math.hypot(dx, dz), CAST_MIN, CAST_MAX);
+  const power = Math.pow((dist - CAST_MIN) / (CAST_MAX - CAST_MIN), 1 / 0.85);
+  return { aim, power: clamp(power, 0, 1), dist };
 }
 
 // ---------- 물고기 ----------
@@ -94,31 +142,27 @@ export const SPECIES = {
   smb: { id: 'smb', name: '작은입배스', en: 'SMALLMOUTH BASS', min: 0.3, max: 2.6, jump: 0.65, k: (w) => 0.34 + 0.27 * w, len: (w) => 0.2 + 0.18 * Math.cbrt(w) * 1.2 },
   blg: { id: 'blg', name: '블루길', en: 'BLUEGILL', min: 0.08, max: 0.6, jump: 0.04, k: (w) => 0.2 + 0.5 * w, len: (w) => 0.1 + 0.2 * Math.cbrt(w) }
 };
+export const BIG_KG = 3; // 이보다 무거우면 '큰 놈'(동시에 두 마리까지)
+export const MIX = { lmb: 0.45, smb: 0.2, blg: 0.35 };
 
-export function pickFish(quality, rand = Math.random) {
-  const q = clamp(quality, 0, 1);
-  const r = rand();
-  const pL = 0.42 + 0.33 * q;
-  const pS = 0.25 - 0.05 * q;
-  const sp = r < pL ? SPECIES.lmb : r < pL + pS ? SPECIES.smb : SPECIES.blg;
-  // 좋은 자리일수록 큰 놈 쪽으로 기웁니다.
-  const u = Math.pow(rand(), 1.9 - 1.1 * q);
-  let w = sp.min + (sp.max - sp.min) * Math.pow(u, 1.7);
-  w = Math.round(w * 100) / 100;
-  return { species: sp.id, name: sp.name, en: sp.en, weight: w, length: Math.round(sp.len(w) * 100) / 100, power: sp.k(w) };
-}
-
-// 찌가 떨어진 뒤의 입질 계획: 톡톡 건드리는 예신 몇 번 뒤에 쭉 끌고 들어가는 본신.
-export function planBite(quality, rand = Math.random, delay = 0) {
-  const q = clamp(quality, 0, 1);
-  let t = delay + 1.6 + rand() * (5.5 - 3 * q);
-  const nibbles = [];
-  const n = rand() < 0.15 ? 0 : 1 + Math.floor(rand() * 3);
-  for (let i = 0; i < n; i++) {
-    nibbles.push(t);
-    t += 0.55 + rand() * 1.1;
+// 무게 뽑기. 큰입배스의 3kg 이상은 드뭅니다(약 15%).
+export function rollWeight(species, rand = Math.random, allowBig = true) {
+  const sp = SPECIES[species] || SPECIES.lmb;
+  const ex = species === 'lmb' ? 2.8 : species === 'smb' ? 2.0 : 1.4;
+  for (let i = 0; i < 8; i++) {
+    const w = Math.round((sp.min + (sp.max - sp.min) * Math.pow(rand(), ex)) * 100) / 100;
+    if (allowBig || w < BIG_KG) return w;
   }
-  return { nibbles, bite: t + 0.2 + rand() * 0.6 };
+  return Math.round(Math.min(sp.max, BIG_KG - 0.2 - rand() * 1.2) * 100) / 100;
+}
+export function fishInfo(species, weight) {
+  const sp = SPECIES[species] || SPECIES.lmb;
+  return { species: sp.id, name: sp.name, en: sp.en, weight, length: Math.round(sp.len(weight) * 100) / 100, power: sp.k(weight) };
+}
+// 큰 정도(0~1): 경계심, 깊이, 미끼를 무는 망설임에 씁니다.
+export function bigness(species, weight) {
+  if (species === 'blg') return 0;
+  return clamp((weight - 1.2) / 3, 0, 1);
 }
 
 // ---------- 파이팅 ----------

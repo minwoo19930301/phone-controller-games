@@ -1,7 +1,10 @@
 // 물고기 모델: 큰입배스·작은입배스·블루길. 몸통은 단면 타원을 길이 방향으로 이어 만든 곡면,
 // 지느러미는 2D 외곽선을 판으로 만들고, 비늘·무늬는 캔버스에 그립니다.
 // 모든 부품을 물고기 좌표(머리 = +x, 위 = +y, 옆 = z, 길이 1)에 굽고, 같은 꼬리치기 셰이더로 함께 휘게 합니다.
+// 물속에서는 깊이만큼 물빛이 섞입니다(underwater.js). 모양(geometry)은 종마다 한 번만 만들어 함께 씁니다.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { underwater } from './underwater.js';
 
 const TAU = Math.PI * 2;
 
@@ -258,7 +261,7 @@ function textures(id) {
 
 // ---------- 꼬리치기 셰이더 ----------
 // 머리는 거의 그대로, 꼬리 쪽일수록 크게 옆(z)으로 흔듭니다. uCurl 은 몸 전체를 C 자로 휩니다(퍼덕임).
-function bendify(mat, U) {
+function bendify(mat, U, part) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = U.uTime;
     sh.uniforms.uAmp = U.uAmp;
@@ -278,8 +281,7 @@ function bendify(mat, U) {
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         transformed.z += sin(fbPh) * uAmp * fbEnv + uCurl * (position.x * position.x * 1.8 - 0.06);`);
   };
-  mat.customProgramCacheKey = () => 'fish-bend-v1';
-  return mat;
+  return underwater(mat, `fish-bend-v2-${part}`);
 }
 
 // ---------- 몸통 ----------
@@ -426,56 +428,31 @@ function sideFin(len, wid) {
   return finFromShape(sh, 'x');
 }
 
-// 한 마리 만들기. 돌려준 group 의 크기 1 = 몸길이 1m 입니다(바깥에서 길이만큼 키웁니다).
-export function makeFish(species) {
-  const id = SHAPES[species] ? species : 'lmb';
+// 종마다 한 번만 만드는 모양: 몸통, 지느러미 전부(한 덩어리), 홍채 둘, 동공 둘
+const geoCache = {};
+function fishGeometry(id) {
+  if (geoCache[id]) return geoCache[id];
   const S = SHAPES[id];
-  const L = LOOK[id];
-  const T = textures(id);
-  const U = { uTime: { value: 0 }, uAmp: { value: 0.02 }, uFreq: { value: 9 }, uCurl: { value: 0 } };
-  const group = new THREE.Group();
-
-  const skin = bendify(new THREE.MeshPhysicalMaterial({
-    map: T.skin, roughness: 0.42, metalness: 0.05, clearcoat: 0.7, clearcoatRoughness: 0.22,
-    bumpMap: T.scales, bumpScale: 0.6, sheen: 0.4, sheenColor: new THREE.Color(id === 'blg' ? '#7aa0ff' : '#e8f0c0'), sheenRoughness: 0.5
-  }), U);
-  const body = new THREE.Mesh(bodyGeometry(id), skin);
-  body.castShadow = true;
-  group.add(body);
-
-  const finMat = bendify(new THREE.MeshStandardMaterial({ map: T.fin, transparent: true, side: THREE.DoubleSide, roughness: 0.55, alphaTest: 0.05, depthWrite: true }), U);
-  const add = (geo) => {
-    const m = new THREE.Mesh(geo, finMat);
-    group.add(m);
-    return m;
-  };
-  add(dorsalSpiny(S, id));
-  add(dorsalSoft(S, id));
-  add(analFin(S, id));
-  add(caudalFin(S, id));
-  // 가슴지느러미(양옆, 뒤로 비스듬히)
+  const fins = [dorsalSpiny(S, id), dorsalSoft(S, id), analFin(S, id), caudalFin(S, id)];
+  // 가슴지느러미(양옆, 뒤로 비스듬히)와 배지느러미
   const uP = 0.25;
   for (const s of [-1, 1]) {
     const g = sideFin(id === 'blg' ? 0.12 : 0.1, 0.05);
-    const m4 = new THREE.Matrix4()
+    g.applyMatrix4(new THREE.Matrix4()
       .makeTranslation(xOf(uP), lerpTable(S, 'c', uP) - lerpTable(S, 'h', uP) * 0.25, s * lerpTable(S, 'w', uP) * 0.92)
       .multiply(new THREE.Matrix4().makeRotationY(s * 0.45))
-      .multiply(new THREE.Matrix4().makeRotationX(s * 0.3));
-    g.applyMatrix4(m4);
-    add(g);
-    // 배지느러미
+      .multiply(new THREE.Matrix4().makeRotationX(s * 0.3)));
+    fins.push(g);
     const uV = 0.31;
     const g2 = sideFin(0.075, 0.035);
-    const m5 = new THREE.Matrix4()
+    g2.applyMatrix4(new THREE.Matrix4()
       .makeTranslation(xOf(uV), botAt(S, uV) + 0.006, s * 0.012)
       .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2 + s * 0.55))
-      .multiply(new THREE.Matrix4().makeRotationZ(-0.35));
-    g2.applyMatrix4(m5);
-    add(g2);
+      .multiply(new THREE.Matrix4().makeRotationZ(-0.35)));
+    fins.push(g2);
   }
-  // 눈: 홍채(유광) + 동공
-  const eyeMat = bendify(new THREE.MeshPhysicalMaterial({ color: L.eye, roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.05 }), U);
-  const pupilMat = bendify(new THREE.MeshPhysicalMaterial({ color: '#050505', roughness: 0.1, clearcoat: 1 }), U);
+  const irises = [];
+  const pupils = [];
   const ue = S.eye;
   for (const s of [-1, 1]) {
     const ex = xOf(ue);
@@ -484,14 +461,42 @@ export function makeFish(species) {
     const eg = new THREE.SphereGeometry(S.eyeR, 18, 14);
     eg.scale(1, 1, 0.55);
     eg.translate(ex, ey, ez);
-    group.add(new THREE.Mesh(eg, eyeMat));
+    irises.push(eg);
     const pg = new THREE.SphereGeometry(S.eyeR * 0.55, 14, 10);
     pg.scale(1, 1, 0.5);
     pg.translate(ex + 0.002, ey, ez + s * S.eyeR * 0.36);
-    group.add(new THREE.Mesh(pg, pupilMat));
+    pupils.push(pg);
   }
+  geoCache[id] = { body: bodyGeometry(id), fins: mergeGeometries(fins), iris: mergeGeometries(irises), pupil: mergeGeometries(pupils) };
+  return geoCache[id];
+}
+
+// 한 마리 만들기. 돌려준 group 의 크기 1 = 몸길이 1m 입니다(바깥에서 길이만큼 키웁니다).
+// 재질은 마리마다 따로(꼬리치기 값이 마리마다 다름), 모양은 종끼리 같이 씁니다. 그리기 4번.
+export function makeFish(species) {
+  const id = SHAPES[species] ? species : 'lmb';
+  const L = LOOK[id];
+  const T = textures(id);
+  const G = fishGeometry(id);
+  const U = { uTime: { value: 0 }, uAmp: { value: 0.02 }, uFreq: { value: 9 }, uCurl: { value: 0 } };
+  const group = new THREE.Group();
+
+  const skin = bendify(new THREE.MeshPhysicalMaterial({
+    map: T.skin, roughness: 0.45, metalness: 0.05, clearcoat: 0.45, clearcoatRoughness: 0.25, envMapIntensity: 0.55,
+    bumpMap: T.scales, bumpScale: 0.6, sheen: 0.18, sheenColor: new THREE.Color(id === 'blg' ? '#7aa0ff' : '#e8f0c0'), sheenRoughness: 0.5
+  }), U, 'skin');
+  const body = new THREE.Mesh(G.body, skin);
+  group.add(body);
+  const finMat = bendify(new THREE.MeshStandardMaterial({ map: T.fin, transparent: true, side: THREE.DoubleSide, roughness: 0.55, alphaTest: 0.05, depthWrite: true }), U, 'fin');
+  group.add(new THREE.Mesh(G.fins, finMat));
+  // 눈: 홍채(유광) + 동공
+  const eyeMat = bendify(new THREE.MeshPhysicalMaterial({ color: L.eye, roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.05 }), U, 'eye');
+  const pupilMat = bendify(new THREE.MeshPhysicalMaterial({ color: '#050505', roughness: 0.1, clearcoat: 1 }), U, 'eye');
+  group.add(new THREE.Mesh(G.iris, eyeMat), new THREE.Mesh(G.pupil, pupilMat));
   group.userData.uniforms = U;
   group.userData.species = id;
+  // 버릴 때 재질만 내립니다(모양과 무늬는 같은 종이 같이 씁니다).
+  group.userData.dispose = () => { for (const m of [skin, finMat, eyeMat, pupilMat]) m.dispose(); };
   return group;
 }
 

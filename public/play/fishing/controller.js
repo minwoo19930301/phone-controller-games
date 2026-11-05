@@ -1,5 +1,6 @@
-// 배스 낚시 컨트롤러. 폰이 낚싯대입니다.
+// 배스 낚시 컨트롤러. 폰이 낚싯대입니다. 호수는 늘 열려 있어서 QR 을 찍고 자세만 맞추면 바로 낚시합니다.
 // 뒤로 젖혔다가 앞으로 휙 던지면 캐스팅, 찌가 들어가면 위로 확 들어 올려 챔질, 화면의 릴 핸들을 돌려 감습니다.
+// 기다리는 중에 핸들을 살짝 돌리면 찌를 톡 건드리고(트위치), 계속 돌리면 찌가 끌려옵니다.
 // 좌표는 '준비' 때 정한 기준축으로 보냅니다: r = 내 오른쪽, u = 위, f = 폰 윗부분이 TV 를 보던 방향.
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -24,7 +25,8 @@
   const HOOK_WIN_MS = 90;
   const REEL_MS = 66; // 감기 전송 간격(약 15Hz)
   const AIM_MAX = 35;
-  const STREAM_STAGES = ['ready', 'cast', 'wait', 'bite', 'fight', 'landed'];
+  // 큰 화면이 낚싯대와 조준선을 늘 그리므로, 조준·대기·파이팅 내내 방향을 보냅니다.
+  const STREAM_STAGES = ['ready', 'cast', 'wait', 'bite', 'fight', 'landed', 'lost'];
 
   let token = null;
   try { token = localStorage.getItem('pcg-token'); } catch (e) {}
@@ -44,7 +46,7 @@
   let me = null;
   let state = { phase: 'lobby' };
   let stateAt = performance.now();
-  let mode = 'start'; // start | connecting | msg | wait | cal | count | play
+  let mode = 'start'; // start | connecting | msg | hold | cal | count | play
   let gotOri = false;
   let gotMotion = false;
   let hasGyro = false;
@@ -135,13 +137,14 @@
 
   function myStage() {
     const p = myInfo();
-    return p ? p.stage : null;
+    return p ? p.state || p.stage || null : null;
   }
   function myInfo() {
     if (!me || !state || !state.players) return null;
     return state.players[me.slot] || state.players[String(me.slot)] || null;
   }
-  const playing = () => state.phase === 'playing' && Boolean(myInfo());
+  // 큰 화면이 'open'(늘 열린 호수)을 보내고 내 자리가 있으면 바로 낚시합니다.
+  const playing = () => (state.phase === 'open' || state.phase === 'playing') && Boolean(myInfo());
 
   function onOrientation(e) {
     if (e.alpha == null && e.beta == null) return;
@@ -165,7 +168,7 @@
       else hookCheck(t);
     }
     // 약 40Hz 로 줄여 보냅니다(경기 중 필요한 단계에서만).
-    if (playing() && STREAM_STAGES.includes(myStage()) && t >= nextPoseAt) {
+    if (playing() && !fallback && STREAM_STAGES.includes(myStage()) && t >= nextPoseAt) {
       nextPoseAt = Math.max(nextPoseAt + POSE_MS, t + POSE_MS * 0.4);
       send('pose', { s: r3(s), fc: r3(inBasis(basis, ori.face)) }, true);
     }
@@ -232,7 +235,7 @@
         cast.topAt = t;
         cast.peak = 0;
         cast.armedAt = t;
-        if (navigator.vibrate) navigator.vibrate(12);
+        vib(12);
         tick(900);
       }
       return;
@@ -264,7 +267,7 @@
     if (!send('cast', { power: round(power, 3), aim: round(aim, 1), rtt: Math.round(rtt()) })) return;
     cast.msg = `${Math.round(power * 100)}% 힘으로 던졌어요`;
     whoosh(power);
-    if (navigator.vibrate) navigator.vibrate(30);
+    vib(30);
     debug(`cast power ${power.toFixed(2)} aim ${aim.toFixed(1)} peak ${Math.round(peak || 0)}`);
     drawCastHint();
   }
@@ -507,6 +510,12 @@
     src.stop(t + dur + 0.05);
   }
   const tick = (f) => tone(f || 1500, 0.05, 0.25);
+  // 진동(Android). 화면을 한 번도 누르지 않았으면 브라우저가 막으므로 부르지 않습니다. iPhone 은 진동이 없습니다.
+  function vib(pattern) {
+    if (!navigator.vibrate) return;
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+    try { navigator.vibrate(pattern); } catch (e) {}
+  }
   const click = () => noise(0.018, 3600, 3, 0.22);
   const whoosh = (p) => {
     noise(0.4 + p * 0.25, 600, 0.8, 0.25 + p * 0.3, { sweep: 2800, attack: 0.06 });
@@ -553,15 +562,13 @@
     if (dragNode && actx && performance.now() > dragUntil) dragNode.g.gain.setTargetAtTime(0, actx.currentTime, 0.05);
   }, 100);
   function buzz(pattern, flashKind) {
-    if (navigator.vibrate) {
-      try { navigator.vibrate(pattern); } catch (e) {}
-    }
+    vib(pattern);
     // iPhone 은 진동이 없어 화면을 번쩍입니다.
     if (flashKind) {
       const f = $('flash');
       f.className = '';
       void f.offsetWidth;
-      f.className = flashKind === 'bite' ? 'bite' : 'go';
+      f.className = flashKind === 'bite' ? 'bite' : flashKind === 'nib' ? 'nib' : 'go';
     }
   }
 
@@ -572,7 +579,7 @@
     mode = 'cal';
     $('calN').classList.add('hidden');
     $('btnReady').classList.remove('hidden');
-    $('btnCalCancel').classList.toggle('hidden', !(basis || state.phase !== 'playing' || !myInfo()));
+    $('btnCalCancel').classList.toggle('hidden', !basis);
     $('calT').textContent = basis ? '다시 맞춰요' : '낚싯대처럼 쥐어요';
     $('calB').textContent = '폰 아래쪽을 손잡이처럼 쥐고 폰 윗부분이 TV를 향하게,\n화면은 하늘을 보게 든 뒤 준비를 눌러요.';
     show('vCal');
@@ -591,14 +598,14 @@
     $('calT').textContent = '그대로 멈춰요';
     $('calB').textContent = '낚싯대를 쥔 자세 그대로, 폰 윗부분이 TV를 보게 둬요.';
     tick();
-    if (navigator.vibrate) navigator.vibrate(15);
+    vib(15);
     clearInterval(countTimer);
     countTimer = setInterval(() => {
       n -= 1;
       if (n > 0) {
         $('calN').textContent = n;
         tick();
-        if (navigator.vibrate) navigator.vibrate(15);
+        vib(15);
         return;
       }
       clearInterval(countTimer);
@@ -623,7 +630,7 @@
     eHist.length = 0;
     cast.state = 'idle';
     // 큰 화면은 이 신호로 낚싯대 기준을 다시 잡습니다. 이 뒤의 pose 는 새 기준축 값입니다.
-    if (!send('calibrate', {})) pendingCal = true;
+    if (!send('calibrate', { e0: round(basis.e0, 1) })) pendingCal = true;
     buzz([30, 40, 30]);
     tone(1320, 0.12, 0.3);
     mode = 'idle';
@@ -633,14 +640,13 @@
 
   // ---------- 화면 ----------
   const STAGE_TEXT = {
-    ready: ['던지세요', '폰을 뒤로 젖혔다가 앞으로 휙! 세게 던질수록 멀리 가요.'],
-    cast: ['날아가는 중…', '찌가 떨어지면 기다려요.'],
-    wait: ['찌를 지켜봐요', '톡톡은 참고, 쏙 들어가면 위로 확! 감으면 찌가 끌려와요.'],
-    bite: ['지금 챔질!', '폰을 위로 확 들어 올려요!'],
-    fight: ['파이팅!', '핸들을 돌려 감아요. 장력이 빨개지면 멈춰요.'],
-    landed: ['잡았다!', '다음 캐스팅을 준비해요.'],
-    lost: ['채비 정리 중…', '새 찌를 달고 있어요.'],
-    done: ['시간 끝', '큰 화면에서 집계를 기다려요.']
+    ready: ['던지세요', '큰 화면의 조준선으로 물고기를 겨누고, 폰을 뒤로 젖혔다가 앞으로 휙!'],
+    cast: ['휙!', '찌가 떨어지면 기다려요.'],
+    wait: ['기다리는 중', '톡톡은 참고, 쏙 들어가면 위로 확! 핸들을 살짝 돌리면 찌가 톡 움직여요.'],
+    bite: ['지금! 위로 확', '폰을 위로 확 들어 올려요!'],
+    fight: ['감아요!', '핸들을 돌려 감아요. 장력이 빨개지면 멈춰요.'],
+    landed: ['잡았다!', '놓아주고 다시 던져요.'],
+    lost: ['채비 정리 중…', '새 찌를 달고 있어요.']
   };
   let lastStage = null;
   let fight = { value: 0, dist: 0, drag: false, run: false, side: 0, at: 0 };
@@ -661,6 +667,7 @@
     const info = myInfo() || {};
     $('myKg').textContent = (info.total || 0).toFixed(1);
     $('myCnt').textContent = info.count || 0;
+    $('myBest').textContent = info.best ? Number(info.best.weight).toFixed(1) : '-';
     if (st !== lastStage || force) {
       const prev = lastStage;
       lastStage = st;
@@ -675,11 +682,12 @@
       $('dialWrap').classList.toggle('hidden', !(st === 'wait' || st === 'bite' || st === 'fight'));
       $('dialWrap').classList.toggle('compact', st !== 'fight');
       $('btnMotion').classList.toggle('hidden', !gotOri || fallback);
-      $('pads').classList.toggle('hidden', !fallback || !(st === 'ready' || st === 'wait' || st === 'bite'));
+      $('pads').classList.toggle('hidden', !fallback || st === 'landed' || st === 'lost');
       $('btnCast').disabled = !(st === 'ready' || st === 'wait');
       $('btnHook').disabled = !(st === 'wait' || st === 'bite');
-      $('btnCast').style.opacity = $('btnCast').disabled ? 0.4 : 1;
-      $('btnHook').style.opacity = $('btnHook').disabled ? 0.4 : 1;
+      $('btnReel').disabled = !(st === 'wait' || st === 'bite' || st === 'fight');
+      $('btnTwitch').disabled = st !== 'wait';
+      for (const id of ['btnCast', 'btnHook', 'btnReel', 'btnTwitch']) $(id).style.opacity = $(id).disabled ? 0.4 : 1;
       if (st === 'ready') cast.msg = '';
       if (prev === 'fight' && st !== 'fight') dragSound(false);
       if (st !== 'fight') fight = { value: 0, dist: 0, drag: false, run: false, side: 0, at: 0 };
@@ -693,9 +701,9 @@
     let t = '';
     if (cast.state === 'armed' && !fallback) t = '좋아요! 이제 앞으로 휙!';
     else if (cast.msg) t = cast.msg;
-    else if (fallback) t = st === 'ready' || st === 'wait' ? '캐스팅 버튼을 누르고 있다가 떼요' : '';
-    else if (st === 'ready') t = '뒤로 젖혀요 ↶';
-    else if (st === 'wait') t = '다시 던지려면 그냥 다시 캐스팅해요';
+    else if (fallback) t = st === 'ready' || st === 'wait' ? '방향과 힘을 고르고 던지기를 눌러요' : '';
+    else if (st === 'ready') t = '겨누고, 뒤로 젖혀요 ↶';
+    else if (st === 'wait') t = '다시 던지면 감아 들인 뒤 던져요';
     $('castHint').textContent = t;
   }
   function drawDialHint() {
@@ -757,50 +765,14 @@
     c._t = setTimeout(() => c.classList.remove('on'), ms || 2600);
   }
 
-  function showWait() {
-    mode = 'wait';
-    const phase = state.phase;
-    const chips = [];
-    $('btnGo').style.display = '';
-    if (phase === 'over') {
-      const r = (state.ranking || []).findIndex((x) => me && x.slot === me.slot);
-      const mine = myInfo();
-      $('waitT').textContent = r === 0 ? '우승!' : r > 0 ? `${r + 1}위` : '경기 끝';
-      $('waitB').textContent = '큰 화면에서 순위를 확인해요.';
-      if (mine) {
-        chips.push(['총 무게', `${(mine.total || 0).toFixed(1)}kg`]);
-        chips.push(['마릿수', `${mine.count || 0}마리`]);
-        if (mine.best) chips.push(['최대어', `${mine.best.name} ${mine.best.weight.toFixed(1)}kg`]);
-      }
-      $('btnGo').textContent = '다시 하기';
-    } else if (phase === 'playing') {
-      $('waitT').textContent = '관전 중';
-      $('waitB').textContent = '이번 판이 끝나면 함께할 수 있어요.';
-      $('btnGo').style.display = 'none';
-    } else {
-      $('waitT').textContent = '대기실';
-      $('waitB').textContent = basis || fallback || !gotOri
-        ? '모두 들어오면 게임 시작을 눌러요.'
-        : '모두 들어오면 게임 시작을 눌러요.\n먼저 낚싯대 자세를 맞춰 두면 바로 던질 수 있어요.';
-      $('btnGo').textContent = '게임 시작';
-    }
-    if (fallback) chips.push(['조작', '버튼']);
-    else if (gotOri) chips.push(['낚싯대 자세', basis ? '맞춤' : '아직']);
-    const box = $('waitChips');
-    box.textContent = '';
-    for (const [k, v] of chips) {
-      const c = document.createElement('span');
-      c.className = 'chip';
-      c.append(k);
-      const b = document.createElement('b');
-      b.textContent = v;
-      c.append(b);
-      box.append(c);
-    }
-    const canCal = gotOri && !fallback;
-    $('btnCalLobby').classList.toggle('hidden', !canCal);
-    $('btnCalLobby').textContent = basis ? '낚싯대 자세 다시 맞추기' : '낚싯대 자세 맞추기';
-    show('vWait');
+  // 큰 화면이 아직 호수를 열지 않았을 때(막 켜지는 중이거나 다시 연결 중)
+  function showHold() {
+    mode = 'hold';
+    $('msgT').textContent = '큰 화면을 기다리는 중…';
+    $('msgB').textContent = '큰 화면이 켜져 있으면 곧 바로 낚시할 수 있어요.';
+    const fb = $('btnFallback');
+    if (fb) fb.remove();
+    show('vMsg');
   }
 
   function render() {
@@ -808,17 +780,19 @@
     if (mode === 'start' || mode === 'connecting' || mode === 'msg') return;
     if (mode === 'cal' || mode === 'count') return;
     if (playing()) {
+      // 센서가 있으면 먼저 낚싯대 자세를 맞추고, 끝나면 바로 낚시합니다(대기실 없음).
       if (!basis && gotOri && !fallback) {
         openCal();
         return;
       }
+      if (fallback) fallbackCalibrate();
       if (mode !== 'play') showPlay();
       else updatePlay();
       return;
     }
-    showWait();
+    showHold();
   }
-  // 센서 안내를 닫고 대기실(아직 방 배정 전이면 연결 중 화면)로 돌아갑니다.
+  // 센서 안내를 닫고 낚시 화면(아직 방 배정 전이면 연결 중 화면)으로 돌아갑니다.
   function leaveSensorHelp() {
     sensorHelpOn = false;
     if (!me) {
@@ -856,11 +830,8 @@
     $('vMsg').append(b);
   }
 
-  // 남은 시간
   setInterval(() => {
     if (mode !== 'play') return;
-    const left = Math.max(0, (state.left || 0) - (performance.now() - stateAt) / 1000);
-    $('myTime').textContent = state.overtime ? '연장' : `${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, '0')}`;
     if (myStage() === 'wait' && performance.now() - nibbleAt > 600) $('bob').classList.remove('nib');
   }, 250);
 
@@ -886,7 +857,7 @@
     $('me').textContent = p.name;
     if (pendingCal) {
       pendingCal = false;
-      send('calibrate', {});
+      send('calibrate', { e0: basis ? round(basis.e0, 1) : 25 });
     }
     // 센서 안내 중이면 안내를 그대로 둡니다(다시 연결 안내 등에 덮였으면 다시 띄움).
     if (sensorHelpOn) {
@@ -916,7 +887,8 @@
     const prevPhase = state.phase;
     state = s && typeof s === 'object' ? s : { phase: 'lobby' };
     stateAt = performance.now();
-    if (state.phase === 'playing' && prevPhase !== 'playing') {
+    const open = (p) => p === 'open' || p === 'playing';
+    if (open(state.phase) && !open(prevPhase)) {
       lastStage = null;
       cast.msg = '';
       $('card').classList.remove('on');
@@ -929,7 +901,7 @@
     if (kind === 'calibrated') return;
     if (kind === 'landed') {
       plop();
-      if (navigator.vibrate) navigator.vibrate(25);
+      vib(25);
       cast.msg = c.dist ? `${c.dist}m 날아갔어요` : '';
       drawCastHint();
     } else if (kind === 'nibble') {
@@ -939,8 +911,9 @@
       void b.getBoundingClientRect();
       b.classList.add('nib');
       nibbleSnd();
-      if (navigator.vibrate) navigator.vibrate(28);
-      setStatus('톡… 톡…', '아직이에요! 쏙 들어갈 때까지 참아요.', '');
+      // 짧게 톡(Android 진동). iPhone 은 진동이 없어 소리와 화면 깜빡임으로 알립니다.
+      buzz(28, 'nib');
+      setStatus('톡톡… 참아요', '아직이에요! 찌가 쏙 들어갈 때까지 기다려요.', '');
     } else if (kind === 'hooked') {
       hookedSnd();
       buzz([140, 50, 90], 'go');
@@ -952,6 +925,9 @@
     } else if (kind === 'slack') {
       buzz([50, 50, 50]);
       setStatus('줄이 느슨해요!', '빨리 감아요! 바늘이 빠지려고 해요.', 'hot');
+    } else if (kind === 'back') {
+      cast.msg = '다 감았어요. 다시 던져요';
+      drawCastHint();
     }
   });
 
@@ -961,7 +937,7 @@
     // 부르르르: 짧고 센 진동을 연달아
     buzz([on, 35, on, 35, on, 35, on, 35, on + 60], 'bite');
     biteSnd();
-    setStatus('지금 챔질!', '폰을 위로 확 들어 올려요!', 'hot');
+    setStatus('지금! 위로 확', '폰을 위로 확 들어 올려요!', 'hot');
     $('bob').classList.add('under');
   });
 
@@ -974,9 +950,7 @@
     }
     fight = { value: Number(d.value) || 0, dist: Number(d.dist) || 0, drag: Boolean(d.drag), run: Boolean(d.run), side: Number(d.side) || 0, at: performance.now() };
     if (mode === 'play' && myStage() === 'fight') drawTension();
-    if (fight.value > 0.8 && navigator.vibrate) {
-      try { navigator.vibrate(Math.round(Math.min(120, 50 + (fight.value - 0.8) * 400))); } catch (e) {}
-    }
+    if (fight.value > 0.8) vib(Math.round(Math.min(120, 50 + (fight.value - 0.8) * 400)));
     dragSound(fight.drag, fight.value);
   });
 
@@ -987,7 +961,8 @@
       const big = (r.weight || 0) >= 2.5;
       fanfare(big);
       buzz(big ? [60, 40, 60, 40, 260] : [60, 40, 160], 'go');
-      showCard('good', r.best && r.count > 1 ? '개인 최고!' : 'CATCH', r.fish,
+      setStatus(`잡았다! ${Number(r.weight).toFixed(1)}kg ${r.fish}`, r.record ? '오늘의 최대어예요!' : '놓아주고 다시 던져요.', 'good');
+      showCard('good', r.record ? '오늘의 최대어!' : r.best && r.count > 1 ? '개인 최고!' : '잡았다!', r.fish,
         `${Number(r.weight).toFixed(1)}<small>kg</small>`, `${r.length ? `${Math.round(r.length * 100)}cm · ` : ''}지금까지 ${r.count || 1}마리, 총 ${(r.total || 0).toFixed(1)}kg`, 3400);
     } else {
       if (r.kind === 'break') snapSnd();
@@ -1043,12 +1018,6 @@
       }
     }, SENSOR_WAIT_MS);
   });
-  $('btnGo').addEventListener('click', () => {
-    audio();
-    if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
-    send('start_game', {});
-  });
-  $('btnCalLobby').addEventListener('click', () => { audio(); openCal(); });
   $('btnRecal').addEventListener('click', () => { audio(); openCal(); });
   $('btnReady').addEventListener('click', () => { audio(); startCountdown(); });
   $('btnCalCancel').addEventListener('click', () => {
@@ -1057,73 +1026,104 @@
     render();
   });
 
-  // ---------- 시험용 버튼(센서 없음): 같은 전송 길을 씁니다 ----------
-  const charge = { on: false, t0: 0, raf: 0 };
-  function chargePower(t) {
-    const u = ((t - charge.t0) / 1200) % 2;
-    return u < 1 ? u : 2 - u;
+  // ---------- 시험용 버튼(센서 없음, 또는 &debug): 폰 동작과 같은 전송 길을 씁니다 ----------
+  // 방향 슬라이더가 가짜 낚싯대 방향(pose)이 되어 큰 화면의 조준선이 그대로 움직입니다.
+  let fbCalSent = false;
+  let fbPoseTimer = null;
+  function fallbackCalibrate() {
+    if (!me || fbCalSent) return;
+    if (send('calibrate', { e0: 25 })) fbCalSent = true;
+    if (!fbPoseTimer) fbPoseTimer = setInterval(fallbackPose, 60);
   }
-  function chargeLoop() {
-    if (!charge.on) return;
-    const p = chargePower(performance.now());
-    $('castPow').style.width = `${p * 100}%`;
-    // 버튼으로 할 때도 낚싯대가 뒤로 젖혀지는 모습을 보여 줍니다.
-    drawGauge(35 + p * 120);
-    charge.raf = requestAnimationFrame(chargeLoop);
+  function fallbackPose() {
+    if (!fallback || !playing()) return;
+    const yaw = (Number($('aim').value) || 0) * RD;
+    const st = myStage();
+    // 감는 중·파이팅에는 조금 들어 올린 자세
+    const e = (st === 'fight' ? 38 : 25) * RD;
+    send('pose', { s: r3([Math.sin(yaw) * Math.cos(e), Math.sin(e), Math.cos(yaw) * Math.cos(e)]) }, true);
   }
-  function startCharge() {
-    if ($('btnCast').disabled || charge.on) return;
+  function padCast() {
+    if ($('btnCast').disabled) return;
     audio();
-    charge.on = true;
-    charge.t0 = performance.now();
-    chargeLoop();
-  }
-  function releaseCharge() {
-    if (!charge.on) return;
-    charge.on = false;
-    cancelAnimationFrame(charge.raf);
-    const p = clamp(chargePower(performance.now()), 0.08, 1);
-    $('castPow').style.width = '0';
-    drawGauge(20);
-    setTimeout(() => drawGauge(35), 300);
+    const p = clamp((Number($('pow').value) || 0) / 100, 0.05, 1);
+    drawGauge(150);
+    setTimeout(() => drawGauge(20), 160);
+    setTimeout(() => drawGauge(35), 500);
     deliverCast(p, Number($('aim').value) || 0, 0);
   }
-  $('btnCast').addEventListener('pointerdown', (e) => { e.preventDefault(); startCharge(); });
-  $('btnCast').addEventListener('pointerup', releaseCharge);
-  $('btnCast').addEventListener('pointerleave', releaseCharge);
-  $('btnHook').addEventListener('pointerdown', (e) => {
-    e.preventDefault();
+  function padHook() {
     if ($('btnHook').disabled) return;
     audio();
     deliverHook(650, 0, myStage());
-  });
-  const keyReel = { on: false, last: 0 };
-  function keyReelLoop() {
-    if (!keyReel.on) return;
-    const now = performance.now();
-    addTurns(((now - keyReel.last) / 1000) * 2.4);
-    keyReel.last = now;
-    setArm((reel.total * TAU) % TAU);
-    requestAnimationFrame(keyReelLoop);
   }
+  // 감기(누르고 있는 동안 초당 2.4바퀴)
+  const holdReel = { on: false, last: 0 };
+  function holdReelLoop() {
+    if (!holdReel.on) return;
+    const now = performance.now();
+    addTurns(((now - holdReel.last) / 1000) * 2.4);
+    holdReel.last = now;
+    setArm((reel.total * TAU) % TAU);
+    requestAnimationFrame(holdReelLoop);
+  }
+  function startHoldReel() {
+    if ($('btnReel').disabled || holdReel.on) return;
+    audio();
+    holdReel.on = true;
+    holdReel.last = performance.now();
+    $('btnReel').classList.add('on');
+    holdReelLoop();
+  }
+  function stopHoldReel() {
+    holdReel.on = false;
+    $('btnReel').classList.remove('on');
+  }
+  // 툭: 핸들을 반 바퀴만 살짝(찌가 톡 움직여 물고기 눈길을 끕니다)
+  function padTwitch() {
+    if ($('btnTwitch').disabled) return;
+    audio();
+    addTurns(0.5);
+    tick(1100);
+  }
+  function syncSliders() {
+    const a = Number($('aim').value) || 0;
+    $('aimV').textContent = a === 0 ? '정면' : `${a < 0 ? '왼쪽' : '오른쪽'} ${Math.abs(a)}°`;
+    $('powV').textContent = `${$('pow').value}%`;
+  }
+  $('aim').addEventListener('input', syncSliders);
+  $('pow').addEventListener('input', syncSliders);
+  syncSliders();
+  $('btnCast').addEventListener('click', padCast);
+  $('btnHook').addEventListener('pointerdown', (e) => { e.preventDefault(); padHook(); });
+  $('btnTwitch').addEventListener('pointerdown', (e) => { e.preventDefault(); padTwitch(); });
+  $('btnReel').addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    try { $('btnReel').setPointerCapture(e.pointerId); } catch (err) {}
+    startHoldReel();
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) $('btnReel').addEventListener(ev, stopHoldReel);
+  // 키보드(PC 에서 폰 화면을 띄워 시험할 때): C 던지기 · Space/H 챔질 · R 감기(누르고 있기) · T 툭 · ←→ 방향 · ↑↓ 힘
   document.addEventListener('keydown', (e) => {
     if (mode !== 'play' || e.repeat) return;
-    if (e.code === 'KeyC') startCharge();
+    if (e.code === 'KeyC') padCast();
     else if (e.code === 'Space' || e.code === 'KeyH') {
       e.preventDefault();
-      if (!$('btnHook').disabled) { audio(); deliverHook(650, 0, myStage()); }
-    } else if (e.code === 'KeyR') {
-      keyReel.on = true;
-      keyReel.last = performance.now();
-      keyReelLoop();
-    } else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+      padHook();
+    } else if (e.code === 'KeyR' || e.code === 'KeyJ') startHoldReel();
+    else if (e.code === 'KeyT') padTwitch();
+    else if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
       const a = $('aim');
       a.value = clamp(Number(a.value) + (e.code === 'ArrowLeft' ? -5 : 5), -AIM_MAX, AIM_MAX);
+      syncSliders();
+    } else if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+      const p = $('pow');
+      p.value = clamp(Number(p.value) + (e.code === 'ArrowUp' ? 5 : -5), 5, 100);
+      syncSliders();
     }
   });
   document.addEventListener('keyup', (e) => {
-    if (e.code === 'KeyC') releaseCharge();
-    if (e.code === 'KeyR') keyReel.on = false;
+    if (e.code === 'KeyR' || e.code === 'KeyJ') stopHoldReel();
   });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && mode !== 'start' && navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});

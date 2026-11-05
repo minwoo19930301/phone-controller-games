@@ -1,4 +1,4 @@
-// 배스 낚시 큰 화면 소리. 파일 없이 WebAudio 로 만듭니다(물소리, 새소리, 풍덩, 드랙, 줄 끊김, 팡파르).
+// 배스 낚시 큰 화면 소리. 파일 없이 WebAudio 로 만듭니다(물소리, 새소리, 풍덩, 톡톡, 드랙, 줄 끊김, 잡았다).
 let actx = null;
 let master = null;
 let noiseBuf = null;
@@ -151,17 +151,19 @@ setInterval(() => {
 
 export const sfx = {
   join: () => { tone(880, 0.12, { gain: 0.18, type: 'triangle' }); tone(1320, 0.16, { gain: 0.15, type: 'triangle', at: 0.09 }); },
-  start: () => { tone(660, 0.18, { gain: 0.2, type: 'triangle' }); tone(990, 0.3, { gain: 0.2, type: 'triangle', at: 0.16 }); },
+  leave: () => { tone(660, 0.14, { gain: 0.12, type: 'triangle' }); tone(440, 0.18, { gain: 0.1, type: 'triangle', at: 0.1 }); },
   whoosh: (p = 0.6) => {
     noise(0.35 + p * 0.2, { freq: 700, sweep: 2600, q: 0.7, gain: 0.18 + p * 0.25, attack: 0.08, curve: 2 });
     // 줄 풀리는 소리
     for (let i = 0; i < 10; i++) noise(0.03, { freq: 5200, q: 3, gain: 0.05, at: 0.1 + i * (0.05 + p * 0.03) });
   },
-  reelFast: () => { for (let i = 0; i < 8; i++) noise(0.025, { freq: 4200, q: 4, gain: 0.08, at: i * 0.045 }); },
+  reelIn: () => { for (let i = 0; i < 16; i++) noise(0.022, { freq: 4200, q: 4, gain: 0.07, at: i * 0.055 }); },
   plop: (v = 0.7) => {
     tone(520, 0.12, { gain: 0.25 * v, to: 180, type: 'sine' });
     noise(0.35, { freq: 900, q: 0.6, gain: 0.22 * v, attack: 0.01, curve: 4 });
   },
+  twitch: () => { tone(760, 0.06, { gain: 0.08, to: 430 }); noise(0.06, { freq: 1800, q: 1.4, gain: 0.05 }); },
+  rise: () => { tone(980, 0.05, { gain: 0.05, to: 620 }); noise(0.12, { freq: 1500, q: 1, gain: 0.035, attack: 0.004 }); },
   nibble: () => { tone(380, 0.07, { gain: 0.14, to: 260 }); noise(0.08, { freq: 1500, q: 1.2, gain: 0.06 }); },
   bite: () => {
     tone(300, 0.22, { gain: 0.28, to: 90 });
@@ -190,21 +192,16 @@ export const sfx = {
     tone(1800, 0.12, { gain: 0.2, type: 'square', to: 300 });
     tone(120, 0.3, { gain: 0.2, type: 'triangle', at: 0.04, to: 50 });
   },
-  catchFish: (w = 1) => {
+  catchFish: (w = 1, record = false) => {
     noise(0.6, { freq: 800, q: 0.5, gain: 0.35, attack: 0.01, curve: 3 });
-    const big = w >= 2.5;
+    const big = w >= 2.5 || record;
     const notes = big ? [523, 659, 784, 1047, 1319] : [587, 740, 880, 1175];
     notes.forEach((f, i) => tone(f, 0.32, { gain: 0.16, type: 'triangle', at: 0.25 + i * 0.09 }));
     if (big) for (let i = 0; i < 26; i++) noise(0.04, { freq: 1400 + Math.random() * 900, q: 1, gain: 0.08, at: 0.5 + Math.random() * 1.6 });
+    if (record) [784, 1047, 1319].forEach((f) => tone(f, 1.0, { gain: 0.1, type: 'triangle', at: 0.75 }));
   },
-  beep: (urgent) => tone(urgent ? 1320 : 990, 0.12, { gain: 0.2, type: 'square' }),
-  horn: () => {
-    tone(392, 0.9, { gain: 0.22, type: 'sawtooth', attack: 0.03 });
-    tone(523, 0.9, { gain: 0.14, type: 'sawtooth', attack: 0.03 });
-  },
-  fanfare: () => {
-    [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.4, { gain: 0.18, type: 'triangle', at: i * 0.12 }));
-    [784, 1047, 1319].forEach((f) => tone(f, 1.1, { gain: 0.12, type: 'triangle', at: 0.55 }));
-    for (let i = 0; i < 40; i++) noise(0.04, { freq: 1300 + Math.random() * 900, q: 1, gain: 0.08, at: 0.5 + Math.random() * 2 });
+  release: () => {
+    noise(0.45, { freq: 1000, q: 0.5, gain: 0.26, attack: 0.008, curve: 3.5 });
+    tone(330, 0.16, { gain: 0.08, to: 160, at: 0.02 });
   }
 };
