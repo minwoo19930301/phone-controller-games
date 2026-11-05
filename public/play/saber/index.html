@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#06070f">
+<title>광선검 컨트롤러</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<style>
+  :root { --c: #ff5a5f; --bg: #06070f; --fg: #f3f4f9; --dim: #9aa6bf; --line: rgba(255,255,255,.12); --glow: 0; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+    font-family: "Pretendard Variable", Pretendard, -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  body { display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top) + 10px) 18px calc(env(safe-area-inset-bottom) + 16px);
+    background: radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--c) 20%, transparent), transparent 70%), var(--bg); transition: background .4s; }
+  body.lit { background: radial-gradient(90% 70% at 50% 45%, color-mix(in srgb, var(--c) calc(28% + var(--glow) * 30%), transparent), transparent 75%),
+    linear-gradient(180deg, color-mix(in srgb, var(--c) 10%, #06070f), #06070f 70%); }
+  header { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; height: 44px; }
+  .me { font-family: Anton, Impact, sans-serif; font-size: 26px; padding: 2px 14px; border-radius: 999px; background: var(--c); color: #0b0f17; }
+  .room { flex: 1; color: var(--dim); font-size: 13px; letter-spacing: .1em; }
+  .recal { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.08); color: var(--fg); border: 1.5px solid var(--line);
+    font-size: 13px; font-weight: 700; }
+  .hidden { display: none !important; }
+  .banner { position: relative; z-index: 2; margin: 6px 0 0; padding: 9px 12px; border-radius: 12px; background: rgba(255,90,95,.14); color: #ffb3b5; font-size: 13px; text-align: center; }
+  main { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  .view.on { display: flex; }
+  .center { align-items: center; justify-content: center; text-align: center; gap: 14px; }
+  h1 { margin: 0; font-size: 30px; line-height: 1.25; letter-spacing: -.02em; }
+  p { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.55; white-space: pre-line; }
+  .note { font-size: 13px; color: #ffcf8a; }
+  button { font: inherit; border: 0; cursor: pointer; }
+  .primary { width: 100%; padding: 19px; border-radius: 18px; background: var(--c); color: #0b0f17; font-size: 21px; font-weight: 800;
+    box-shadow: 0 0 30px color-mix(in srgb, var(--c) 35%, transparent); }
+  .ghost { width: 100%; padding: 14px; border-radius: 16px; background: transparent; color: var(--fg); border: 1.5px solid var(--line); font-size: 16px; font-weight: 700; }
+  .art { width: 120px; height: 200px; overflow: visible; }
+  .big { font-size: 40px; font-weight: 900; letter-spacing: -.03em; }
+  .chips { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .chip { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); font-size: 14px; color: var(--dim); }
+  .chip b { color: var(--fg); font-size: 16px; margin-left: 4px; }
+  .chip.ok b { color: #7ef0a0; }
+  .practice { min-height: 22px; font-size: 15px; color: var(--fg); }
+  .count { font-family: Anton, Impact, sans-serif; font-size: 96px; line-height: 1; color: var(--c); text-shadow: 0 0 30px var(--c); }
+
+  /* 칼 그림(시작·자세 맞추기) */
+  .beam-art { filter: drop-shadow(0 0 10px var(--c)); animation: hum 0.09s infinite alternate; }
+  @keyframes hum { from { opacity: .92; } to { opacity: 1; } }
+
+  /* 경기 중 */
+  .hudrow { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; margin: 8px 0 6px; padding: 12px 16px;
+    border-radius: 20px; background: rgba(0,0,0,.35); border: 1px solid var(--line); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+  .sc { display: flex; align-items: baseline; gap: 4px; }
+  .sc b { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 46px; line-height: 1; }
+  .sc span { color: var(--dim); font-size: 14px; font-weight: 700; }
+  .hp { display: flex; flex-direction: column; gap: 6px; }
+  .hp-top { display: flex; justify-content: space-between; font-size: 13px; font-weight: 800; color: var(--dim); }
+  .hp-top b { color: var(--fg); }
+  .hpbar { height: 14px; border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden; }
+  .hpbar i { display: block; height: 100%; width: 100%; border-radius: 99px; background: var(--c); box-shadow: 0 0 12px var(--c); transition: width .25s; }
+  .hpbar.low i { background: #ff4a5a; box-shadow: 0 0 12px #ff4a5a; animation: blink .4s infinite alternate; }
+  @keyframes blink { to { opacity: .4; } }
+  .stage { flex: 1; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 0; text-align: center; }
+  .blade { position: relative; width: 34px; flex: 1; max-height: 52vh; min-height: 120px; border-radius: 20px;
+    background: linear-gradient(90deg, transparent, #fff 30%, #fff 70%, transparent);
+    box-shadow: 0 0 calc(18px + var(--glow) * 30px) calc(8px + var(--glow) * 10px) var(--c), 0 0 calc(60px + var(--glow) * 60px) calc(16px + var(--glow) * 24px) color-mix(in srgb, var(--c) 60%, transparent);
+    transform-origin: 50% 100%; transform: scaleY(var(--len, 0)); transition: transform .32s cubic-bezier(.2, 1.2, .4, 1); animation: hum .07s infinite alternate; }
+  .hilt { width: 46px; height: 64px; margin-top: -6px; border-radius: 8px 8px 12px 12px;
+    background: linear-gradient(90deg, #555c66, #d7dce4 35%, #8a919c 60%, #3b4048);
+    box-shadow: inset 0 -18px 0 rgba(0,0,0,.35), 0 8px 24px rgba(0,0,0,.5); position: relative; }
+  .hilt::before { content: ""; position: absolute; left: 8px; right: 8px; top: 18px; height: 6px; border-radius: 3px; background: var(--c); box-shadow: 0 0 10px var(--c); }
+  .hilt::after { content: ""; position: absolute; left: 50%; top: 32px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
+  .status { min-height: 48px; font-size: 17px; font-weight: 700; color: var(--fg); }
+  .status.warn { color: #ffd0f6; }
+  .stats { min-height: 34px; }
+  .cue { position: absolute; inset: 0; pointer-events: none; border-radius: 24px; box-shadow: inset 0 0 0 0 #ff3ddf; }
+  .cue.on { animation: cue .5s ease-out; }
+  @keyframes cue { from { box-shadow: inset 0 0 60px 20px rgba(255,61,223,.8); } to { box-shadow: inset 0 0 0 0 transparent; } }
+
+  /* 센서 없는 PC 시험용 */
+  .pad { position: relative; height: 34vh; min-height: 150px; border-radius: 20px; border: 1.5px dashed rgba(255,255,255,.25);
+    background: radial-gradient(circle at 50% 100%, color-mix(in srgb, var(--c) 18%, transparent), transparent 70%); touch-action: none; }
+  .pad .dotp { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: var(--c); box-shadow: 0 0 16px var(--c); }
+  .pad span { position: absolute; left: 0; right: 0; bottom: 10px; text-align: center; font-size: 13px; color: var(--dim); }
+  .pads { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; margin-top: 10px; }
+  .pads button { padding: 16px 0; border-radius: 16px; background: rgba(255,255,255,.08); color: var(--fg); border: 1.5px solid var(--line); font-size: 17px; font-weight: 800; }
+  .pads button:first-child { background: var(--c); color: #0b0f17; border-color: var(--c); }
+  .pads-hint { margin-top: 8px; font-size: 12px; text-align: center; }
+
+  #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 5; }
+  #flash.go { animation: flash .45s ease-out; }
+  #flash.deflect { background: #fff; }
+  #flash.hurt { background: radial-gradient(circle, rgba(255,40,70,.2), rgba(255,20,60,.9)); }
+  #flash.kill { background: radial-gradient(circle, #fff3c4, #ff8a2a); }
+  #flash.cue { background: radial-gradient(circle, transparent 40%, rgba(255,61,223,.75)); }
+  @keyframes flash { from { opacity: .85; } to { opacity: 0; } }
+  .debug { position: fixed; left: 8px; right: 8px; bottom: calc(env(safe-area-inset-bottom) + 4px); font: 11px ui-monospace, monospace;
+    color: rgba(255,255,255,.45); white-space: pre-wrap; pointer-events: none; z-index: 6; }
+</style>
+</head>
+<body>
+<header>
+  <span class="me" id="me">…</span>
+  <span class="room" id="room"></span>
+  <button class="recal hidden" id="btnRecal">다시 맞추기</button>
+</header>
+<div class="banner hidden" id="banner"></div>
+<main>
+  <!-- 처음 -->
+  <section class="view center on" id="vStart">
+    <svg class="art beam-art" viewBox="0 0 120 200" aria-hidden="true">
+      <rect x="52" y="8" width="16" height="120" rx="8" fill="var(--c)" opacity=".55"/>
+      <rect x="56" y="10" width="8" height="116" rx="4" fill="#fff"/>
+      <rect x="47" y="126" width="26" height="66" rx="5" fill="#aeb4be"/>
+      <rect x="47" y="146" width="26" height="6" fill="var(--c)"/>
+      <rect x="47" y="160" width="26" height="28" rx="3" fill="#1a1c21"/>
+      <circle cx="60" cy="138" r="3.5" fill="var(--c)"/>
+    </svg>
+    <h1>폰이 광선검이 됩니다</h1>
+    <p>폰을 칼자루처럼 세워 쥐면
+화면 속 칼이 폰 각도를 그대로 따라요.
+칼 소리는 폰에서 나니 소리를 켜 주세요.</p>
+    <p class="note hidden" id="httpNote">https 주소가 아니라서 동작 센서가 꺼질 수 있어요.
+그때는 화면의 버튼으로 할 수 있어요.</p>
+    <button class="primary" id="btnStart" style="margin-top:10px">시작하기</button>
+  </section>
+
+  <!-- 메시지 -->
+  <section class="view center" id="vMsg"><h1 id="msgT"></h1><p id="msgB"></p><button class="ghost hidden" id="btnMsg" style="max-width:280px"></button></section>
+
+  <!-- 대기실 · 경기 끝 · 관전 -->
+  <section class="view center" id="vWait">
+    <div class="big" id="waitT">대기실</div>
+    <p id="waitB"></p>
+    <div class="chips" id="waitChips"></div>
+    <div class="practice" id="practice"></div>
+    <button class="primary" id="btnGo" style="margin-top:8px">게임 시작</button>
+    <button class="ghost" id="btnCalLobby">칼자루 자세 맞추기</button>
+  </section>
+
+  <!-- 자세 맞추기 -->
+  <section class="view center" id="vCal">
+    <svg class="art" viewBox="0 0 120 200" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="40" y="70" width="40" height="80" rx="9" fill="#0b0f17" stroke="#fff" stroke-width="3"/>
+      <rect x="46" y="80" width="28" height="56" rx="4" fill="var(--c)" opacity=".4"/>
+      <path d="M60 66V8" stroke="var(--c)" stroke-width="6" opacity=".8"/>
+      <path d="M60 66V8" stroke="#fff" stroke-width="2"/>
+      <path d="M34 128c-8 4-8 22 2 28h48c10-6 10-24 2-28z" fill="#e2ae86"/>
+      <path d="M60 176l-10 10M60 176l10 10" stroke="#9aa6bf" stroke-width="2.5"/>
+      <text x="60" y="198" fill="#9aa6bf" font-size="11" text-anchor="middle">나</text>
+    </svg>
+    <div class="count hidden" id="calN">3</div>
+    <h1 id="calT">칼자루처럼 쥡니다</h1>
+    <p id="calB">폰을 칼자루처럼 세워 쥐고
+화면이 나를 보게 한 뒤 준비를 누릅니다.</p>
+    <button class="primary" id="btnReady" style="margin-top:6px">준비</button>
+    <button class="ghost hidden" id="btnCalCancel">돌아가기</button>
+  </section>
+
+  <!-- 경기 중 -->
+  <section class="view" id="vPlay">
+    <div class="hudrow">
+      <div class="sc"><b id="score">0</b><span>점</span></div>
+      <div class="hp">
+        <div class="hp-top"><span>체력</span><b id="hpT">100</b></div>
+        <div class="hpbar" id="hpBar"><i id="hpFill"></i></div>
+      </div>
+    </div>
+    <div class="stage">
+      <div class="cue" id="cue"></div>
+      <div class="blade" id="blade"></div>
+      <div class="hilt"></div>
+      <div class="status" id="status">곧 시작해요</div>
+      <div class="chips stats" id="stats"></div>
+    </div>
+    <div class="hidden" id="fallback">
+      <div class="pad" id="pad"><div class="dotp" id="padDot"></div><span>끌어서 칼 방향 바꾸기 (위 = 칼 세우기)</span></div>
+      <div class="pads">
+        <button id="btnSwing">휘두르기</button>
+        <button id="btnGuard">가운데로</button>
+      </div>
+      <p class="pads-hint" id="fallbackHint">동작 센서가 없어 버튼으로 해요. (키보드: Space 휘두르기 · 방향키)</p>
+    </div>
+  </section>
+</main>
+<div id="flash"></div>
+<div class="debug" id="debug"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="controller.js"></script>
+</body>
+</html>

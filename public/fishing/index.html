@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#10202a">
+<title>배스 낚시</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
+</script>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="vignette"></div>
+
+<!-- 경기 중 -->
+<div id="hud" class="hud hidden">
+  <div class="board" id="board"></div>
+  <div class="timer" id="timer">
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <circle cx="50" cy="50" r="46" class="track"/>
+      <circle cx="50" cy="50" r="46" class="arc" id="timeArc"/>
+    </svg>
+    <div class="tm"><span>남은 시간</span><b id="timeNum">3:00</b></div>
+  </div>
+</div>
+<div id="tags" class="tags"></div>
+<div id="cards" class="cards"></div>
+
+<div id="join" class="join hidden">
+  <img id="qrMini" alt="">
+  <div><span class="join-k">참가</span><b id="codeMini">----</b></div>
+</div>
+
+<div id="catch" class="catch">
+  <div class="catch-fish" id="catchFish"></div>
+  <div class="catch-info">
+    <div class="catch-top"><span class="catch-who" id="catchWho">1P</span><span class="catch-badge hidden" id="catchBadge">개인 최고</span></div>
+    <div class="catch-name" id="catchName">큰입배스</div>
+    <div class="catch-en" id="catchEn">LARGEMOUTH BASS</div>
+    <div class="catch-row"><b id="catchKg">0.0<small>kg</small></b><span id="catchLen">0cm</span></div>
+  </div>
+</div>
+
+<div id="call" class="call"><div class="call-main" id="callMain"></div><div class="call-sub" id="callSub"></div></div>
+
+<!-- 대기실 -->
+<section id="lobby" class="screen">
+  <div class="lobby">
+    <div class="lobby-copy">
+      <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 동시 · 3분</div>
+      <h1 class="wordmark">BASS<br>FISHING</h1>
+      <p class="lede">폰이 낚싯대가 됩니다. 노을 지는 호수에서 3분 동안 다 같이 던지고, 걸고, 감아요. 잡은 물고기 무게를 모두 더해 순위를 정해요.</p>
+      <ol class="steps">
+        <li>
+          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M10 40L30 8"/><path d="M30 8c6 6 9 14 8 24"/><circle cx="38" cy="36" r="3"/><path d="M16 14c-4 3-6 7-6 11" stroke-dasharray="3 4"/><path d="M8 22l2 4 4-2"/></svg>
+          <div><b>뒤로 젖혔다 휙</b><span>폰을 뒤로 젖혔다가 앞으로 빠르게 던져요. 세게 던질수록 멀리 가요.</span></div>
+        </li>
+        <li>
+          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 30h32"/><circle cx="24" cy="34" r="5"/><path d="M24 29v-8"/><path d="M16 12l8-6 8 6"/><path d="M24 6v12"/></svg>
+          <div><b>찌가 쏙 들어가면 챔질</b><span>폰이 부르르 떨면 바로 위로 확 들어 올려요. 톡톡은 참아요.</span></div>
+        </li>
+        <li>
+          <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="15"/><circle cx="24" cy="24" r="3"/><path d="M24 24l9-9"/><circle cx="34" cy="14" r="3.5"/><path d="M40 30a17 17 0 0 1-8 10" /><path d="M32 40l1-5 4 3"/></svg>
+          <div><b>원을 그려 감기</b><span>폰 화면의 릴을 손가락으로 돌려요. 장력이 빨개지면 잠깐 멈춰요.</span></div>
+        </li>
+      </ol>
+      <div class="tip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-4 4-8 6-8 11a8 8 0 0 0 16 0c0-5-4-7-8-11z"/></svg>연잎과 갈대 근처에 큰 배스가 숨어 있어요</div>
+      <div class="slots" id="slots"></div>
+      <div class="hint"><kbd>Enter</kbd> 게임 시작 <span class="dot"></span> 시험용 키: <kbd>C</kbd> 캐스팅 <kbd>Space</kbd> 챔질 <kbd>R</kbd> 감기 <kbd>A</kbd><kbd>D</kbd> 눕히기 <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
+    </div>
+    <div class="qr-card">
+      <img id="qr" alt="참가 QR">
+      <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
+      <div class="qr-url" id="url"></div>
+      <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 동작 센서가 꺼져 있어요. https 주소에서 열어 주세요.</div>
+    </div>
+  </div>
+  <div class="msg" id="msg"></div>
+</section>
+
+<!-- 경기 끝 -->
+<section id="over" class="screen hidden">
+  <div class="over">
+    <div class="eyebrow">FINAL · 조과 집계</div>
+    <h1 class="wordmark sm">오늘의 조과</h1>
+    <div class="podium" id="podium"></div>
+    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b></div>
+  </div>
+</section>
+
+<section id="replaced" class="screen hidden">
+  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+</section>
+
+<pre id="debug" class="debug hidden"></pre>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>

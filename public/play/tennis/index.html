@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a1626">
+<title>테니스 컨트롤러</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<style>
+  :root { --c: #ff5a5f; --bg: #0a1626; --fg: #f3f4f7; --dim: #9aabc4; --line: rgba(255,255,255,.12); --court: #2c5a93; --ball: #d9f24a; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+    font-family: "Pretendard Variable", Pretendard, -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  body { display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top) + 10px) 18px calc(env(safe-area-inset-bottom) + 16px);
+    background: radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--c) 22%, transparent), transparent 70%),
+      radial-gradient(90% 40% at 50% 100%, color-mix(in srgb, var(--court) 38%, transparent), transparent 70%), var(--bg); }
+  header { display: flex; align-items: center; gap: 10px; height: 44px; }
+  .me { font-family: Anton, Impact, sans-serif; font-size: 26px; padding: 2px 14px; border-radius: 999px; background: var(--c); color: #0b0f17; }
+  .room { flex: 1; color: var(--dim); font-size: 13px; letter-spacing: .1em; }
+  .recal { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); color: var(--fg); border: 1.5px solid var(--line);
+    font-size: 13px; font-weight: 700; }
+  .hidden { display: none !important; }
+  .banner { margin: 6px 0 0; padding: 9px 12px; border-radius: 12px; background: rgba(255,90,95,.14); color: #ffb3b5; font-size: 13px; text-align: center; }
+  main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  .view.on { display: flex; }
+  .center { align-items: center; justify-content: center; text-align: center; gap: 14px; }
+  h1 { margin: 0; font-size: 30px; line-height: 1.25; letter-spacing: -.02em; }
+  p { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.55; white-space: pre-line; }
+  .note { font-size: 13px; color: #ffcf8a; }
+  button { font: inherit; border: 0; cursor: pointer; }
+  .primary { width: 100%; padding: 19px; border-radius: 18px; background: var(--c); color: #0b0f17; font-size: 21px; font-weight: 800; }
+  .ghost { width: 100%; padding: 14px; border-radius: 16px; background: transparent; color: var(--fg); border: 1.5px solid var(--line); font-size: 16px; font-weight: 700; }
+  .art { width: 150px; height: 190px; }
+  .big { font-size: 40px; font-weight: 900; letter-spacing: -.03em; }
+  .chips { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .chip { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); font-size: 14px; color: var(--dim); }
+  .chip b { color: var(--fg); font-size: 16px; margin-left: 4px; }
+  .chip.ok b { color: #7ef0a0; }
+  .legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; }
+  .legend div { padding: 10px 4px 9px; border-radius: 14px; background: rgba(255,255,255,.05); border: 1px solid var(--line); }
+  .legend b { display: block; font-size: 15px; }
+  .legend span { font-size: 12px; color: var(--dim); }
+  .practice { min-height: 22px; font-size: 15px; color: var(--fg); }
+  .count { font-family: Anton, Impact, sans-serif; font-size: 96px; line-height: 1; color: var(--c); }
+
+  /* 점수판 */
+  .score { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; margin: 8px 0 4px;
+    padding: 12px 14px; border-radius: 20px; background: rgba(255,255,255,.05); border: 1px solid var(--line); }
+  .side { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
+  .side .who { font-size: 13px; color: var(--dim); font-weight: 700; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .side .pt { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 46px; line-height: 1.05; }
+  .side .gm { font-size: 13px; color: var(--dim); font-weight: 800; }
+  .side .gm b { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 18px; color: var(--fg); margin-left: 3px; }
+  .side.mine .pt { color: var(--c); }
+  .srv { width: 10px; height: 10px; border-radius: 50%; background: var(--ball); box-shadow: 0 0 8px var(--ball); visibility: hidden; }
+  .srv.on { visibility: visible; }
+  .mid { display: flex; flex-direction: column; align-items: center; gap: 4px; color: var(--dim); font-size: 12px; font-weight: 700; }
+  .mid .colon { font-family: Anton, Impact, sans-serif; font-size: 30px; color: rgba(255,255,255,.35); line-height: 1; }
+  .callL { min-height: 18px; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 900; }
+  .callL:not(:empty) { background: #ffd23a; color: #1a1300; }
+  .stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; min-height: 0; }
+  .orb { width: min(58vw, 230px); aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; position: relative;
+    border: 8px solid color-mix(in srgb, var(--c) 55%, transparent); background: rgba(255,255,255,.03);
+    font-size: 32px; font-weight: 900; letter-spacing: -.03em; color: var(--dim); transition: background .15s, color .15s; }
+  .orb::after { content: ""; position: absolute; width: 22%; aspect-ratio: 1; border-radius: 50%; right: 12%; top: 12%;
+    background: radial-gradient(circle at 35% 35%, #f4ffb0, var(--ball) 60%, #9db41f); opacity: .5; }
+  .orb.cue { background: var(--c); color: #0b0f17; border-color: #fff; font-size: 54px; animation: pulse .32s ease-in-out infinite alternate; }
+  .orb.cue::after { opacity: 1; }
+  .orb.hit { animation: pop .35s ease-out; }
+  @keyframes pulse { from { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 60%, transparent); }
+    to { transform: scale(1.08); box-shadow: 0 0 0 22px transparent; } }
+  @keyframes pop { 0% { transform: scale(.9); } 60% { transform: scale(1.05); } 100% { transform: scale(1); } }
+  .status { min-height: 50px; }
+  .res { min-height: 86px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .res .t { font-size: 28px; font-weight: 900; letter-spacing: -.02em; }
+  .res .t.good { color: #7ef0a0; }
+  .res .t.bad { color: #ff9a9d; }
+  .pads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+  .pads button { padding: 18px 0; border-radius: 16px; background: rgba(255,255,255,.08); color: var(--fg); border: 1.5px solid var(--line);
+    font-size: 17px; font-weight: 800; }
+  .pads button:first-child { background: var(--c); color: #0b0f17; border-color: var(--c); }
+  .hands { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .hands button { padding: 10px 0; border-radius: 12px; background: transparent; color: var(--dim); border: 1.5px solid var(--line); font-size: 14px; font-weight: 800; }
+  .hands button.on { color: var(--fg); border-color: var(--fg); background: rgba(255,255,255,.08); }
+  .pads-hint { margin-top: 8px; font-size: 12px; text-align: center; }
+
+  #flash { position: fixed; inset: 0; pointer-events: none; background: var(--c); opacity: 0; }
+  #flash.go { animation: flash .45s ease-out; }
+  @keyframes flash { from { opacity: .75; } to { opacity: 0; } }
+  .debug { position: fixed; left: 8px; right: 8px; bottom: calc(env(safe-area-inset-bottom) + 4px); font: 11px ui-monospace, monospace;
+    color: rgba(255,255,255,.4); white-space: pre-wrap; pointer-events: none; }
+</style>
+</head>
+<body>
+<header>
+  <span class="me" id="me">…</span>
+  <span class="room" id="room"></span>
+  <button class="recal hidden" id="btnRecal">다시 맞추기</button>
+</header>
+<div class="banner hidden" id="banner"></div>
+<main>
+  <!-- 처음 -->
+  <section class="view center on" id="vStart">
+    <svg class="art" viewBox="0 0 150 190" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <ellipse cx="75" cy="64" rx="50" ry="60" stroke="var(--c)" stroke-width="7"/>
+      <path d="M45 40h60M38 64h74M45 88h60M60 12v104M75 6v116M90 12v104" stroke="rgba(255,255,255,.35)" stroke-width="2"/>
+      <path d="M62 120l13 16 13-16" stroke="var(--c)" stroke-width="6"/>
+      <rect x="52" y="104" width="46" height="82" rx="9" fill="#0b0f17" stroke="#fff" stroke-width="3"/>
+      <rect x="58" y="113" width="34" height="62" rx="4" fill="var(--c)" opacity=".35"/>
+      <circle cx="128" cy="22" r="11" fill="#d9f24a"/>
+      <path d="M120 16c5 2 9 7 10 13" stroke="#fff" stroke-width="1.6"/>
+    </svg>
+    <h1>폰이 라켓이 됩니다</h1>
+    <p>폰 아래쪽을 라켓 손잡이처럼 쥐고
+화면이 TV를 보게 듭니다.</p>
+    <p class="note hidden" id="httpNote">https 주소가 아니라서 동작 센서가 꺼질 수 있습니다.
+그때는 버튼으로 칠 수 있습니다.</p>
+    <button class="primary" id="btnStart" style="margin-top:10px">시작하기</button>
+  </section>
+
+  <!-- 메시지 -->
+  <section class="view center" id="vMsg"><h1 id="msgT"></h1><p id="msgB"></p></section>
+
+  <!-- 대기실 · 경기 끝 · 관전 -->
+  <section class="view center" id="vWait">
+    <div class="big" id="waitT">대기실</div>
+    <p id="waitB"></p>
+    <div class="chips" id="waitChips"></div>
+    <div class="practice" id="practice"></div>
+    <button class="primary" id="btnGo" style="margin-top:8px">게임 시작</button>
+    <button class="ghost" id="btnCalLobby">라켓 자세 맞추기</button>
+  </section>
+
+  <!-- 자세 맞추기 -->
+  <section class="view center" id="vCal">
+    <svg class="art" viewBox="0 0 150 190" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="96" y="40" width="46" height="34" rx="4" stroke="#fff" stroke-width="3"/>
+      <path d="M112 74v10M104 86h24" stroke="#fff" stroke-width="3"/>
+      <text x="119" y="62" fill="#fff" font-size="12" font-weight="800" text-anchor="middle">TV</text>
+      <rect x="26" y="34" width="22" height="104" rx="7" fill="#0b0f17" stroke="#fff" stroke-width="3"/>
+      <path d="M50 44v66" stroke="var(--c)" stroke-width="4"/>
+      <path d="M56 78h30" stroke="var(--c)" stroke-width="3" stroke-dasharray="4 5"/>
+      <path d="M82 71l9 7-9 7" stroke="var(--c)" stroke-width="3"/>
+      <path d="M20 112c-6 6-6 26 4 34h26c8-8 8-28 0-34z" fill="#c98f68"/>
+      <text x="37" y="176" fill="#9aabc4" font-size="11" text-anchor="middle">손잡이</text>
+    </svg>
+    <div class="count hidden" id="calN">3</div>
+    <h1 id="calT">라켓처럼 쥡니다</h1>
+    <p id="calB">폰 아래쪽을 라켓 손잡이처럼 쥐고,
+화면이 TV를 보게 한 뒤 준비를 누릅니다.</p>
+    <div class="legend" id="calLegend">
+      <div><b>쓸어 올리기</b><span>탑스핀</span></div>
+      <div><b>깎아 내리기</b><span>슬라이스</span></div>
+      <div><b>화면 등지기</b><span>백핸드</span></div>
+    </div>
+    <button class="primary" id="btnReady" style="margin-top:6px">준비</button>
+    <button class="ghost hidden" id="btnCalCancel">돌아가기</button>
+  </section>
+
+  <!-- 경기 중 -->
+  <section class="view" id="vPlay">
+    <div class="score">
+      <div class="side mine"><span class="who"><i class="srv" id="srvMe"></i><span id="meName">우리</span></span><b class="pt" id="ptMe">0</b><span class="gm">게임<b id="gmMe">0</b></span></div>
+      <div class="mid"><span id="ruleL">2게임 선승</span><span class="colon">:</span><span class="callL" id="callL"></span></div>
+      <div class="side"><span class="who"><span id="oppName">상대</span><i class="srv" id="srvOpp"></i></span><b class="pt" id="ptOpp">0</b><span class="gm">게임<b id="gmOpp">0</b></span></div>
+    </div>
+    <div class="stage">
+      <div class="orb" id="orb">준비</div>
+      <p class="status" id="status">공이 느려지면 타이밍을 맞춰 휘두릅니다.</p>
+      <div class="res">
+        <div class="t" id="resT"></div>
+        <div class="chips" id="resChips"></div>
+      </div>
+    </div>
+    <div class="hidden" id="fallback">
+      <div class="pads">
+        <button data-kind="none">플랫</button>
+        <button data-kind="top">탑스핀</button>
+        <button data-kind="slice">슬라이스</button>
+      </div>
+      <div class="hands" id="hands">
+        <button data-hand="auto" class="on">손 자동</button>
+        <button data-hand="back">백핸드로</button>
+      </div>
+      <p class="pads-hint" id="fallbackHint">동작 센서가 없어 버튼으로 칩니다. (키보드: Space · T · S)</p>
+    </div>
+  </section>
+</main>
+<div id="flash"></div>
+<div class="debug" id="debug"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="controller.js"></script>
+</body>
+</html>

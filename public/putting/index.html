@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0d2a1c">
+<title>퍼팅 챌린지</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
+</script>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="vignette"></div>
+
+<!-- 경기 중 점수판 -->
+<div id="hud" class="hud hidden">
+  <div class="bug">
+    <div class="bug-who"><span id="bName">1P</span></div>
+    <div class="bug-main">
+      <div class="bug-top"><b id="bHole">1번 홀</b><span class="bug-tag" id="bTag">TWO-TIER</span></div>
+      <div class="bug-sub"><span id="bPar">파 2</span><span class="dot"></span><span id="bStroke">1타째</span></div>
+    </div>
+    <div class="bug-pin"><span>홀까지</span><b id="bDist">0.0</b><small>m</small></div>
+  </div>
+  <div class="leader" id="leader"></div>
+</div>
+
+<div id="join" class="join hidden">
+  <img id="qrMini" alt="">
+  <div><span class="join-k">참가</span><b id="codeMini">----</b></div>
+</div>
+
+<!-- 그린 읽기 -->
+<div id="read" class="read">
+  <div class="read-h">그린 읽기</div>
+  <div class="read-row"><span>거리</span><b id="rDist">-</b></div>
+  <div class="read-row"><span>높낮이</span><b id="rRise">-</b></div>
+  <div class="read-row"><span>옆 경사</span><b id="rCross">-</b></div>
+  <div class="read-row"><span>그린 빠르기</span><b>스팀프 10</b></div>
+  <div class="read-legend">
+    <i style="--h:#2766ff"></i>평평 <i style="--h:#1ac6f2"></i>1% <i style="--h:#4deb59"></i>2% <i style="--h:#ffdb26"></i>3% <i style="--h:#ff5226"></i>4%+
+  </div>
+  <div class="read-foot" id="rFoot"><kbd>G</kbd> 경사 보기 켜짐</div>
+</div>
+
+<div id="tags" class="tags"></div>
+
+<div id="prompt" class="prompt"><b id="promptT"></b><span id="promptB"></span></div>
+<div id="call" class="call"><div class="call-main" id="callMain"></div><div class="call-sub" id="callSub"></div></div>
+
+<div id="shot" class="shot">
+  <div class="stat"><span>퍼터 스피드</span><b id="sPutter">-</b><small>m/s</small></div>
+  <div class="stat"><span>볼 스피드</span><b id="sBall">-</b><small>m/s</small></div>
+  <div class="stat"><span>페이스</span><b id="sFace" class="sm">-</b></div>
+  <div class="stat"><span>남은 거리</span><b id="sLeft">-</b><small>m</small></div>
+</div>
+
+<div id="kbd" class="kbd hidden">
+  <div class="kbd-h">키보드 퍼팅 <small>시험용</small></div>
+  <div class="kbd-bar"><i id="kbdFill"></i></div>
+  <div class="kbd-v"><b id="kbdV">1.50</b><small>m/s</small><span id="kbdD">평지 약 3.0m</span></div>
+  <div class="kbd-k"><kbd>↑</kbd><kbd>↓</kbd> 세기 <kbd>←</kbd><kbd>→</kbd> 방향 <kbd>Space</kbd> 퍼팅</div>
+</div>
+
+<!-- 홀 끝 스코어카드 -->
+<div id="card" class="card hidden">
+  <div class="card-h"><span class="eyebrow" id="cardEyebrow">HOLE 1</span><b id="cardTitle">스코어카드</b></div>
+  <table id="cardTable"></table>
+</div>
+
+<div id="fade" class="fade"></div>
+
+<section id="lobby" class="screen">
+  <div class="lobby">
+    <div class="lobby-copy">
+      <div class="eyebrow">PHONE CONTROLLER GAMES · 3 HOLES</div>
+      <h1 class="wordmark">PUTTING<br>CHALLENGE</h1>
+      <p class="lede">폰이 퍼터가 됩니다. 그립처럼 쥐고 톡 밀면 그 세기 그대로 공이 굴러가요. 경사를 읽고 3홀을 가장 적은 타수로 끝낸 사람이 이겨요.</p>
+      <ol class="steps">
+        <li>
+          <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="12" r="5"/><path d="M24 40V18"/><path d="M14 30l10 10 10-10"/><path d="M8 44h32"/></svg>
+          <div><b>터치로 방향</b><span>폰 화면을 좌우로 밀어 겨눠요. 경사 보기로 휘는 쪽을 읽어요.</span></div>
+        </li>
+        <li>
+          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="18" y="4" width="12" height="22" rx="3"/><path d="M24 26v14"/><path d="M18 42h11"/></svg>
+          <div><b>그립처럼 쥐고 어드레스</b><span>폰 윗부분이 땅을, 화면이 홀을 보게 해요.</span></div>
+        </li>
+        <li>
+          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 6v20"/><path d="M24 26l-9 12"/><path d="M24 26l9 12" opacity=".35"/><circle cx="38" cy="40" r="3"/></svg>
+          <div><b>시계추처럼 톡</b><span>뒤로 살짝 뺐다가 밀어요. 빠를수록 멀리 굴러가요.</span></div>
+        </li>
+      </ol>
+      <div class="slots" id="slots"></div>
+      <div class="hint"><kbd>Enter</kbd> 게임 시작 <span class="dot"></span> 홀마다 최대 5타(못 넣으면 6타) <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
+      <div class="hint sub"><kbd>←</kbd><kbd>→</kbd> 조준 <kbd>↑</kbd><kbd>↓</kbd> 세기 <kbd>Space</kbd> 퍼팅 <kbd>G</kbd> 경사 보기 <kbd>F</kbd> 깃대 <span class="dot"></span> 폰 없이 시험할 때</div>
+    </div>
+    <div class="qr-card">
+      <img id="qr" alt="참가 QR">
+      <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
+      <div class="qr-url" id="url"></div>
+      <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 동작 센서가 꺼져 있어요. https 주소에서 열어 주세요.</div>
+    </div>
+  </div>
+</section>
+
+<section id="over" class="screen hidden">
+  <div class="over">
+    <div class="eyebrow">FINAL</div>
+    <h1 class="wordmark sm">퍼팅 챌린지 결과</h1>
+    <div class="podium" id="podium"></div>
+    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b></div>
+  </div>
+</section>
+
+<section id="replaced" class="screen hidden">
+  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+</section>
+
+<div id="debug" class="debug hidden"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>

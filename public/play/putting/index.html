@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b1a14">
+<title>퍼팅 컨트롤러</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<style>
+  :root { --c: #ff5a5f; --bg: #0b1a14; --fg: #f4f2ea; --dim: #9db3a6; --line: rgba(255,255,255,.12); --accent: #d4f36b; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+    font-family: "Pretendard Variable", Pretendard, -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  body { display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top) + 10px) 18px calc(env(safe-area-inset-bottom) + 16px);
+    background: radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--c) 22%, transparent), transparent 70%), var(--bg); }
+  header { display: flex; align-items: center; justify-content: space-between; height: 44px; flex: none; }
+  .me { font-family: Anton, Impact, sans-serif; font-size: 26px; padding: 2px 14px; border-radius: 999px; background: var(--c); color: #0b0f17; }
+  .room { color: var(--dim); font-size: 13px; letter-spacing: .1em; }
+  main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  .view.on { display: flex; }
+  .center { align-items: center; justify-content: center; text-align: center; gap: 14px; }
+  h1 { margin: 0; font-size: 30px; line-height: 1.25; letter-spacing: -.02em; }
+  p { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.55; white-space: pre-line; }
+  button { font: inherit; border: 0; cursor: pointer; }
+  .primary { width: 100%; padding: 19px; border-radius: 18px; background: var(--c); color: #0b0f17; font-size: 21px; font-weight: 800; }
+  .primary:active { transform: scale(.98); }
+  .ghost { width: 100%; padding: 14px; border-radius: 16px; background: transparent; color: var(--fg); border: 1.5px solid var(--line); font-size: 16px; font-weight: 700; }
+  .art { width: 150px; height: 190px; }
+  .hidden { display: none !important; }
+
+  /* 조준 */
+  .aim-top { display: flex; justify-content: space-between; align-items: baseline; margin: 6px 0 10px; gap: 10px; }
+  .aim-top b { font-size: 22px; }
+  .aim-top span { color: var(--dim); font-size: 14px; text-align: right; }
+  .pad { position: relative; flex: 1; min-height: 170px; border-radius: 22px; overflow: hidden; border: 1px solid var(--line);
+    background: repeating-linear-gradient(115deg, #2f7a45 0 26px, #357f4a 26px 52px); }
+  .pad svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .pad .lab { position: absolute; left: 0; right: 0; bottom: 12px; text-align: center; font-size: 14px; color: rgba(255,255,255,.8); }
+  .pad .deg { position: absolute; top: 12px; left: 0; right: 0; text-align: center; font-family: Anton, Impact, sans-serif; font-size: 30px;
+    text-shadow: 0 2px 10px rgba(0,0,0,.35); }
+  .row { display: flex; gap: 8px; margin: 10px 0; }
+  .row button { flex: 1; padding: 13px 0; border-radius: 14px; background: rgba(255,255,255,.07); color: var(--fg); border: 1.5px solid var(--line);
+    font-weight: 800; font-size: 15px; }
+  .row button.on { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); color: var(--accent); }
+
+  /* 어드레스·스트로크 */
+  .count { font-family: Anton, Impact, sans-serif; font-size: 84px; line-height: 1; }
+  .big { font-size: 40px; font-weight: 900; letter-spacing: -.03em; }
+  .meter { width: 260px; height: 190px; }
+  .chips { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .chip { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); font-size: 14px; color: var(--dim); }
+  .chip b { color: var(--fg); font-size: 18px; margin-left: 4px; }
+  .sim { width: 100%; padding: 14px; border-radius: 18px; background: rgba(255,255,255,.06); border: 1px dashed rgba(255,255,255,.22); text-align: left; }
+  .sim h3 { margin: 0 0 8px; font-size: 14px; color: var(--accent); letter-spacing: .04em; }
+  .sim label { display: flex; justify-content: space-between; font-size: 14px; color: var(--dim); font-weight: 700; margin-top: 6px; }
+  .sim label b { color: var(--fg); }
+  .sim input[type=range] { width: 100%; accent-color: var(--c); touch-action: pan-x; }
+  .sim .primary { margin-top: 10px; padding: 15px; font-size: 18px; }
+  .card { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: 100%; max-width: 320px; }
+  .card div { padding: 8px 0; border-radius: 12px; background: rgba(255,255,255,.06); text-align: center; }
+  .card span { display: block; font-size: 11px; color: var(--dim); font-weight: 700; }
+  .card b { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 24px; }
+  .card div.tot { background: color-mix(in srgb, var(--c) 25%, transparent); }
+  .flash { animation: flash .6s; }
+  @keyframes flash { from { background-color: var(--c); } }
+  .debug { position: fixed; left: 8px; bottom: calc(env(safe-area-inset-bottom) + 4px); font: 11px ui-monospace, monospace; color: rgba(255,255,255,.4);
+    white-space: pre; pointer-events: none; }
+</style>
+</head>
+<body>
+<header><span class="me" id="me">…</span><span class="room" id="room"></span></header>
+<main>
+  <!-- 처음 -->
+  <section class="view center on" id="vStart">
+    <svg class="art" viewBox="0 0 150 190" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M44 34c8-14 54-14 62 0l-5 30c-8 10-44 10-52 0z" fill="#e2ae86"/>
+      <rect x="57" y="40" width="36" height="74" rx="8" stroke="#fff" stroke-width="3" fill="#0b1a14"/>
+      <path d="M64 100h22" stroke="var(--c)" stroke-width="3"/>
+      <path d="M75 114v52" stroke="#c7c7c7" stroke-width="4"/>
+      <path d="M62 168h28" stroke="#d9dde2" stroke-width="7"/>
+      <circle cx="104" cy="168" r="6" fill="#fff"/>
+    </svg>
+    <h1>폰이 퍼터가 됩니다</h1>
+    <p>폰을 퍼터 그립처럼 두 손으로 쥐고
+윗부분이 땅을, 화면이 홀 쪽을 보게 하세요.</p>
+    <button class="primary" id="btnStart" style="margin-top:10px">시작하기</button>
+  </section>
+
+  <!-- 메시지 -->
+  <section class="view center" id="vMsg"><h1 id="msgT"></h1><p id="msgB"></p><button class="ghost hidden" id="btnMsg" style="max-width:260px">확인</button></section>
+
+  <!-- 대기 / 다른 사람 차례 -->
+  <section class="view center" id="vWait">
+    <div class="big" id="waitT">대기실</div>
+    <p id="waitB"></p>
+    <div class="card" id="myCard"></div>
+    <button class="primary" id="btnGo" style="margin-top:14px">게임 시작</button>
+  </section>
+
+  <!-- 내 차례: 조준 -->
+  <section class="view" id="vAim">
+    <div class="aim-top"><b>방향 맞추기</b><span id="aimInfo"></span></div>
+    <div class="pad" id="pad">
+      <svg viewBox="0 0 300 260" preserveAspectRatio="xMidYMid meet">
+        <ellipse cx="150" cy="44" rx="120" ry="22" fill="rgba(255,255,255,.06)"/>
+        <path d="M150 238 L150 44" stroke="rgba(255,255,255,.28)" stroke-width="2" stroke-dasharray="6 8"/>
+        <ellipse cx="150" cy="44" rx="11" ry="5" fill="#0d130f"/>
+        <path d="M152 44V8" stroke="#fff" stroke-width="2"/><path d="M152 9l16 6-16 6z" fill="#e23b3b"/>
+        <path id="aimLine" d="M150 238 L150 44" stroke="var(--c)" stroke-width="4" stroke-linecap="round" stroke-dasharray="10 7"/>
+        <circle cx="150" cy="238" r="7" fill="#fff"/>
+      </svg>
+      <div class="deg" id="aimDeg">홀 방향</div>
+      <div class="lab">좌우로 밀어서 방향을 맞춰요</div>
+    </div>
+    <div class="row">
+      <button id="btnLeft">◀ 0.5°</button>
+      <button id="btnGrid" class="on">경사 보기 켜짐</button>
+      <button id="btnRight">0.5° ▶</button>
+    </div>
+    <button class="primary" id="btnAddress">어드레스</button>
+  </section>
+
+  <!-- 어드레스 잡는 중 -->
+  <section class="view center" id="vHold">
+    <div class="count" id="holdN">3</div>
+    <h1>퍼터처럼 쥐고 멈추세요</h1>
+    <p>폰 윗부분이 땅을, 화면이 홀을 보게.
+이 자세가 퍼터 페이스의 기준이 돼요.</p>
+  </section>
+
+  <!-- 스트로크 -->
+  <section class="view center" id="vStroke">
+    <svg class="meter" viewBox="-130 -10 260 190" aria-hidden="true">
+      <path d="M-104 128 A160 160 0 0 0 104 128" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="14" stroke-linecap="round"/>
+      <path id="arcBack" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="14" stroke-linecap="round"/>
+      <path id="arcFwd" fill="none" stroke="var(--c)" stroke-width="14" stroke-linecap="round"/>
+      <line id="needle" x1="0" y1="0" x2="0" y2="150" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+      <circle r="8" fill="#fff"/>
+      <circle cx="0" cy="168" r="6" fill="#fff"/>
+      <text x="-112" y="176" fill="rgba(255,255,255,.5)" font-size="13" font-weight="700" text-anchor="middle">뒤</text>
+      <text x="112" y="176" fill="rgba(255,255,255,.5)" font-size="13" font-weight="700" text-anchor="middle">홀</text>
+    </svg>
+    <div class="big" id="strokeT">톡 밀어요</div>
+    <p id="strokeB">뒤로 살짝 뺐다가 시계추처럼.
+빠를수록 멀리 굴러가요.</p>
+    <div class="sim hidden" id="sim">
+      <h3>센서 없음 · 시험 퍼팅</h3>
+      <label>세기 <b id="simV">1.50 m/s</b></label>
+      <input type="range" id="simPower" min="0.3" max="3.6" step="0.05" value="1.5">
+      <label>페이스 <b id="simFV">스퀘어</b></label>
+      <input type="range" id="simFace" min="-6" max="6" step="0.5" value="0">
+      <button class="primary" id="btnSim">시험 스트로크</button>
+    </div>
+    <button class="ghost" id="btnRedo" style="max-width:260px">다시 어드레스</button>
+  </section>
+
+  <!-- 결과 -->
+  <section class="view center" id="vResult">
+    <div class="big" id="resT"></div>
+    <p id="resB"></p>
+    <div class="chips" id="resChips"></div>
+  </section>
+</main>
+<div class="debug" id="debug"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="controller.js"></script>
+</body>
+</html>

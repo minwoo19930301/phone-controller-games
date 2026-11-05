@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#06050d">
+<title>에어하키</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
+</script>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="vignette"></div>
+<div id="tags" class="tags"></div>
+
+<!-- 경기 중 -->
+<div id="hud" class="hud hidden">
+  <div class="sb">
+    <div class="team a" id="tA"><span class="bar"></span><span class="names" id="nA">1P</span><b id="sA">0</b></div>
+    <div class="mid"><span class="mode" id="sbMode">1 : 1</span><span class="first" id="sbMid">7점 선승</span></div>
+    <div class="team b" id="tB"><b id="sB">0</b><span class="names" id="nB">2P</span><span class="bar"></span></div>
+  </div>
+  <div class="speed" id="speed">
+    <div class="spd-top"><span>퍽 속도</span><em id="spdTag"></em></div>
+    <div class="spd-num"><b id="spdV">0</b><small>km/h</small></div>
+    <div class="spd-track"><i id="spdBar"></i></div>
+  </div>
+  <div class="keys"><kbd>W A S D</kbd> 아래쪽 · <kbd>방향키</kbd> 위쪽 · 판을 마우스로 끌기 <span>(시험용)</span></div>
+</div>
+
+<div id="join" class="join hidden">
+  <img id="qrMini" alt="">
+  <div><span class="join-k">참가</span><b id="codeMini">----</b></div>
+</div>
+
+<div id="call" class="call"><div class="call-main" id="callMain"></div><div class="call-sub" id="callSub"></div></div>
+<div id="rule" class="rule"></div>
+<div id="note" class="note"></div>
+
+<!-- 대기실 -->
+<section id="lobby" class="screen">
+  <div class="lobby">
+    <div class="lobby-copy">
+      <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 · 7점 선승</div>
+      <h1 class="wordmark">AIR<br>HOCKEY</h1>
+      <p class="lede">폰 화면이 내 쪽 반 코트가 됩니다. 엄지로 누른 자리로 말렛이 따라와요. 퍽을 상대 골문에 먼저 7번 넣으면 이겨요.</p>
+      <ol class="steps">
+        <li>
+          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="14" y="5" width="20" height="38" rx="4"/><path d="M20 15h8v8h-8z M20 27h3 M25 27h3v3 M20 31h3v3"/></svg>
+          <div><b>QR을 찍어요</b><span>폰 카메라로 찍고 시작하기를 눌러요. 센서 허용은 필요 없어요.</span></div>
+        </li>
+        <li>
+          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="13" y="4" width="22" height="40" rx="5"/><circle cx="24" cy="28" r="6"/><path d="M24 22v-8 M20 17l4-4 4 4"/></svg>
+          <div><b>엄지로 말렛 조작</b><span>폰 화면이 큰 화면 속 내 쪽 반 코트와 같은 방향이에요.</span></div>
+        </li>
+        <li>
+          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 40h32"/><path d="M16 40v-6h16v6"/><circle cx="24" cy="18" r="6"/><path d="M24 8v-4 M33 11l3-3 M15 11l-3-3"/></svg>
+          <div><b>세게 밀어 쳐요</b><span>빠르게 밀수록 퍽이 빨라요. 벽을 맞혀 꺾어 넣어도 돼요.</span></div>
+        </li>
+      </ol>
+      <div class="slots" id="slots"></div>
+      <div class="pairs" id="pairs"></div>
+      <div class="hint"><kbd>Enter</kbd> 게임 시작 <span class="dot"></span> 한쪽 반에 8초 넘게 머물면 상대에게 넘어가요 <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
+    </div>
+    <div class="qr-card">
+      <img id="qr" alt="참가 QR">
+      <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
+      <div class="qr-url" id="url"></div>
+      <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 화면 꺼짐 방지가 안 될 수 있어요. 경기 중 폰 화면이 꺼지지 않게 해 두거나 https 주소로 열어 주세요.</div>
+    </div>
+  </div>
+  <div class="msg" id="msg"></div>
+</section>
+
+<!-- 경기 끝 -->
+<section id="over" class="screen hidden">
+  <div class="over">
+    <div class="eyebrow">FINAL</div>
+    <h1 class="over-title" id="overTitle">승리</h1>
+    <div class="over-score" id="overScore"></div>
+    <div class="podium" id="podium"></div>
+    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b></div>
+  </div>
+</section>
+
+<section id="replaced" class="screen hidden">
+  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+</section>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>

@@ -268,7 +268,7 @@ export function makeGolfer(color) {
   const skin = std('#e6b48e', 0.62);
   const white = std('#f3f3f0', 0.55);
   const dark = std('#15171c', 0.5);
-  const hair = std('#2a211b', 0.9);
+  const hair = std('#3a2a1f', 0.95); // 뒷머리는 모자 아래에서 목덜미까지 덮어야 띠처럼 안 보입니다
   const add = (m) => { m.castShadow = true; g.add(m); return m; };
   const P = {};
   // 하체
@@ -310,7 +310,7 @@ export function makeGolfer(color) {
   const skull = new THREE.Mesh(new THREE.SphereGeometry(0.1, 24, 18).scale(0.92, 1.06, 1), skin);
   skull.castShadow = true;
   head.add(skull);
-  const hairM = new THREE.Mesh(new THREE.SphereGeometry(0.104, 24, 14, Math.PI * 1.08, Math.PI * 0.84, Math.PI * 0.3, Math.PI * 0.3).scale(0.94, 1.06, 1.02), hair);
+  const hairM = new THREE.Mesh(new THREE.SphereGeometry(0.104, 24, 16, Math.PI * 1.08, Math.PI * 0.84, Math.PI * 0.3, Math.PI * 0.42).scale(0.94, 1.06, 1.02), hair);
   head.add(hairM);
   for (const s of [-1, 1]) {
     const ear = new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 8).scale(0.5, 1, 0.8), skin);

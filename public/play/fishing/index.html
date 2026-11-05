@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#14161f">
+<title>낚시 컨트롤러</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<style>
+  :root { --c: #ff5a5f; --bg: #14161f; --fg: #f6f1e8; --dim: #a9adb8; --line: rgba(255,255,255,.12); --accent: #ffbe5c; --good: #7ef0a0; --bad: #ff6b6b; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+    font-family: "Pretendard Variable", Pretendard, -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  body { display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top) + 10px) 16px calc(env(safe-area-inset-bottom) + 14px);
+    background: radial-gradient(120% 55% at 50% 0%, color-mix(in srgb, var(--c) 20%, transparent), transparent 70%),
+      radial-gradient(100% 45% at 50% 105%, rgba(255,150,70,.22), transparent 70%), var(--bg); }
+  header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none; }
+  .me { font-family: Anton, Impact, sans-serif; font-size: 26px; padding: 2px 14px; border-radius: 999px; background: var(--c); color: #0b0f17; }
+  .room { flex: 1; color: var(--dim); font-size: 13px; letter-spacing: .1em; }
+  .small { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); color: var(--fg); border: 1.5px solid var(--line); font-size: 13px; font-weight: 700; }
+  .hidden { display: none !important; }
+  .banner { margin: 6px 0 0; padding: 9px 12px; border-radius: 12px; background: rgba(255,90,95,.14); color: #ffb3b5; font-size: 13px; text-align: center; }
+  main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  .view.on { display: flex; }
+  .center { align-items: center; justify-content: center; text-align: center; gap: 14px; }
+  h1 { margin: 0; font-size: 29px; line-height: 1.25; letter-spacing: -.02em; }
+  p { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.55; white-space: pre-line; }
+  .note { font-size: 13px; color: #ffcf8a; }
+  button { font: inherit; border: 0; cursor: pointer; color: inherit; }
+  .primary { width: 100%; padding: 19px; border-radius: 18px; background: var(--c); color: #0b0f17; font-size: 21px; font-weight: 800; }
+  .ghost { width: 100%; padding: 14px; border-radius: 16px; background: transparent; color: var(--fg); border: 1.5px solid var(--line); font-size: 16px; font-weight: 700; }
+  .art { width: 170px; height: 170px; }
+  .big { font-size: 40px; font-weight: 900; letter-spacing: -.03em; }
+  .chips { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .chip { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); font-size: 14px; color: var(--dim); }
+  .chip b { color: var(--fg); font-size: 16px; margin-left: 4px; }
+  .count { font-family: Anton, Impact, sans-serif; font-size: 96px; line-height: 1; color: var(--c); }
+
+  /* 경기 화면 */
+  .status { flex: none; padding: 12px 16px; border-radius: 18px; background: rgba(255,255,255,.05); border: 1px solid var(--line); margin-top: 6px;
+    transition: background .2s, border-color .2s; }
+  .status b { display: block; font-size: 26px; font-weight: 900; letter-spacing: -.02em; }
+  .status span { display: block; margin-top: 3px; color: var(--dim); font-size: 14px; line-height: 1.45; min-height: 20px; }
+  .status.hot { background: rgba(255,90,95,.18); border-color: var(--bad); }
+  .status.good { background: rgba(126,240,160,.12); border-color: rgba(126,240,160,.5); }
+  .stats { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0; }
+  .stats div { padding: 8px 6px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--line); text-align: center; }
+  .stats span { display: block; font-size: 11px; color: var(--dim); font-weight: 700; }
+  .stats b { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 24px; line-height: 1.2; }
+  .stats small { font-size: 12px; color: var(--dim); margin-left: 2px; }
+  .stage { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; position: relative; }
+
+  /* 캐스팅 게이지 */
+  .gauge { width: min(70vw, 250px); height: auto; overflow: visible; }
+  .gauge .zone { fill: none; stroke-width: 16; stroke-linecap: round; }
+  .gauge text { font-size: 12px; font-weight: 800; fill: var(--dim); }
+  .castHint { font-size: 15px; color: var(--fg); font-weight: 700; min-height: 22px; text-align: center; }
+
+  /* 찌 */
+  .bob { width: min(56vw, 24vh, 210px); height: auto; overflow: visible; }
+  .bob #bobG { transition: transform .12s; }
+  .bob.nib #bobG { animation: nib .5s; }
+  .bob.under #bobG { transform: translateY(40px); }
+  @keyframes nib { 30% { transform: translateY(12px); } }
+
+  /* 장력 */
+  .tension { width: 100%; }
+  .tbar { position: relative; height: 34px; border-radius: 12px; background: rgba(255,255,255,.08); overflow: hidden; border: 1px solid var(--line); }
+  .tbar i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 12px; background: linear-gradient(90deg, #5ee07a, #ffd23a 70%, #ff5a4f); background-size: calc(100vw - 32px) 100%; transition: width .12s linear; }
+  .tbar em { position: absolute; top: 0; bottom: 0; left: 77%; width: 3px; background: rgba(255,255,255,.75); }
+  .tbar.hot i { animation: hot .2s infinite alternate; }
+  @keyframes hot { to { filter: brightness(1.45); } }
+  .trow { display: flex; justify-content: space-between; align-items: baseline; margin-top: 8px; }
+  .trow b { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 30px; }
+  .trow span { color: var(--dim); font-size: 14px; font-weight: 700; }
+  .side { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-weight: 800; font-size: 15px; min-height: 24px; color: var(--accent); }
+  .side i { font-style: normal; font-size: 22px; }
+
+  /* 릴 핸들 */
+  .dialWrap { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 4px; }
+  .dial { width: min(78vw, 46vh, 300px); height: auto; aspect-ratio: 1; touch-action: none; display: block; transition: width .25s; }
+  .dialWrap.compact .dial { width: min(52vw, 30vh, 210px); }
+  .dial .rim { fill: #22252f; stroke: rgba(255,255,255,.14); stroke-width: 3; }
+  .dial .spin { transform-origin: 0 0; }
+  .dial .knob { fill: var(--c); stroke: rgba(0,0,0,.35); stroke-width: 3; }
+  .dialHint { font-size: 13px; color: var(--dim); min-height: 18px; text-align: center; }
+  .dialHint.warn { color: var(--accent); font-weight: 700; }
+  .toggle { margin-top: 2px; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 800; background: rgba(255,255,255,.06); border: 1.5px solid var(--line); color: var(--dim); }
+  .toggle.on { color: #0b0f17; background: var(--accent); border-color: var(--accent); }
+
+  /* 시험용(센서 없음) */
+  .pads { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .pads button { padding: 16px 0; border-radius: 16px; background: rgba(255,255,255,.08); border: 1.5px solid var(--line); font-size: 17px; font-weight: 800; }
+  .pads button.main { background: var(--c); color: #0b0f17; border-color: var(--c); position: relative; overflow: hidden; }
+  .pads button.main i { position: absolute; left: 0; bottom: 0; height: 5px; width: 0; background: #0b0f17; opacity: .5; }
+  .aimRow { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--dim); }
+  .aimRow input { flex: 1; accent-color: var(--c); }
+  .pads-hint { grid-column: 1 / -1; font-size: 12px; text-align: center; color: var(--dim); }
+
+  /* 결과 카드 */
+  .card { position: fixed; left: 16px; right: 16px; top: 22%; padding: 22px 18px; border-radius: 24px; text-align: center; background: #1d212c; border: 2px solid var(--c);
+    box-shadow: 0 20px 60px rgba(0,0,0,.5); transform: translateY(20px) scale(.94); opacity: 0; pointer-events: none; transition: opacity .25s, transform .35s cubic-bezier(.2,1.4,.4,1); }
+  .card.on { opacity: 1; transform: none; }
+  .card .k { font-size: 13px; font-weight: 800; letter-spacing: .14em; color: var(--accent); }
+  .card .n { font-size: 30px; font-weight: 900; margin-top: 6px; }
+  .card .w { font-family: Anton, Impact, sans-serif; font-size: 76px; line-height: 1.05;
+    background: linear-gradient(180deg, #fff6d6 0%, #ffd23a 55%, #ff9d1a 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .card .w small { font-size: .4em; }
+  .card .s { color: var(--dim); font-size: 15px; margin-top: 6px; white-space: pre-line; }
+  .card.bad { border-color: var(--bad); }
+  .card.bad .n { color: #ffb0b0; }
+  .card.bad .w { display: none; }
+
+  #flash { position: fixed; inset: 0; pointer-events: none; background: var(--c); opacity: 0; }
+  #flash.go { animation: flash .45s ease-out; }
+  #flash.bite { background: #ff3b3b; animation: biteFlash .18s 6 alternate; }
+  @keyframes flash { from { opacity: .7; } to { opacity: 0; } }
+  @keyframes biteFlash { from { opacity: 0; } to { opacity: .55; } }
+  .debug { position: fixed; left: 8px; right: 8px; bottom: calc(env(safe-area-inset-bottom) + 2px); font: 11px ui-monospace, monospace; color: rgba(255,255,255,.45);
+    white-space: pre-wrap; pointer-events: none; }
+</style>
+</head>
+<body>
+<header>
+  <span class="me" id="me">…</span>
+  <span class="room" id="room"></span>
+  <button class="small hidden" id="btnRecal">다시 맞추기</button>
+</header>
+<div class="banner hidden" id="banner"></div>
+<main>
+  <!-- 처음 -->
+  <section class="view center on" id="vStart">
+    <svg class="art" viewBox="0 0 170 170" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M30 150 L120 34" stroke="#3a3f4c" stroke-width="5"/>
+      <path d="M120 34 C 140 60, 150 95, 146 132" stroke="#f3efe4" stroke-width="1.6" stroke-dasharray="3 4"/>
+      <circle cx="146" cy="138" r="7" fill="#e0242c"/><path d="M139 138h14" stroke="#f6f3ee" stroke-width="3"/>
+      <path d="M126 150c10-4 30-4 40 0" stroke="#5aa0b8" stroke-width="2"/>
+      <rect x="22" y="104" width="34" height="62" rx="7" transform="rotate(-52 39 135)" fill="#0b0f17" stroke="#fff" stroke-width="3"/>
+      <circle cx="58" cy="124" r="9" stroke="var(--c)" stroke-width="3"/>
+    </svg>
+    <h1>폰이 낚싯대가 됩니다</h1>
+    <p>폰 아래쪽을 낚싯대 손잡이처럼 쥐고
+뒤로 젖혔다가 앞으로 휙 던져요.</p>
+    <p class="note hidden" id="httpNote">https 주소가 아니라서 동작 센서가 꺼질 수 있어요.
+그때는 버튼으로 할 수 있어요.</p>
+    <button class="primary" id="btnStart" style="margin-top:10px">시작하기</button>
+  </section>
+
+  <!-- 메시지 -->
+  <section class="view center" id="vMsg"><h1 id="msgT"></h1><p id="msgB"></p></section>
+
+  <!-- 대기실 · 끝 · 관전 -->
+  <section class="view center" id="vWait">
+    <div class="big" id="waitT">대기실</div>
+    <p id="waitB"></p>
+    <div class="chips" id="waitChips"></div>
+    <button class="primary" id="btnGo" style="margin-top:8px">게임 시작</button>
+    <button class="ghost" id="btnCalLobby">낚싯대 자세 맞추기</button>
+  </section>
+
+  <!-- 자세 맞추기 -->
+  <section class="view center" id="vCal">
+    <svg class="art" viewBox="0 0 170 170" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="112" y="24" width="50" height="36" rx="4" stroke="#fff" stroke-width="3"/>
+      <text x="137" y="47" fill="#fff" font-size="12" font-weight="800" text-anchor="middle">TV</text>
+      <path d="M128 60v8M120 70h34" stroke="#fff" stroke-width="3"/>
+      <path d="M26 128 L96 92" stroke="var(--c)" stroke-width="3" stroke-dasharray="4 5"/>
+      <path d="M90 86l10 4-6 9" stroke="var(--c)" stroke-width="3"/>
+      <g transform="rotate(-27 50 120)"><rect x="18" y="108" width="74" height="26" rx="6" fill="#0b0f17" stroke="#fff" stroke-width="3"/><path d="M26 114v14" stroke="#9aa" stroke-width="2"/></g>
+      <path d="M8 138c4-12 22-16 34-10l4 14c-10 8-30 8-38-4z" fill="#e2ae86"/>
+      <text x="62" y="160" fill="#a9adb8" font-size="11" text-anchor="middle">화면은 하늘 쪽</text>
+    </svg>
+    <div class="count hidden" id="calN">3</div>
+    <h1 id="calT">낚싯대처럼 쥐어요</h1>
+    <p id="calB">폰 아래쪽을 손잡이처럼 쥐고 폰 윗부분이 TV를 향하게,
+화면은 하늘을 보게 든 뒤 준비를 눌러요.</p>
+    <button class="primary" id="btnReady" style="margin-top:6px">준비</button>
+    <button class="ghost hidden" id="btnCalCancel">돌아가기</button>
+  </section>
+
+  <!-- 경기 중 -->
+  <section class="view" id="vPlay">
+    <div class="status" id="status"><b id="stT">던지세요</b><span id="stB"></span></div>
+    <div class="stats">
+      <div><span>총 무게</span><b id="myKg">0.0</b><small>kg</small></div>
+      <div><span>마릿수</span><b id="myCnt">0</b><small>마리</small></div>
+      <div><span>남은 시간</span><b id="myTime">3:00</b></div>
+    </div>
+    <div class="stage">
+      <!-- 캐스팅 게이지: 낚싯대 각도 -->
+      <svg class="gauge" id="gauge" viewBox="-110 -110 220 130">
+        <path class="zone" d="M -96 0 A 96 96 0 0 1 96 0" stroke="rgba(255,255,255,.08)"/>
+        <path class="zone" id="zoneBack" d="" stroke="color-mix(in srgb, var(--c) 45%, transparent)"/>
+        <line id="rodLine" x1="0" y1="0" x2="80" y2="-40" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+        <circle r="8" fill="#fff"/>
+        <text x="96" y="16" text-anchor="end">TV 쪽</text>
+        <text x="-96" y="16" text-anchor="start">내 쪽</text>
+      </svg>
+      <div class="castHint" id="castHint"></div>
+      <!-- 찌 -->
+      <svg class="bob hidden" id="bob" viewBox="-110 -80 220 140">
+        <defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b6e7a"/><stop offset="1" stop-color="#14262c"/></linearGradient></defs>
+        <rect x="-110" y="10" width="220" height="50" rx="10" fill="url(#wg)"/>
+        <g id="bobG">
+          <line x1="0" y1="-62" x2="0" y2="-26" stroke="#f6f3ee" stroke-width="4"/>
+          <rect x="-3" y="-72" width="6" height="12" rx="2" fill="var(--c)"/>
+          <path d="M-22 4 A 22 22 0 0 1 22 4 Z" fill="#e0242c"/>
+          <path d="M-22 4 A 22 22 0 0 0 22 4 Z" fill="#f6f3ee"/>
+        </g>
+        <path d="M-60 12 q 15 -6 30 0 t 30 0 t 30 0 t 30 0" stroke="rgba(255,255,255,.4)" stroke-width="2" fill="none"/>
+      </svg>
+      <!-- 장력 -->
+      <div class="tension hidden" id="tension">
+        <div class="tbar" id="tbar"><i id="tfill"></i><em></em></div>
+        <div class="trow"><span id="tLabel">장력</span><b id="tDist">0.0m</b></div>
+        <div class="side" id="sideHint"></div>
+      </div>
+    </div>
+    <div class="dialWrap hidden" id="dialWrap">
+      <svg class="dial" id="dial" viewBox="-150 -150 300 300">
+        <circle class="rim" r="142"/>
+        <g id="ticks"></g>
+        <circle r="96" fill="#2c303c" stroke="rgba(255,255,255,.08)" stroke-width="2"/>
+        <circle r="70" fill="none" stroke="color-mix(in srgb, var(--c) 35%, transparent)" stroke-width="10" stroke-dasharray="6 9" id="spool"/>
+        <g class="spin" id="arm">
+          <rect x="-9" y="-112" width="18" height="112" rx="9" fill="#9aa1ad"/>
+          <circle cx="0" cy="-112" r="26" class="knob"/>
+          <circle cx="0" cy="-112" r="9" fill="rgba(255,255,255,.6)"/>
+        </g>
+        <circle r="22" fill="#9aa1ad"/>
+        <text y="6" text-anchor="middle" fill="#0b0f17" font-size="15" font-weight="900" id="rateT">0.0</text>
+      </svg>
+      <div class="dialHint" id="dialHint">손가락으로 원을 그리며 감아요</div>
+      <button class="toggle hidden" id="btnMotion">폰 돌려서 감기 (실험)</button>
+    </div>
+    <div class="pads hidden" id="pads">
+      <button class="main" id="btnCast">캐스팅 (누르고 떼기)<i id="castPow"></i></button>
+      <button id="btnHook">챔질!</button>
+      <div class="aimRow">왼쪽<input type="range" id="aim" min="-35" max="35" step="1" value="0">오른쪽</div>
+      <div class="pads-hint" id="padsHint">동작 센서가 없어 버튼으로 해요. (키보드: C 캐스팅 · Space 챔질 · R 감기)</div>
+    </div>
+  </section>
+</main>
+<div class="card" id="card"><div class="k" id="cardK">CATCH</div><div class="n" id="cardN"></div><div class="w" id="cardW"></div><div class="s" id="cardS"></div></div>
+<div id="flash"></div>
+<div class="debug" id="debug"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="controller.js"></script>
+</body>
+</html>
