@@ -248,6 +248,8 @@
     const rotN = clamp01((rotPeak - TRIGGER_DPS) / (ROT_FULL_DPS - TRIGGER_DPS));
     const accN = clamp01(accPeak / ACC_FULL);
     const power = clamp(0.15 + 0.85 * (hasAcc ? 0.65 * rotN + 0.35 * accN : rotN), 0.1, 1);
+    // 만점을 넘는 힘(너무 세게 휘두름): 회전 속도를 자르지 않고 잽니다. 1.25 를 넘으면 큰 화면에서 홈런(아웃)입니다.
+    const raw = Math.max(power, 0.15 + 0.85 * Math.max(0, (rotPeak - TRIGGER_DPS) / (ROT_FULL_DPS - TRIGGER_DPS)));
 
     const b = basis || (ori ? makeBasis(ori.top, ori.face) : null);
 
@@ -291,6 +293,7 @@
     }
     const data = {
       power: round(power, 3),
+      raw: round(raw, 3),
       ago: Math.max(0, Math.round(performance.now() - t0)),
       rtt: Math.round(rtt()),
       spin,

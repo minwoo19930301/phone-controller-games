@@ -395,7 +395,8 @@ export function aimShot(o) {
       const r = rng();
       outcome = r < 0.45 ? 'net' : r < 0.8 ? 'long' : 'wide';
     }
-    if (outcome === 'long') depth = COURT.svc + 0.25 + rng() * 0.9;
+    if (o.over) outcome = 'long';
+    if (outcome === 'long') depth = COURT.svc + 0.25 + rng() * 0.9 + (o.over ? 1.5 + o.over * 6 : 0);
     if (outcome === 'wide') lat = sideSign * (COURT.halfWS + 0.2 + rng() * 0.6);
     const tx = lat * Rr;
     const tz = F * depth;
@@ -432,7 +433,9 @@ export function aimShot(o) {
     const r = rng();
     outcome = r < 0.4 ? 'net' : r < 0.75 ? 'long' : 'wide';
   }
-  if (outcome === 'long') depth = COURT.halfL + 0.35 + rng() * 1.6;
+  // 너무 세게 휘두르면 보정 없이 담장 너머로 날아갑니다(홈런).
+  if (o.over) outcome = 'long';
+  if (outcome === 'long') depth = COURT.halfL + 0.35 + rng() * 1.6 + (o.over ? 3 + o.over * 16 : 0);
   if (outcome === 'wide') lat = (Math.sign(lat) || 1) * (hw + 0.45 + 0.35 + rng() * 1.2);
   const tx = Rx * lat;
   const tz = F * depth;
@@ -445,7 +448,7 @@ export function aimShot(o) {
   speed *= 0.84 + 0.16 * o.q;
   const w = spinVector(spin, amt, dir);
   const minClear = spin === 'top' ? 0.5 + 0.3 * amt : spin === 'slice' ? 0.2 : 0.3;
-  const sol = solveShot(p, [tx, tz], w, dist / speed, { minClear, maxClear: spin === 'top' ? 1.6 : 1.1 });
+  const sol = solveShot(p, [tx, tz], w, dist / speed, { minClear, maxClear: o.over ? 6 : spin === 'top' ? 1.6 : 1.1 });
   let v = sol ? sol.v : [dir[0] * speed, 3, dir[1] * speed];
   if (outcome === 'net') v = sinkToNet(p, v, w, o.end);
   return { v, w, target: [tx, tz], outcome, kind: spin, speed: Math.hypot(v[0], v[1], v[2]) };

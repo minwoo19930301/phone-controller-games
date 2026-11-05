@@ -98,7 +98,18 @@ export function createScene(cv) {
       model.group.visible = false;
       scene.add(model.group);
       athletes.set(p.key, { model, color: p.color, cpu: p.cpu });
+      fpKey = undefined; // 새 모델에도 1인칭 숨김을 다시 적용합니다
     }
+  }
+  // 1인칭: 이 선수는 몸을 숨기고 라켓만 보입니다(탁구처럼).
+  let fpKey = null;
+  function setFirstPerson(key) {
+    if (key === fpKey) return;
+    for (const [k, a] of athletes) {
+      const fp = k === key;
+      for (const c of a.model.group.children) c.visible = fp ? c === a.model.racket : true;
+    }
+    fpKey = key;
   }
   function poseAthlete(key, x, z, yaw, pose, visible = true) {
     const a = athletes.get(key);
@@ -246,7 +257,7 @@ export function createScene(cv) {
   }
 
   return {
-    renderer, scene, camera, setAthletes, poseAthlete, setBall, flash, mark, setCamera, render, project, update,
+    renderer, scene, camera, setAthletes, setFirstPerson, poseAthlete, setBall, flash, mark, setCamera, render, project, update,
     setBoard: stadium.setBoard, COURT
   };
 }

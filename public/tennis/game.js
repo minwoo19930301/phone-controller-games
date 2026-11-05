@@ -9,6 +9,7 @@ const GAMES_TO_WIN = 2; // 2게임 선승(게임 안에서는 15·30·40·듀스
 const WINDOW = 0.14; // 판정 창(경기 초)
 const PERFECT = 0.035;
 const GOOD = 0.08;
+const OVER_RAW = 1.25; // 폰 raw 힘이 이 값을 넘으면 너무 세게 친 것(홈런)
 const SLOW = 0.28; // 슬로우 배율
 const SLOW_LEAD = 0.38; // 타점까지 이 시간(경기 초) 안이면 슬로우
 const SLOW_TAU = 0.05; // 슬로우로 들어갈 때 배율이 내려가는 시간 상수(실제 초)
@@ -451,6 +452,8 @@ function updatePlan(m, p, now) {
 function readSwing(d) {
   return {
     power: clamp(num(d.power, 0.6), 0, 1),
+    // 만점을 넘긴 만큼(너무 세게). 0 이면 보정 안에서 칩니다.
+    over: clamp(num(d.raw, 0) - OVER_RAW, 0, 2) > 0 ? clamp(num(d.raw, 0) - OVER_RAW, 0, 2) + 0.1 : 0,
     spin: d.spin === 'top' || d.spin === 'slice' ? d.spin : 'none',
     spinAmt: clamp(num(d.spinAmt, 0.6), 0, 1),
     aim: clamp(num(d.aim, 0), -45, 45),
@@ -570,7 +573,7 @@ function doHit(m, pl, sw, th, p) {
   if (game.debug.pressures.length > 400) game.debug.pressures.shift();
   const shot = aimShot({
     end, p: st.p, q: qEff, err: sw.err, window: WINDOW, power: sw.power, aim: sw.aim, spin: sw.spin, spinAmt: sw.spinAmt,
-    hand: sw.hand, serve, box: m.box, second: m.serveNo === 2, doubles: m.doubles
+    hand: sw.hand, over: sw.over || 0, serve, box: m.box, second: m.serveNo === 2, doubles: m.doubles
   });
   m.flight = simulate(st.p, shot.v, shot.w, { t0: th });
   m.evIdx = 0;
@@ -621,7 +624,8 @@ function doHit(m, pl, sw, th, p) {
     if (e <= PERFECT) pl.stats.perfect += 1;
     const label = serve ? SPIN_NAME[shot.kind] : `${HAND_NAME[sw.hand]} ${shot.kind === 'top' ? '탑스핀!' : shot.kind === 'slice' ? '슬라이스' : '플랫'}`;
     const cls = e <= PERFECT ? 'perfect' : e <= GOOD ? 'good' : 'meh';
-    hitPop(pl, qLabel, label, `${cls} ${shot.kind}`);
+    if (sw.over) hitPop(pl, '홈런!', '너무 세요', 'miss');
+    else hitPop(pl, qLabel, label, `${cls} ${shot.kind}`);
     if (!pl.bot) send('result', { text: `${qLabel} · ${label}`, good: e <= GOOD, kmh: Math.round(shot.speed * 3.6) }, pl.slot);
   }
   // 받는 쪽에 들어오는 스핀 예고
@@ -1315,6 +1319,29 @@ function broadcastCam(m, ballPos, dtR, now) {
 }
 // 높이는 관중석 뒷벽(옆 약 11.2m, 뒤 약 12.2m)과 모서리 조명탑 너머로 코트 가운데·양 베이스라인이
 // 모든 각도에서 보이게 잡았습니다(위아래 흔들림 ±1.4m 포함, 레이캐스트로 확인).
+// 1인칭: 화면의 첫 사람 선수 눈높이에서, 공 쪽으로 고개를 돌립니다. 몸은 숨기고 라켓만 보입니다.
+const fp = { look: null, key: null };
+function eyePlayer(m) {
+  return allPlayers(m).find((p) => p.kind === 'human' && (!p.bot || params.has('fpbot'))) || null;
+}
+function firstPersonCam(m, ballPos, dtR) {
+  const pl = eyePlayer(m);
+  if (!pl) return null;
+  const end = endOf(m, pl.team);
+  const F = fwdOf(end);
+  const pos = [pl.x, 1.62, pl.z - F * 0.35];
+  // 기본은 상대 코트 가운데, 공이 보이면 공 쪽으로 70% 돌립니다.
+  const base = [pl.x * 0.3, 0.9, F * 9];
+  let want = base;
+  if (ballPos && (ballPos[2] - pl.z) * F > 0.6) want = base.map((b, i) => b + (ballPos[i] - b) * 0.7);
+  if (!fp.look || fp.key !== pl.key) fp.look = want.slice();
+  const k = 1 - Math.exp(-dtR / 0.18);
+  for (let i = 0; i < 3; i++) fp.look[i] += (want[i] - fp.look[i]) * k;
+  fp.key = pl.key;
+  const p = m.plan;
+  const slowAmt = p && p.pl === pl && !p.decided ? clamp((1 - m.clock.scale) / (1 - SLOW), 0, 1) : 0;
+  return { pos, look: fp.look.slice(), fov: 62 - 6 * slowAmt, slowAmt, key: pl.key };
+}
 function orbitCam(now, r = 31, h = 18) {
   const a = (now / 1000) * 0.055 + 0.6;
   return { pos: [Math.sin(a) * r, h + Math.sin(a * 0.7) * 1.4, Math.cos(a) * r], look: [0, 0.6, 0], fov: 42 };
@@ -1444,13 +1471,14 @@ function frame(now, dtR, draw) {
   let camv;
   let slowAmt = 0;
   if (game.phase === 'playing' && m && m.state !== 'over' && m.state !== 'change') {
-    camv = broadcastCam(m, ball && ball.pos, dtR, now);
+    camv = (!m.demo && !params.has('broadcast') && firstPersonCam(m, ball && ball.pos, dtR)) || broadcastCam(m, ball && ball.pos, dtR, now);
     slowAmt = camv.slowAmt;
   } else if (game.phase === 'playing' && m && m.state === 'change') {
     camv = orbitCam(now, 26, 14);
   } else {
     camv = orbitCam(now);
   }
+  view.setFirstPerson(camv.key || null);
   if (!draw) return;
   if (game.camOverride) camv = game.camOverride;
   view.setCamera(camv);
