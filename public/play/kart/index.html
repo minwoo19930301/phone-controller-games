@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d1a">
+<title>카트 컨트롤러</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<style>
+  :root { --c: #ff5a5f; --bg: #0b0d1a; --fg: #f4f4f8; --dim: #9ea7c0; --line: rgba(255,255,255,.14); }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+    font-family: "Pretendard Variable", Pretendard, -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  body { position: fixed; inset: 0; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    background: radial-gradient(90% 70% at 50% 0%, color-mix(in srgb, var(--c) 22%, transparent), transparent 70%), var(--bg); }
+  .hidden { display: none !important; }
+  .banner { position: fixed; top: 6px; left: 50%; transform: translateX(-50%); z-index: 5; max-width: 80vw; padding: 7px 14px; border-radius: 12px;
+    background: rgba(255,90,95,.2); color: #ffc1c3; font-size: 13px; text-align: center; }
+  .view { position: absolute; inset: 0; display: none; padding: 10px 16px; }
+  .view.on { display: flex; }
+  .center { align-items: center; justify-content: center; text-align: center; flex-direction: column; gap: 10px; }
+  h1 { margin: 0; font-size: 24px; font-weight: 900; letter-spacing: -.03em; }
+  p { margin: 0; color: var(--dim); font-size: 14px; line-height: 1.5; white-space: pre-line; }
+  .note { font-size: 12px; color: #ffcf8a; }
+  .me { font-family: Anton, Impact, sans-serif; font-size: 22px; padding: 2px 14px; border-radius: 999px; background: var(--c); color: #0b0f17; display: inline-block; }
+  button { font: inherit; color: inherit; border: 0; }
+  .primary { padding: 14px 30px; border-radius: 16px; background: var(--c); color: #0b0f17; font-size: 19px; font-weight: 900; min-width: 160px; }
+  .primary:disabled { opacity: .5; }
+  .primary.waiting { background: rgba(255,255,255,.12); color: var(--fg); box-shadow: inset 0 0 0 2px var(--c); }
+  .ghost { padding: 10px 18px; border-radius: 14px; background: rgba(255,255,255,.08); border: 1.5px solid var(--line); font-size: 14px; font-weight: 800; }
+  .row { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; }
+  .big { font-family: Anton, Impact, "Pretendard Variable", sans-serif; font-size: 52px; line-height: 1; }
+  .big.win { color: #ffd23a; }
+
+  /* 핸들 그림 */
+  .wheel { width: 120px; height: 120px; }
+  .wheel svg { width: 100%; height: 100%; overflow: visible; }
+  .wheel .rot { transform-origin: 50% 50%; transition: transform .04s linear; }
+  .bar { width: 220px; height: 10px; border-radius: 6px; background: rgba(255,255,255,.1); position: relative; }
+  .bar i { position: absolute; top: -4px; width: 4px; height: 18px; left: 50%; margin-left: -2px; border-radius: 2px; background: var(--c); }
+  .bar b { position: absolute; left: 50%; top: -2px; width: 2px; height: 14px; background: rgba(255,255,255,.4); }
+
+  /* 경기 중: 왼쪽 브레이크, 오른쪽 액셀 */
+  #vPlay { padding: 10px 12px; gap: 12px; align-items: stretch; }
+  .pedal { flex: 0 0 31%; border-radius: 28px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    font-weight: 900; font-size: clamp(22px, 7vh, 40px); letter-spacing: -.02em; touch-action: none; transition: transform .05s, filter .05s; }
+  .pedal small { font-size: 13px; font-weight: 700; opacity: .75; letter-spacing: 0; }
+  .pedal svg { width: clamp(40px, 16vh, 84px); height: clamp(40px, 16vh, 84px); fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  #pBrake { background: linear-gradient(180deg, #ff6a74, #c8283a); color: #fff; box-shadow: 0 10px 0 #7d1522; }
+  #pGas { background: linear-gradient(180deg, #4be58a, #1b9e55); color: #04210f; box-shadow: 0 10px 0 #0c5e31; }
+  .pedal.down { transform: translateY(8px); filter: brightness(1.18); }
+  #pBrake.down { box-shadow: 0 2px 0 #7d1522; }
+  #pGas.down { box-shadow: 0 2px 0 #0c5e31; }
+  .mid { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; position: relative; }
+  .mid .status { font-weight: 900; font-size: clamp(14px, 5vh, 22px); color: var(--fg); min-height: 1.3em; }
+  .mid .sub { font-size: 12px; color: var(--dim); min-height: 1.2em; }
+  .mid .cd { position: absolute; inset: 0; display: grid; place-items: center; font-family: Anton, Impact, sans-serif; font-size: 22vh; color: #fff;
+    text-shadow: 0 0 30px var(--c); pointer-events: none; opacity: 0; }
+  .mid .cd.on { opacity: 1; animation: pop .5s cubic-bezier(.2,1.5,.4,1); }
+  @keyframes pop { from { transform: scale(1.6); opacity: 0; } }
+  .mid.fallback .slide { display: block; }
+  .slide { display: none; width: 90%; height: 54px; border-radius: 27px; background: rgba(255,255,255,.08); border: 1.5px dashed var(--line); position: relative; touch-action: none; }
+  .slide i { position: absolute; top: 5px; left: 50%; width: 44px; height: 44px; margin-left: -22px; border-radius: 50%; background: var(--c); }
+  .slide em { position: absolute; inset: 0; display: grid; place-items: center; font-style: normal; font-size: 12px; color: var(--dim); pointer-events: none; }
+  .tilt-hint { font-size: 12px; color: var(--dim); }
+
+  /* 세로로 들면 돌려 달라고 안내 */
+  #rotate { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px;
+    background: rgba(11,13,26,.96); text-align: center; padding: 30px; }
+  #rotate svg { width: 90px; height: 90px; fill: none; stroke: var(--c); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; animation: turn 2s ease-in-out infinite; }
+  @keyframes turn { 0%, 30% { transform: rotate(0); } 70%, 100% { transform: rotate(-90deg); } }
+  @media (orientation: portrait) { body.need-land #rotate { display: flex; } }
+
+  #flash { position: fixed; inset: 0; pointer-events: none; background: var(--c); opacity: 0; z-index: 9; }
+  #flash.go { animation: flash .5s ease-out; }
+  @keyframes flash { from { opacity: .6; } to { opacity: 0; } }
+  .debug { position: fixed; left: 8px; right: 8px; bottom: 4px; font: 11px ui-monospace, monospace; color: rgba(255,255,255,.4); white-space: pre-wrap; pointer-events: none; z-index: 30; }
+  .cal-row { display: flex; align-items: center; gap: 22px; }
+  .cal-col { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+</style>
+</head>
+<body>
+<div class="banner hidden" id="banner"></div>
+
+<!-- 처음 -->
+<section class="view center on" id="vStart">
+  <svg width="120" height="76" viewBox="0 0 120 76" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <rect x="4" y="6" width="112" height="64" rx="12" fill="#0b0f17" stroke="#fff" stroke-width="3"/>
+    <circle cx="60" cy="38" r="20" stroke="var(--c)" stroke-width="5"/>
+    <circle cx="60" cy="38" r="5" fill="var(--c)"/>
+    <path d="M60 18v8M43 48l7-4M77 48l-7-4" stroke="var(--c)" stroke-width="4"/>
+  </svg>
+  <h1>폰이 카트 핸들이 됩니다</h1>
+  <p>폰을 가로로 세워 양손으로 잡고 핸들처럼 기울여요.
+왼쪽 엄지는 브레이크, 오른쪽 엄지는 액셀.</p>
+  <p class="note hidden" id="httpNote">https 주소가 아니라서 동작 센서가 꺼질 수 있어요. 그때는 화면 가운데를 밀어서 조향해요.</p>
+  <button class="primary" id="btnStart">시작하기</button>
+</section>
+
+<!-- 메시지 -->
+<section class="view center" id="vMsg"><h1 id="msgT"></h1><p id="msgB"></p></section>
+
+<!-- 대기실 · 경기 끝 · 관전 -->
+<section class="view center" id="vWait">
+  <div class="row"><span class="me" id="me">…</span><span class="big hidden" id="waitBig"></span></div>
+  <h1 id="waitT">대기실</h1>
+  <p id="waitB"></p>
+  <div class="row">
+    <button class="ghost" id="btnCal">핸들 맞추기</button>
+    <button class="primary" id="btnReady">준비</button>
+  </div>
+</section>
+
+<!-- 핸들 맞추기 -->
+<section class="view center" id="vCal">
+  <div class="cal-row">
+    <div class="wheel"><svg viewBox="0 0 100 100" fill="none" stroke-linecap="round"><g class="rot" id="calWheel">
+      <circle cx="50" cy="50" r="40" stroke="#fff" stroke-width="9"/>
+      <path d="M50 50V13M50 50L19 68M50 50L81 68" stroke="#fff" stroke-width="7"/>
+      <circle cx="50" cy="50" r="9" fill="var(--c)" stroke="none"/>
+      <rect x="46" y="4" width="8" height="12" rx="2" fill="#ffd23a" stroke="none"/>
+    </g></svg></div>
+    <div class="cal-col">
+      <h1 id="calT">핸들 맞추기</h1>
+      <p id="calB">폰을 가로로 세워, 핸들을 똑바로 잡은 자세에서
+영점 맞추기를 누르세요. 그 자세가 직진이에요.</p>
+      <div class="bar"><b></b><i id="calBar"></i></div>
+      <div class="row">
+        <button class="ghost" id="btnZero">영점 맞추기</button>
+        <button class="primary" id="btnCalDone" style="padding:10px 22px;font-size:16px;min-width:0">완료</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 경기 중 -->
+<section class="view" id="vPlay">
+  <button class="pedal" id="pBrake" aria-label="브레이크"><svg viewBox="0 0 48 48"><rect x="10" y="10" width="28" height="28" rx="6"/></svg>브레이크<small>왼쪽 엄지</small></button>
+  <div class="mid" id="mid">
+    <span class="me" id="meP">…</span>
+    <div class="wheel"><svg viewBox="0 0 100 100" fill="none" stroke-linecap="round"><g class="rot" id="wheel">
+      <circle cx="50" cy="50" r="40" stroke="#fff" stroke-width="9"/>
+      <path d="M50 50V13M50 50L19 68M50 50L81 68" stroke="#fff" stroke-width="7"/>
+      <circle cx="50" cy="50" r="9" fill="var(--c)" stroke="none"/>
+      <rect x="46" y="4" width="8" height="12" rx="2" fill="#ffd23a" stroke="none"/>
+    </g></svg></div>
+    <div class="bar"><b></b><i id="bar"></i></div>
+    <div class="status" id="status">달릴 준비</div>
+    <div class="sub" id="sub">폰을 핸들처럼 기울여요</div>
+    <div class="slide" id="slide"><i id="slideKnob"></i><em>동작 센서가 없어요 · 여기를 좌우로 밀어서 조향</em></div>
+    <div class="cd" id="cd"></div>
+  </div>
+  <button class="pedal" id="pGas" aria-label="액셀"><svg viewBox="0 0 48 48"><path d="M10 26l14-14 14 14"/><path d="M10 40l14-14 14 14"/></svg>액셀<small>오른쪽 엄지</small></button>
+</section>
+
+<div id="rotate"><svg viewBox="0 0 48 48"><rect x="14" y="4" width="20" height="40" rx="4"/><path d="M22 40h4"/></svg><h1>폰을 가로로 돌려 주세요</h1><p>핸들처럼 양손으로 잡고 기울여서 운전해요.</p></div>
+<div id="flash"></div>
+<div class="debug" id="debug"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script src="controller.js"></script>
+</body>
+</html>

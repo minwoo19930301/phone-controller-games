@@ -1,5 +1,6 @@
 // 에어하키 소리: 말렛 타구음, 벽 튕김, 골문 기둥, 골(퍽 떨어지는 소리 + 버저), 카운트다운, 공기 부상 소음.
 // 녹음 파일 없이 WebAudio 로 만듭니다.
+import { modal, grit, organ, marimba, bell, chip, pluck, brass, phrase } from '/common/voice.js';
 let actx = null;
 let master = null;
 export function audio() {
@@ -173,12 +174,14 @@ export const sfx = {
     tone(1900, 0.32, 0.09, { type: 'triangle', glide: 1.06 });
   },
   win() {
-    [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.34, 0.11, { type: 'triangle', when: i * 0.12 }));
+    if (!ready()) return;
+    phrase(392, [[0, 0.25], [4, 0.25], [7, 0.25], [11, 0.25], [12, 0.25], [7, 0.25], [12, 0.25], [16, 0.25], [19, 1]], 300, (f, d, w) => chip(actx, master, f, d, { when: w, gain: 0.05 }));
     noise(2.2, 1600, 0.35, 0.2, { attack: 0.4, when: 0.3 });
   },
+  // 동전 넣는 오락실 '삐로링'
   join() {
-    tone(880, 0.1, 0.1);
-    tone(1320, 0.14, 0.08, { when: 0.08 });
+    if (!ready()) return;
+    phrase(784, [[0, 0.25], [7, 0.25], [12, 0.5]], 480, (f, d, w) => chip(actx, master, f, d, { when: w, gain: 0.05, duty: 0.25 }));
   },
   fast() {
     if (muted) return;

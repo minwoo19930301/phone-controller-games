@@ -11,6 +11,7 @@
 <script type="importmap">
 { "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
 </script>
+<style>/* 대기실 설명은 한 줄만 */ .lobby-copy .steps, .lobby-copy .spins, .lobby-copy .rules { display: none !important; }</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
@@ -92,11 +93,11 @@
       <h1 class="wordmark only-derby">HOME RUN<br>DERBY</h1>
       <h1 class="wordmark only-duel">PITCHER<br>VS BATTER</h1>
       <div class="modes" id="modes">
-        <button class="mode" data-mode="derby"><kbd>1</kbd><b>홈런 더비</b><span>1~4명 · 10구씩 쳐서 홈런 수로 겨뤄요</span></button>
-        <button class="mode" data-mode="duel"><kbd>2</kbd><b>투타 대결</b><span>2~4명 · 한 명은 폰으로 던지고, 한 명은 쳐요</span></button>
+        <button class="mode" data-mode="derby"><kbd>1</kbd><b>홈런 더비</b><span>1~4명</span></button>
+        <button class="mode" data-mode="duel"><kbd>2</kbd><b>투타 대결</b><span>2~4명</span></button>
       </div>
-      <p class="lede only-derby">폰이 방망이가 됩니다. 1~4명이 10구씩 쳐서 홈런 수로 겨뤄요.</p>
-      <p class="lede only-duel">한 명은 폰으로 던지고 한 명은 쳐요. 3아웃(최대 6타석)이면 공수 교대, 한 사람당 두 이닝씩 쳐서 득점으로 겨뤄요.</p>
+      <p class="lede only-derby">폰을 방망이처럼 휘두르세요.</p>
+      <p class="lede only-duel">한 명은 던지고, 한 명은 치세요.</p>
       <ol class="steps only-duel">
         <li>
           <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="12" y="10" width="24" height="28" rx="3"/><path d="M12 19h24 M12 29h24 M20 10v28 M28 10v28"/><circle cx="31" cy="15" r="3"/></svg>

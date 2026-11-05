@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#05070d">
+<title>좀비 건 아케이드</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
+</script>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="vig" class="vig"></div>
+<div id="hurt" class="hurt"></div>
+
+<div id="topbar" class="topbar hidden">
+  <div class="stagetag"><span id="stageName">1 · 폐허가 된 거리</span><b id="waveName">WAVE 1/9</b></div>
+  <div class="foe"><span>남은 좀비</span><b id="foeLeft">0</b></div>
+</div>
+
+<div id="floaters" class="floaters"></div>
+<div id="xhs" class="xhs"></div>
+<div id="cards" class="cards"></div>
+<div id="count" class="count"></div>
+<div id="banner" class="banner"><b></b><span></span></div>
+
+<div id="join" class="join hidden">
+  <img id="qrMini" alt="">
+  <div><span class="join-k">참가</span><b id="codeMini">----</b></div>
+</div>
+
+<section id="lobby" class="screen">
+  <div class="lobby">
+    <div class="lobby-copy">
+      <div class="eyebrow">1~8인 · 한 화면</div>
+      <h1 class="wordmark">ZOMBIE<br>GUN</h1>
+      <p class="lede">폰을 화면에 겨누고 방아쇠를 눌러 좀비를 잡아요.</p>
+      <div class="slots" id="slots"></div>
+      <div class="hint"><kbd>Enter</kbd> 시작</div>
+    </div>
+    <div class="qr-card">
+      <img id="qr" alt="참가 QR">
+      <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
+      <div class="qr-url" id="url"></div>
+      <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 동작 센서가 꺼져 있어요. https 주소에서 열어 주세요.</div>
+    </div>
+  </div>
+  <div class="msg" id="msg"></div>
+</section>
+
+<section id="over" class="screen over-screen hidden">
+  <div class="over">
+    <div class="eyebrow" id="overEyebrow">MISSION COMPLETE</div>
+    <h1 class="wordmark sm" id="overTitle">작전 결과</h1>
+    <div class="podium" id="podium"></div>
+    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b></div>
+  </div>
+</section>
+
+<section id="replaced" class="screen hidden">
+  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+</section>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#06070f">
+<title>좀비 건 컨트롤러</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<style>
+  :root { --c: #ff5a5f; --bg: #06070f; --fg: #f3f4f9; --dim: #9aa6bf; --line: rgba(255,255,255,.12); }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+    font-family: "Pretendard Variable", Pretendard, -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  body { display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top) + 10px) 16px calc(env(safe-area-inset-bottom) + 14px);
+    background: radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--c) 20%, transparent), transparent 70%), var(--bg); }
+  header { position: relative; z-index: 2; display: flex; align-items: center; gap: 10px; height: 44px; }
+  .me { font-family: Anton, Impact, sans-serif; font-size: 26px; padding: 2px 14px; border-radius: 999px; background: var(--c); color: #0b0f17; }
+  .room { flex: 1; color: var(--dim); font-size: 13px; letter-spacing: .1em; }
+  .recal { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.08); color: var(--fg); border: 1.5px solid var(--line);
+    font-size: 13px; font-weight: 700; }
+  .hidden { display: none !important; }
+  .banner { position: relative; z-index: 2; margin: 6px 0 0; padding: 9px 12px; border-radius: 12px; background: rgba(255,90,95,.14); color: #ffb3b5; font-size: 13px; text-align: center; }
+  main { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  .view.on { display: flex; }
+  .center { align-items: center; justify-content: center; text-align: center; gap: 14px; }
+  h1 { margin: 0; font-size: 28px; line-height: 1.25; letter-spacing: -.02em; }
+  p { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.55; white-space: pre-line; }
+  .note { font-size: 13px; color: #ffcf8a; }
+  button { font: inherit; border: 0; cursor: pointer; color: inherit; }
+  button:disabled { opacity: .55; }
+  .primary { width: 100%; padding: 19px; border-radius: 18px; background: var(--c); color: #0b0f17; font-size: 21px; font-weight: 800;
+    box-shadow: 0 0 30px color-mix(in srgb, var(--c) 35%, transparent); }
+  .primary.waiting { background: rgba(255,255,255,.1); color: var(--fg); box-shadow: none; border: 1.5px solid var(--c); }
+  .ghost { width: 100%; padding: 14px; border-radius: 16px; background: transparent; color: var(--fg); border: 1.5px solid var(--line); font-size: 16px; font-weight: 700; }
+  .art { width: 120px; height: 150px; overflow: visible; }
+  .big { font-size: 40px; font-weight: 900; letter-spacing: -.03em; }
+  .chips { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .chip { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); font-size: 14px; color: var(--dim); }
+  .chip b { color: var(--fg); font-size: 16px; margin-left: 4px; }
+  .chip.ok b { color: #7ef0a0; }
+  .practice { min-height: 22px; font-size: 15px; color: var(--fg); }
+
+  /* 중앙 맞추기 */
+  .aimart circle, .aimart path { fill: none; stroke: var(--c); stroke-width: 3; stroke-linecap: round; }
+
+  /* 경기 중 */
+  .hudrow { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; margin: 6px 0; padding: 10px 14px;
+    border-radius: 18px; background: rgba(0,0,0,.35); border: 1px solid var(--line); }
+  .sc { display: flex; align-items: baseline; gap: 4px; }
+  .sc b { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 40px; line-height: 1; }
+  .sc span { color: var(--dim); font-size: 13px; font-weight: 700; }
+  .hp { display: flex; flex-direction: column; gap: 5px; }
+  .hp-top { display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; color: var(--dim); }
+  .hp-top b { color: var(--fg); }
+  .hpbar { height: 12px; border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden; }
+  .hpbar i { display: block; height: 100%; width: 100%; border-radius: 99px; background: var(--c); box-shadow: 0 0 12px var(--c); transition: width .25s; }
+  .hpbar.low i { background: #ff4a5a; box-shadow: 0 0 12px #ff4a5a; animation: blink .4s infinite alternate; }
+  @keyframes blink { to { opacity: .4; } }
+  .ammo { display: flex; gap: 3px; height: 14px; margin: 2px 0 4px; }
+  .ammo i { flex: 1; border-radius: 3px; background: rgba(255,255,255,.14); }
+  .ammo i.on { background: var(--c); box-shadow: 0 0 6px var(--c); }
+  .status { min-height: 22px; text-align: center; font-size: 15px; font-weight: 700; color: var(--fg); }
+  .status.warn { color: #ffd0a0; }
+  .combo { color: #ffd23a; font-weight: 800; }
+  .pads { position: relative; flex: 1; display: grid; grid-template-columns: 1fr 2.3fr; gap: 10px; min-height: 0; margin-top: 8px; }
+  .trigger { position: relative; border-radius: 26px; background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--c) 85%, #fff 10%), color-mix(in srgb, var(--c) 70%, #000));
+    color: #0b0f17; font-size: 34px; font-weight: 900; letter-spacing: .04em; box-shadow: 0 0 40px color-mix(in srgb, var(--c) 40%, transparent), inset 0 -10px 0 rgba(0,0,0,.2);
+    touch-action: none; }
+  .trigger:active, .trigger.on { transform: scale(.975); filter: brightness(1.25); }
+  .reload { border-radius: 26px; background: rgba(255,255,255,.08); border: 1.5px solid var(--line); font-size: 20px; font-weight: 800; touch-action: none; }
+  .reload:active { background: rgba(255,255,255,.2); }
+  .reload.need { border-color: var(--c); color: var(--c); animation: blink .5s infinite alternate; }
+  .down-ov { position: absolute; inset: 0; border-radius: 26px; background: rgba(5,6,12,.82); display: none; align-items: center; justify-content: center;
+    text-align: center; padding: 20px; font-size: 18px; font-weight: 800; line-height: 1.5; z-index: 3; }
+  .down-ov.on { display: flex; }
+
+  /* 센서 없는 PC 시험용 */
+  .pad { position: relative; height: 22vh; min-height: 110px; border-radius: 18px; border: 1.5px dashed rgba(255,255,255,.25); margin-top: 8px;
+    background: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--c) 16%, transparent), transparent 70%); touch-action: none; }
+  .pad .dotp { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: var(--c); box-shadow: 0 0 16px var(--c); }
+  .pad span { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 12px; color: var(--dim); }
+  .pads-hint { margin-top: 6px; font-size: 12px; text-align: center; }
+  .practice-pad { width: 100%; height: 22vh; min-height: 110px; border-radius: 20px; background: color-mix(in srgb, var(--c) 82%, #000); color: #0b0f17; font-size: 24px; font-weight: 900; touch-action: none; }
+
+  #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 5; }
+  #flash.go { animation: flash .4s ease-out; }
+  #flash.hurt { background: radial-gradient(circle, rgba(255,40,70,.2), rgba(255,20,60,.9)); }
+  #flash.head { background: radial-gradient(circle, rgba(255,230,120,.1), rgba(255,200,40,.55)); }
+  #flash.kill { background: radial-gradient(circle, transparent 50%, color-mix(in srgb, var(--c) 70%, transparent)); }
+  #flash.shot { background: color-mix(in srgb, var(--c) 18%, transparent); }
+  @keyframes flash { from { opacity: .85; } to { opacity: 0; } }
+  .debug { position: fixed; left: 8px; right: 8px; bottom: calc(env(safe-area-inset-bottom) + 4px); font: 11px ui-monospace, monospace;
+    color: rgba(255,255,255,.45); white-space: pre-wrap; pointer-events: none; z-index: 6; }
+</style>
+</head>
+<body>
+<header>
+  <span class="me" id="me">…</span>
+  <span class="room" id="room"></span>
+  <button class="recal hidden" id="btnRecal">중앙 다시 맞추기</button>
+</header>
+<div class="banner hidden" id="banner"></div>
+<main>
+  <!-- 처음 -->
+  <section class="view center on" id="vStart">
+    <svg class="art aimart" viewBox="0 0 120 150" aria-hidden="true">
+      <rect x="40" y="70" width="40" height="76" rx="9" fill="#0b0f17" stroke="#fff" stroke-width="3" style="fill:#0b0f17;stroke:#fff"/>
+      <circle cx="60" cy="30" r="20"/><circle cx="60" cy="30" r="5"/>
+      <path d="M60 2v10M60 48v10M32 30h10M78 30h10"/>
+      <path d="M60 70V52" style="stroke:#fff;stroke-dasharray:3 5"/>
+    </svg>
+    <h1>폰이 총이 됩니다</h1>
+    <p>폰을 큰 화면 쪽으로 겨누면
+화면에 내 색 조준점이 움직여요.
+큰 방아쇠를 누르면 발사!</p>
+    <p class="note hidden" id="httpNote">https 주소가 아니라서 동작 센서가 꺼질 수 있어요.
+그때는 화면의 버튼으로 할 수 있어요.</p>
+    <button class="primary" id="btnStart" style="margin-top:10px">시작하기</button>
+  </section>
+
+  <!-- 메시지 -->
+  <section class="view center" id="vMsg"><h1 id="msgT"></h1><p id="msgB"></p><button class="ghost hidden" id="btnMsg" style="max-width:280px"></button></section>
+
+  <!-- 대기실 · 경기 끝 · 관전 -->
+  <section class="view center" id="vWait">
+    <div class="big" id="waitT">대기실</div>
+    <p id="waitB"></p>
+    <div class="chips" id="waitChips"></div>
+    <div class="practice" id="practice"></div>
+    <button class="primary" id="btnGo" style="margin-top:8px">준비</button>
+    <button class="ghost" id="btnCalLobby">조준 맞추기</button>
+    <button class="practice-pad hidden" id="btnPractice">연습 사격</button>
+  </section>
+
+  <!-- 중앙 맞추기 -->
+  <section class="view center" id="vCal">
+    <svg class="art aimart" viewBox="0 0 120 150" aria-hidden="true">
+      <circle cx="60" cy="60" r="38"/><circle cx="60" cy="60" r="8"/>
+      <path d="M60 8v18M60 94v18M8 60h18M94 60h18"/>
+    </svg>
+    <h1 id="calT">화면 한가운데를 겨눠요</h1>
+    <p id="calB">폰을 큰 화면 정중앙으로 향하고
+그대로 아래 버튼을 눌러요.</p>
+    <button class="primary" id="btnReady" style="margin-top:6px">여기가 중앙</button>
+    <button class="ghost hidden" id="btnCalCancel">돌아가기</button>
+  </section>
+
+  <!-- 경기 중 -->
+  <section class="view" id="vPlay">
+    <div class="hudrow">
+      <div class="sc"><b id="score">0</b><span>점</span></div>
+      <div class="hp">
+        <div class="hp-top"><span>체력</span><b id="hpT">100</b></div>
+        <div class="hpbar" id="hpBar"><i id="hpFill"></i></div>
+      </div>
+    </div>
+    <div class="ammo" id="ammo"></div>
+    <div class="status" id="status">곧 시작해요</div>
+    <div class="pads">
+      <button class="reload" id="btnReload">장전</button>
+      <button class="trigger" id="btnTrigger">발사</button>
+      <div class="down-ov" id="downOv">쓰러졌어요<br>다음 웨이브가 끝나면 부활해요</div>
+    </div>
+    <div class="hidden" id="fallback">
+      <div class="pad" id="pad"><div class="dotp" id="padDot"></div><span>끌어서 조준점 움직이기</span></div>
+      <p class="pads-hint" id="fallbackHint"></p>
+    </div>
+  </section>
+</main>
+<div id="flash"></div>
+<div class="debug" id="debug"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script src="controller.js"></script>
+</body>
+</html>

@@ -19,7 +19,7 @@
   h1 { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: clamp(48px, 7vw, 96px); line-height: 0.95; margin: 12px 0 14px; }
   p.lede { color: #c9d3e1; font-size: 19px; margin: 0 0 40px; }
   .games { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-  a.card { position: relative; display: flex; flex-direction: column; justify-content: flex-end; min-height: 320px; padding: 28px;
+  a.card { position: relative; isolation: isolate; display: flex; flex-direction: column; justify-content: flex-end; min-height: 320px; padding: 28px;
     border-radius: 24px; color: inherit; text-decoration: none; overflow: hidden; border: 1px solid rgba(255,255,255,.1);
     transition: transform .25s cubic-bezier(.2,1.2,.4,1), border-color .25s; }
   a.card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,.35); }
@@ -31,6 +31,8 @@
   .tennis { --bg: radial-gradient(420px 260px at 70% 0%, rgba(255,255,255,.22), transparent 70%), linear-gradient(180deg, #2f6fb3 0%, #3d8a4f 100%); }
   .airhockey { --bg: radial-gradient(420px 260px at 70% 0%, rgba(255,255,255,.22), transparent 70%), linear-gradient(180deg, #2a0f3a 0%, #0b2a4a 100%); }
   .putting { --bg: radial-gradient(420px 260px at 70% 0%, rgba(255,255,255,.22), transparent 70%), linear-gradient(180deg, #6fb04f 0%, #2f6a3a 100%); }
+  .kart { --bg: radial-gradient(420px 260px at 70% 0%, rgba(255,255,255,.22), transparent 70%), linear-gradient(180deg, #ff8a3d 0%, #9b2f1f 100%); }
+  .gun { --bg: radial-gradient(420px 260px at 70% 0%, rgba(255,255,255,.14), transparent 70%), linear-gradient(180deg, #3b4a3a 0%, #121812 100%); }
   .golf { --bg: radial-gradient(500px 260px at 80% 0%, rgba(255,250,220,.6), transparent 70%), linear-gradient(180deg, #7fb4e6 0%, #b9d9ef 45%, #5d9c4f 70%, #3f7d3a 100%); }
   .card .tag { position: absolute; top: 24px; left: 28px; font-size: 13px; font-weight: 800; letter-spacing: .14em;
     padding: 6px 12px; border-radius: 999px; background: rgba(0,0,0,.35); backdrop-filter: blur(6px); }
@@ -38,79 +40,77 @@
   .card .ko { font-size: 20px; font-weight: 800; margin: 6px 0 10px; }
   .card .desc { font-size: 15px; line-height: 1.5; color: rgba(255,255,255,.88); max-width: 34ch; text-shadow: 0 2px 10px rgba(0,0,0,.4); }
   .card svg { position: absolute; right: 22px; top: 60px; width: 150px; height: 150px; opacity: .9; }
+  h1.title { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: clamp(40px, 7vw, 88px); letter-spacing: .02em; margin: 0 0 36px; line-height: 1; }
+  .card .pv { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -1; }
+  a.card::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, transparent 45%, rgba(0,0,0,.75)); }
   footer { margin-top: 32px; color: var(--dim); font-size: 14px; }
 </style>
 </head>
 <body>
 <main>
-  <div class="eyebrow">PHONE CONTROLLER GAMES</div>
-  <h1>폰이 컨트롤러가 됩니다</h1>
-  <p class="lede">큰 화면에서 종목을 고르고, 폰으로 QR을 찍어 참가하세요. 앱 설치는 필요 없어요.</p>
+  <h1 class="title">PHONE CONTROLLER GAMES</h1>
   <div class="games">
     <a class="card baseball" href="/baseball/">
+      <img class="pv" src="/previews/baseball.gif" alt="" loading="lazy">
       <span class="tag">1~4인</span>
-      <svg viewBox="0 0 100 100" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round">
-        <circle cx="50" cy="50" r="30"/><path d="M30 28c8 8 8 36 0 44M70 28c-8 8-8 36 0 44" stroke="#ff5a5f"/>
-      </svg>
       <h2>HOME RUN DERBY</h2>
       <div class="ko">홈런 더비</div>
-      <div class="desc">폰을 방망이처럼 쥐고, 공이 오는 순간 휘둘러요. 10구씩 쳐서 홈런 수로 겨뤄요.</div>
     </a>
     <a class="card golf" href="/golf/">
+      <img class="pv" src="/previews/golf.gif" alt="" loading="lazy">
       <span class="tag">1~4인</span>
-      <svg viewBox="0 0 100 100" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round">
-        <path d="M40 12v66"/><path d="M40 14l28 10-28 10" fill="#ff5a5f" stroke="#ff5a5f"/><ellipse cx="44" cy="80" rx="26" ry="7"/>
-      </svg>
       <h2>CLOSEST TO THE PIN</h2>
       <div class="ko">골프 니어핀</div>
-      <div class="desc">폰이 골프채가 됩니다. 휘두르는 궤적 그대로 클럽이 움직이고, 방향은 터치로 맞춰요.</div>
     </a>
     <a class="card pingpong" href="/pingpong/">
+      <img class="pv" src="/previews/pingpong.gif" alt="" loading="lazy">
       <span class="tag">1~4인 · 화면 분할</span>
-      <svg viewBox="0 0 100 100" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round">
-        <ellipse cx="44" cy="40" rx="24" ry="26" fill="#d62f3a" stroke="none"/><path d="M58 60l16 20"/><circle cx="78" cy="30" r="6" fill="#fff" stroke="none"/>
-      </svg>
       <h2>TABLE TENNIS</h2>
       <div class="ko">탁구</div>
-      <div class="desc">1인칭으로 탁구채만 보여요. 공이 오기 직전 슬로우가 걸리고, 브러시하듯 치면 스핀이 걸려요.</div>
     </a>
     <a class="card saber" href="/saber/">
+      <img class="pv" src="/previews/saber.gif" alt="" loading="lazy">
       <span class="tag">1~4인 · 화면 분할</span>
-      <svg viewBox="0 0 100 100" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M30 80L72 22" stroke="#7fd4ff" stroke-width="7"/><path d="M30 80L72 22" stroke="#fff" stroke-width="2.5"/><path d="M22 90l12-14" stroke="#c9ccd1" stroke-width="7"/></svg>
       <h2>BEAM BLADE</h2>
       <div class="ko">광선검</div>
-      <div class="desc">폰을 세로로 쥐면 광선검이 1:1로 따라 움직여요. 날아오는 레이저를 튕겨 내고 드론을 쓰러뜨려요.</div>
     </a>
     <a class="card fishing" href="/fishing/">
+      <img class="pv" src="/previews/fishing.gif" alt="" loading="lazy">
       <span class="tag">1~4인</span>
-      <svg viewBox="0 0 100 100" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M20 20Q60 10 80 70" /><path d="M80 70v14"/><circle cx="80" cy="86" r="4" fill="#ff5a5f" stroke="none"/><path d="M14 92c14-6 26 6 40 0s26-6 40 0"/></svg>
       <h2>BASS FISHING</h2>
       <div class="ko">배스 낚시</div>
-      <div class="desc">뒤로 젖혔다 휙 던져 캐스팅하고, 찌가 들어가면 낚아채요. 화면을 돌려 릴을 감아요.</div>
     </a>
     <a class="card tennis" href="/tennis/">
+      <img class="pv" src="/previews/tennis.gif" alt="" loading="lazy">
       <span class="tag">1~4인</span>
-      <svg viewBox="0 0 100 100" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><circle cx="40" cy="42" r="22"/><path d="M56 58l22 24"/><circle cx="76" cy="26" r="7" fill="#d4f36b" stroke="none"/></svg>
       <h2>TENNIS</h2>
       <div class="ko">테니스</div>
-      <div class="desc">폰을 라켓처럼 휘둘러요. 포핸드·백핸드를 알아서 가리고, 감아올리면 탑스핀, 깎으면 슬라이스.</div>
     </a>
     <a class="card airhockey" href="/airhockey/">
+      <img class="pv" src="/previews/airhockey.gif" alt="" loading="lazy">
       <span class="tag">1~4인</span>
-      <svg viewBox="0 0 100 100" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><rect x="16" y="18" width="68" height="64" rx="10"/><path d="M16 50h68"/><circle cx="50" cy="66" r="9" fill="#ff5a5f" stroke="none"/><circle cx="50" cy="40" r="5" fill="#fff" stroke="none"/></svg>
       <h2>AIR HOCKEY</h2>
       <div class="ko">에어하키</div>
-      <div class="desc">폰 화면이 손잡이가 돼요. 밀어서 퍽을 쳐 상대 골문에 넣어요.</div>
     </a>
     <a class="card putting" href="/putting/">
+      <img class="pv" src="/previews/putting.gif" alt="" loading="lazy">
       <span class="tag">1~4인</span>
-      <svg viewBox="0 0 100 100" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><ellipse cx="50" cy="70" rx="34" ry="12"/><path d="M58 22v46"/><path d="M58 24l16 6-16 6" fill="#ff5a5f" stroke="#ff5a5f"/><circle cx="34" cy="70" r="3" fill="#fff" stroke="none"/></svg>
       <h2>PUTTING</h2>
       <div class="ko">퍼팅 챌린지</div>
-      <div class="desc">경사진 그린에서 폰을 진자처럼 “톡” 밀어 퍼팅해요. 홀마다 타수를 겨뤄요.</div>
+    </a>
+    <a class="card kart" href="/kart/">
+      <img class="pv" src="/previews/kart.gif" alt="" loading="lazy">
+      <span class="tag">1~4인</span>
+      <h2>KART RACE</h2>
+      <div class="ko">카트 레이스</div>
+    </a>
+    <a class="card gun" href="/gun/">
+      <img class="pv" src="/previews/gun.gif" alt="" loading="lazy">
+      <span class="tag">1~8인</span>
+      <h2>ZOMBIE GUN</h2>
+      <div class="ko">좀비 건 아케이드</div>
     </a>
   </div>
-  <footer>폰 동작 센서는 https 주소에서만 켜져요.</footer>
 </main>
 </body>
 </html>

@@ -1,4 +1,5 @@
 // 테니스 소리: 라켓 타구음(퐁), 바운드, 네트, 벽, 슬로우 진입, 관중 박수·함성, 심판 콜 효과음. 모두 WebAudio 로 만듭니다.
+import { modal, grit, organ, marimba, bell, chip, pluck, brass, phrase } from '/common/voice.js';
 let actx = null;
 let crowdBus = null;
 export function audio() {
@@ -98,10 +99,12 @@ export function crowd(level, sec = 0.8) {
 export const sfx = {
   // 라켓에 맞는 소리: 낮은 '퐁' + 줄 울림. 세게 칠수록 단단하고, 슬로우 중이면 늘어집니다.
   hit(q, slow, power = 0.6) {
+    if (!ready() || muted) return;
     const r = slow ? 0.6 : 1;
-    noise(0.07 / r, 1500 * r, 0.8, 0.45 + q * 0.35 + power * 0.2, 0, 'bandpass', r);
-    tone((420 + q * 120) * r, 0.09 / r, 0.32, 'triangle', 0.7);
-    tone((1650 + power * 300) * r, 0.05, 0.08, 'sine');
+    // 펠트 공이 줄에 박히는 낮은 '퍽' + 줄이 잠깐 '팅' 울림
+    modal(actx, actx.destination, [[340, 1, 0.07], [610, 0.5, 0.05]], { gain: 0.45 + power * 0.25, pitch: r, drop: 0.25 });
+    modal(actx, actx.destination, [[1180, 0.5, 0.16], [1770, 0.25, 0.12]], { gain: 0.08 + q * 0.06, pitch: r });
+    grit(actx, actx.destination, { sec: 0.03, freq: 1100, q: 0.6, gain: 0.25 + power * 0.2 });
   },
   serve(q, slow, power) {
     this.hit(q, slow, power);
@@ -137,14 +140,11 @@ export const sfx = {
       tone(1200, 0.08, 0.1, 'sine', 1, 0.12);
     }
   },
+  // 경기장 안내 종 '딩-동'
   point(good) {
-    if (good) {
-      tone(784, 0.14, 0.12, 'triangle');
-      tone(1175, 0.22, 0.12, 'triangle', 1, 0.11);
-    } else {
-      tone(392, 0.2, 0.1, 'triangle');
-      tone(330, 0.26, 0.1, 'triangle', 1, 0.12);
-    }
+    if (!ready() || muted) return;
+    if (good) { bell(actx, actx.destination, 880, { gain: 0.09, ratio: 1.4, depth: 1 }); bell(actx, actx.destination, 1109, { gain: 0.09, ratio: 1.4, depth: 1, when: 0.22 }); }
+    else { bell(actx, actx.destination, 740, { gain: 0.08, ratio: 1.4, depth: 1 }); bell(actx, actx.destination, 587, { gain: 0.08, ratio: 1.4, depth: 1, when: 0.22 }); }
   },
   clap(n, spread = 1600) {
     for (let i = 0; i < n; i++) noise(0.04, 1300 + Math.random() * 900, 1, 0.13, 0, 'bandpass', 1, (Math.random() * spread) / 1000);
@@ -154,11 +154,14 @@ export const sfx = {
     setTimeout(() => crowd(0.035, 1.6), big ? 1800 : 1100);
     this.clap(big ? 50 : 22, big ? 2200 : 1500);
   },
+  // 시상식 금관 팡파르
   win() {
-    [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.32, 0.12, 'triangle', 1, i * 0.13));
+    if (!ready() || muted) return;
+    phrase(349, [[0, 0.33], [0, 0.33], [0, 0.33], [5, 1], [9, 0.5], [12, 1.5]], 132, (f, d, w) => brass(actx, actx.destination, f, d, { gain: 0.06, when: w }));
   },
   join() {
-    tone(880, 0.12, 0.12);
+    if (!ready() || muted) return;
+    bell(actx, actx.destination, 1319, { gain: 0.07, ratio: 1.4, depth: 1, sec: 0.8 });
   },
   change() {
     tone(660, 0.14, 0.1, 'triangle');

@@ -1,4 +1,5 @@
 // 탁구 소리: 라켓 타구음, 테이블 바운드, 네트, 바닥, 슬로우 진입, 득점, 박수. 모두 WebAudio 로 만듭니다.
+import { modal, grit, organ, marimba, bell, chip, pluck, brass, phrase } from '/common/voice.js';
 let actx = null;
 export function audio() {
   if (!actx) {
@@ -54,10 +55,12 @@ function tone(freq, sec, gain, type = 'sine', glide = 0) {
 export const sfx = {
   // 라켓에 맞는 소리. 슬로우 중이면 낮고 길게 늘어집니다.
   hit(q, slow, smash) {
+    if (!ready()) return;
     const r = slow ? 0.55 : 1;
-    noise(0.05 / r, 2600 * r, 0.9, 0.55 + q * 0.4, 0, 'bandpass', r);
-    tone((1250 + q * 450) * r, 0.07 / r, 0.22);
-    if (smash) noise(0.12, 900, 0.6, 0.5, 0);
+    // 속이 빈 셀룰로이드 공: 높고 짧은 '틱' + 라켓 나무판 '톡'
+    modal(actx, actx.destination, [[3900, 1, 0.025], [6100, 0.5, 0.018], [1450, 0.6, 0.05]], { gain: 0.35 + q * 0.25, pitch: r });
+    grit(actx, actx.destination, { sec: 0.012, freq: 7000, q: 0.7, gain: 0.25 });
+    if (smash) modal(actx, actx.destination, [[520, 1, 0.09]], { gain: 0.4, drop: 0.3 });
   },
   bounce(vol = 1) {
     noise(0.035, 1700, 1.2, 0.5 * vol, 0);
@@ -79,22 +82,23 @@ export const sfx = {
   whiff() {
     noise(0.28, 800, 0.6, 0.3, 0.45);
   },
+  // 득점·실점: 마림바 5음계 한 줄
   point(good) {
-    if (good) {
-      tone(784, 0.14, 0.12, 'triangle');
-      setTimeout(() => tone(1175, 0.2, 0.12, 'triangle'), 110);
-    } else {
-      tone(392, 0.2, 0.1, 'triangle');
-      setTimeout(() => tone(330, 0.26, 0.1, 'triangle'), 120);
-    }
+    if (!ready()) return;
+    const m = (f, d, w) => marimba(actx, actx.destination, f, { when: w });
+    if (good) phrase(587, [[0, 0.5], [4, 0.5], [7, 1]], 220, m);
+    else phrase(440, [[3, 0.5], [0, 1]], 200, m);
   },
   clap(n) {
     for (let i = 0; i < n; i++) setTimeout(() => noise(0.04, 1400 + Math.random() * 900, 1, 0.16, 0), Math.random() * 1500);
   },
   win() {
-    [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.3, 0.12, 'triangle'), i * 130));
+    if (!ready()) return;
+    phrase(587, [[0, 0.5], [2, 0.5], [4, 0.5], [7, 0.5], [9, 0.5], [12, 0.5], [9, 0.5], [12, 1.5]], 260, (f, d, w) => marimba(actx, actx.destination, f, { when: w }));
   },
   join() {
-    tone(880, 0.12, 0.12);
+    if (!ready()) return;
+    marimba(actx, actx.destination, 1175);
+    marimba(actx, actx.destination, 1568, { when: 0.09 });
   }
 };

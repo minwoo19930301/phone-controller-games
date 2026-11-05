@@ -1,5 +1,6 @@
 // 홈런 더비 큰 화면. 서버는 방과 이벤트만 중계하고, 판정은 모두 여기서 합니다.
 // 같은 화면에서 투타 대결(한 명은 폰으로 던지고 한 명은 치기)도 돌립니다. 규칙 숫자는 duel.js 에 있습니다.
+import { modal, grit, organ, bell } from '/common/voice.js';
 import { createScene, fenceDist, FIELD_SPOTS } from './scene.js';
 import { RULES, PAD, REACH, PITCHES, clamp, aimToPlate, plateToAim, zoneMiss, controlSigma, pitchPoint,
   randomThrow, newDuel, half, nextHalf, applyPitch, battedOutcome, catchPoint, ranking } from './duel.js';
@@ -85,11 +86,14 @@ function tone(freq, sec, gain) {
   o.stop(a.currentTime + sec);
 }
 const sfx = {
-  crack: (q) => { noise(0.1, 2400, 0.6, 0.7 + q, 0); tone(1400 + q * 600, 0.05, 0.25); },
-  mitt: () => { noise(0.07, 420, 1.4, 1.1, 0); tone(160, 0.08, 0.3); },
+  // 나무 배트 '딱!': 날카로운 갈라짐 + 나무 몸통의 짧은 울림
+  crack: (q) => { if (!actx || actx.state !== 'running') return; grit(actx, actx.destination, { sec: 0.05, freq: 3600, q: 0.5, type: 'highpass', gain: 0.6 + q * 0.4 }); modal(actx, actx.destination, [[240, 1, 0.12], [610, 0.7, 0.08], [1330, 0.5, 0.05], [2170, 0.3, 0.03]], { gain: 0.35 + q * 0.25 }); },
+  // 가죽 미트 '퍽'
+  mitt: () => { if (!actx || actx.state !== 'running') return; modal(actx, actx.destination, [[110, 1, 0.1], [190, 0.6, 0.07]], { gain: 0.6, drop: 0.3 }); grit(actx, actx.destination, { sec: 0.05, freq: 600, q: 1, type: 'lowpass', gain: 0.7 }); },
   whiff: () => noise(0.32, 700, 0.6, 0.35, 0.45),
   cheer: (big) => noise(big ? 3.6 : 1.8, 1000, 0.35, big ? 0.6 : 0.3, 0.12),
-  organ: () => [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.25, 0.12), i * 140))
+  // 야구장 오르간 '차지!' 응원 가락
+  organ: () => { if (!actx || actx.state !== 'running') return; [[0, 0.16], [5, 0.16], [9, 0.16], [12, 0.32], [9, 0.16], [12, 0.6]].reduce((at, [s2, d]) => { organ(actx, actx.destination, 392 * Math.pow(2, s2 / 12), d, { when: at }); return at + d + 0.02; }, 0); }
 };
 
 // ---------- 연결 ----------

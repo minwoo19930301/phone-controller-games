@@ -1,4 +1,5 @@
 // 배스 낚시 큰 화면 소리. 파일 없이 WebAudio 로 만듭니다(물소리, 새소리, 풍덩, 톡톡, 드랙, 줄 끊김, 잡았다).
+import { modal, grit, organ, marimba, bell, chip, pluck, brass, phrase } from '/common/voice.js';
 let actx = null;
 let master = null;
 let noiseBuf = null;
@@ -150,8 +151,9 @@ setInterval(() => {
 }, 80);
 
 export const sfx = {
-  join: () => { tone(880, 0.12, { gain: 0.18, type: 'triangle' }); tone(1320, 0.16, { gain: 0.15, type: 'triangle', at: 0.09 }); },
-  leave: () => { tone(660, 0.14, { gain: 0.12, type: 'triangle' }); tone(440, 0.18, { gain: 0.1, type: 'triangle', at: 0.1 }); },
+  // 통기타 한 줄 뜯기
+  join: () => { if (!live()) return; pluck(actx, master, 392); pluck(actx, master, 587, { when: 0.1 }); },
+  leave: () => { if (!live()) return; pluck(actx, master, 494); pluck(actx, master, 330, { when: 0.12 }); },
   whoosh: (p = 0.6) => {
     noise(0.35 + p * 0.2, { freq: 700, sweep: 2600, q: 0.7, gain: 0.18 + p * 0.25, attack: 0.08, curve: 2 });
     // 줄 풀리는 소리

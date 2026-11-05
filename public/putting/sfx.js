@@ -1,4 +1,5 @@
 // 큰 화면 소리. 파일 없이 WebAudio 로 만듭니다: 퍼터 "톡", 구르는 소리, 컵 "딸그락", 립 아웃, 박수와 탄성, 새소리.
+import { modal, grit, organ, marimba, bell, chip, pluck, brass, phrase } from '/common/voice.js';
 let actx = null;
 let master = null;
 export function audio() {
@@ -92,10 +93,11 @@ function rollStop() {
 export const sfx = {
   putt(q) {
     // 퍼터 페이스에 맞는 짧은 "톡"
+    if (!ok()) return;
     const s = Math.min(1, Math.max(0.15, q));
-    burst({ sec: 0.03, freq: 3200, q: 1.4, gain: 0.35 + s * 0.4 });
-    tone({ freq: 1250 + s * 400, sec: 0.06, gain: 0.12 + s * 0.12, type: 'triangle' });
-    tone({ freq: 190, sec: 0.07, gain: 0.25 * s });
+    // 스틸 퍼터 페이스: 맑게 잠깐 남는 '팅' + 공 '톡'
+    modal(actx, master, [[2350, 1, 0.22], [5870, 0.4, 0.12], [3120, 0.3, 0.09]], { gain: 0.12 + s * 0.15 });
+    modal(actx, master, [[900, 1, 0.03]], { gain: 0.3 * s });
   },
   rollStart,
   rollSet,
@@ -117,8 +119,8 @@ export const sfx = {
     burst({ sec: 0.25, freq: 900, q: 0.7, gain: 0.12, attack: 0.08, sweep: 2200 });
   },
   chime() {
-    tone({ freq: 784, sec: 0.25, gain: 0.12 });
-    tone({ freq: 1175, sec: 0.35, gain: 0.1, at: 0.12 });
+    if (!ok()) return;
+    phrase(1047, [[0, 0.5], [7, 0.5], [16, 1.5]], 200, (f, d, w) => bell(actx, master, f, { when: w, gain: 0.08, ratio: 4, depth: 1.2, sec: 1.6 }));
   },
   tick() {
     tone({ freq: 1500, sec: 0.04, gain: 0.08 });

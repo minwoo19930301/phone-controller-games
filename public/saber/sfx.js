@@ -1,5 +1,6 @@
 // 광선검 큰 화면 소리: 드론 발사, 충전, 칼에 튕기는 소리, 격추 폭발, 피격, 점화, 슬로우, 웨이브 경보, 카운트다운, 박수.
 // 칼날의 웅웅 소리는 각자 폰 스피커에서 납니다. 큰 화면은 훈련장 바탕 소음만 아주 작게 깔아 둡니다.
+import { modal, grit, organ, marimba, bell, chip, pluck, brass, phrase } from '/common/voice.js';
 let actx = null;
 let master = null;
 let ambient = null;
@@ -161,14 +162,18 @@ export const sfx = {
   wall() {
     noise(0.06, 2600, 1.2, 0.12);
   },
+  // 우주 함대 같은 신스 브라스 화음
   win() {
-    [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.32, 0.11, 'triangle', 1, i * 0.13));
+    if (!ready()) return;
+    for (const s of [0, 7, 12]) brass(actx, master, 110 * Math.pow(2, s / 12), 0.5, { gain: 0.05 });
+    for (const s of [3, 10, 15]) brass(actx, master, 110 * Math.pow(2, s / 12), 1.6, { gain: 0.05, when: 0.55 });
   },
   clap(n) {
     for (let i = 0; i < n; i++) setTimeout(() => noise(0.04, 1400 + Math.random() * 900, 1, 0.13), Math.random() * 1500);
   },
   join() {
-    tone(880, 0.12, 0.1);
-    tone(1320, 0.14, 0.07, 'sine', 1, 0.08);
+    if (!ready()) return;
+    brass(actx, master, 220, 0.25, { gain: 0.05 });
+    brass(actx, master, 330, 0.35, { gain: 0.04, when: 0.12 });
   }
 };

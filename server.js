@@ -5,7 +5,8 @@ const { Server } = require('socket.io');
 const QRCode = require('qrcode');
 
 const PORT = process.env.PORT || process.argv[2] || 3000;
-const MAX_PLAYERS = 4;
+const MAX_PLAYERS = 4; // 기본 인원. 종목에 max 가 있으면 그 값(총게임은 8명)
+const maxOf = (room) => (room && GAMES[room.game] && GAMES[room.game].max) || MAX_PLAYERS;
 // 폰이 잠깐 끊겨도(새로고침, 화면 꺼짐) 같은 자리로 돌아올 수 있게 자리를 잡아 둡니다.
 const RESERVE_MS = Number(process.env.RESERVE_MS || 15000);
 // 큰 화면이 사라진 방은 이 시간 뒤에 지웁니다. 화면을 새로고침해도 같은 방으로 돌아올 수 있습니다.
@@ -65,6 +66,21 @@ const GAMES = {
     fromDisplay: ['game_state', 'goal', 'hit'],
     volatile: ['move']
   },
+  kart: {
+    title: '카트 레이스',
+    play: '/play/kart/',
+    fromController: ['drive', 'item', 'calibrate', 'start_game'],
+    fromDisplay: ['game_state', 'cue', 'result'],
+    volatile: ['drive']
+  },
+  gun: {
+    title: '좀비 건 아케이드',
+    play: '/play/gun/',
+    max: 8,
+    fromController: ['aim', 'shoot', 'reload', 'calibrate', 'start_game'],
+    fromDisplay: ['game_state', 'cue', 'result', 'hit'],
+    volatile: ['aim']
+  },
   putting: {
     title: '퍼팅 챌린지',
     play: '/play/putting/',
@@ -78,7 +94,11 @@ const PLAYER_SLOTS = {
   1: { slot: 1, name: '1P', color: '#ff5a5f' },
   2: { slot: 2, name: '2P', color: '#3ab4ff' },
   3: { slot: 3, name: '3P', color: '#ffc93c' },
-  4: { slot: 4, name: '4P', color: '#5ee07a' }
+  4: { slot: 4, name: '4P', color: '#5ee07a' },
+  5: { slot: 5, name: '5P', color: '#c77dff' },
+  6: { slot: 6, name: '6P', color: '#ff8fd1' },
+  7: { slot: 7, name: '7P', color: '#3ee6d6' },
+  8: { slot: 8, name: '8P', color: '#ff9b3d' }
 };
 
 const app = express();
@@ -138,7 +158,7 @@ function playerList(room) {
 }
 
 function broadcastPlayers(room) {
-  const payload = { players: playerList(room), max: MAX_PLAYERS };
+  const payload = { players: playerList(room), max: maxOf(room) };
   io.to(`${room.code}:display`).emit('players', payload);
   io.to(`${room.code}:controllers`).emit('players', payload);
   // 사람이 들어오거나 나가면 준비 인원을 다시 셉니다(준비 안 한 사람이 나가면 바로 시작될 수 있음).
@@ -211,7 +231,7 @@ function registerDisplay(socket, payload) {
   room.lastState = { phase: 'lobby' };
   socket.data = { role: 'display', room: room.code };
   socket.join(`${room.code}:display`);
-  socket.emit('room', { code: room.code, game, fresh, players: playerList(room), max: MAX_PLAYERS });
+  socket.emit('room', { code: room.code, game, fresh, players: playerList(room), max: maxOf(room) });
   io.to(`${room.code}:controllers`).emit('display_status', { connected: true });
 }
 
@@ -240,11 +260,11 @@ function registerController(socket, payload) {
     let free = null;
     const before = token ? room.tokens.get(token) : null;
     if (before && !room.slots.has(before)) free = before;
-    for (let s = 1; s <= MAX_PLAYERS && !free; s++) {
+    for (let s = 1; s <= maxOf(room) && !free; s++) {
       if (!room.slots.has(s)) free = s;
     }
     if (!free) {
-      socket.emit('room_full', { max: MAX_PLAYERS });
+      socket.emit('room_full', { max: maxOf(room) });
       return;
     }
     entry = { slot: free, token: token || `anon-${socket.id}` };

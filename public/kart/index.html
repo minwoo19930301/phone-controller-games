@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a0d18">
+<title>카트 레이스</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
+</script>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="views" class="views"></div>
+
+<section id="lobby" class="screen">
+  <div class="lobby">
+    <div class="lobby-copy">
+      <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 · 화면 분할</div>
+      <h1 class="wordmark">KART<br>RACE</h1>
+      <p class="lede">폰을 가로로 들고 핸들처럼 기울여 달리세요.</p>
+      <div class="slots" id="slots"></div>
+    </div>
+    <div class="qr-card">
+      <img id="qr" alt="참가 QR">
+      <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
+      <div class="qr-url" id="url"></div>
+      <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 동작 센서가 꺼져 있어요. https 주소에서 열어 주세요.</div>
+    </div>
+  </div>
+  <div class="msg" id="msg"></div>
+</section>
+
+<section id="over" class="screen hidden">
+  <div class="over">
+    <div class="eyebrow">FINAL</div>
+    <h1 class="wordmark sm">레이스 결과</h1>
+    <div class="podium" id="podium"></div>
+    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b></div>
+  </div>
+</section>
+
+<section id="replaced" class="screen hidden">
+  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+</section>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>

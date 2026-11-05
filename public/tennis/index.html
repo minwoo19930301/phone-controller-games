@@ -11,6 +11,7 @@
 <script type="importmap">
 { "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
 </script>
+<style>/* 대기실 설명은 한 줄만 */ .lobby-copy .steps, .lobby-copy .spins, .lobby-copy .rules { display: none !important; }</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
@@ -54,7 +55,7 @@
     <div class="lobby-copy">
       <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 · 단식·복식</div>
       <h1 class="wordmark">TENNIS</h1>
-      <p class="lede">폰이 라켓이 됩니다. 선수는 알아서 공까지 달려가요. 공이 오면 슬로우가 걸리고 링이 줄어드니, 링이 공에 닿는 순간 휘두르세요. 포핸드·백핸드는 폰 방향으로 알아서 가려요.</p>
+      <p class="lede">폰을 라켓처럼 휘두르세요.</p>
       <ol class="steps">
         <li>
           <svg viewBox="0 0 48 48" aria-hidden="true"><ellipse cx="24" cy="17" rx="11" ry="13"/><path d="M24 30v14"/><path d="M19 22h10M19 14h10M24 6v22"/></svg>
@@ -76,7 +77,7 @@
       </div>
       <div class="slots" id="slots"></div>
       <div class="pairs" id="pairs"></div>
-      <div class="hint"><kbd>Enter</kbd> 게임 시작 <span class="dot"></span> 2게임 선승 · 15·30·40·듀스 <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요 <span class="dot"></span> <button id="slowBtn" class="slow-btn" type="button">슬로우 켜짐</button> <kbd>L</kbd></div>
+      <div class="hint"><button id="slowBtn" class="slow-btn" type="button">슬로우 켜짐</button> <kbd>L</kbd></div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">

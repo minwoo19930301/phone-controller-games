@@ -1,4 +1,5 @@
 // 골프 니어핀 큰 화면: 차례, 타구 계산, 점수. 클럽 움직임은 폰에서 오는 방향을 그대로 씁니다.
+import { modal, grit, organ, bell } from '/common/voice.js';
 import { createScene, CLUBS } from './scene.js';
 import { PIN, TEE_H, WATER_Y, height, surface, slope, pinHeight } from './course.js';
 
@@ -61,12 +62,13 @@ function tone(freq, sec, gain, type = 'sine') {
   o.stop(a.currentTime + sec);
 }
 const sfx = {
-  strike: (q) => { noise(0.06, 3200, 0.8, 0.6 + q * 0.4, 0); tone(1800 + q * 900, 0.12, 0.18); },
+  // 티타늄 드라이버 헤드의 높고 쨍한 '팅'(비조화 배음이 길게 남음)
+  strike: (q) => { if (!actx || actx.state !== 'running') return; modal(actx, actx.destination, [[3150, 1, 0.38], [4720, 0.6, 0.3], [7300, 0.35, 0.2], [1880, 0.4, 0.15]], { gain: 0.12 + q * 0.1 }); grit(actx, actx.destination, { sec: 0.02, freq: 5000, gain: 0.3 + q * 0.2 }); },
   whoosh: () => noise(0.5, 900, 0.5, 0.25, 0.5),
   land: () => noise(0.08, 300, 1, 0.5, 0),
   splash: () => noise(0.7, 600, 0.4, 0.6, 0.05),
   clap: (n) => { for (let i = 0; i < n; i++) setTimeout(() => noise(0.04, 1500 + Math.random() * 800, 1, 0.25, 0), Math.random() * 1600); },
-  cup: () => { tone(900, 0.08, 0.3, 'triangle'); setTimeout(() => tone(600, 0.12, 0.3, 'triangle'), 90); }
+  cup: () => { if (!actx || actx.state !== 'running') return; [0, 0.1, 0.17].forEach((w, i) => modal(actx, actx.destination, [[1250 - i * 90, 1, 0.08], [2900, 0.4, 0.05]], { gain: 0.25 - i * 0.06, when: w })); bell(actx, actx.destination, 1568, { when: 0.35, gain: 0.07, ratio: 4, depth: 1.2 }); }
 };
 
 // ---------- 연결 ----------
