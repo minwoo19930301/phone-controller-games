@@ -23,11 +23,12 @@ const GAMES = {
     fromDisplay: ['game_state', 'turn', 'pitch', 'result', 'role'],
     volatile: []
   },
+  // 골프: 니어핀·퍼팅·홀 플레이(티샷→어프로치→퍼팅)를 한 종목으로 합쳤습니다. 퍼팅 스트로크와 스윙 분석용 이벤트도 받습니다.
   golf: {
-    title: '골프 니어핀',
+    title: '골프',
     play: '/play/golf/',
-    fromController: ['pose', 'aim', 'club', 'address', 'impact', 'start_game', 'cancel'],
-    fromDisplay: ['game_state', 'result', 'calibrated'],
+    fromController: ['pose', 'aim', 'club', 'address', 'impact', 'stroke', 'swing_data', 'mode', 'course', 'nav', 'pick', 'start_game', 'cancel'],
+    fromDisplay: ['game_state', 'result', 'calibrated', 'turn', 'cue', 'analysis', 'picker'],
     volatile: ['pose', 'aim']
   },
   pingpong: {
