@@ -177,12 +177,39 @@ async function main() {
   t1.emit('c2d', { event: 'start_game', data: {} });
   await wait(80);
   t2.disconnect();
-  await wait(200);
-  assert.strictEqual(starts, 2, '준비 안 한 사람이 나가면 남은 사람끼리 시작');
+  await wait(120);
+  assert.strictEqual(starts, 1, '잠깐 끊긴 사람(자리 잡아 둠)도 들어온 사람이라 기다려야 함');
+  await wait(450);
+  assert.strictEqual(starts, 2, '준비 안 한 사람의 자리가 빠지면 남은 사람끼리 시작');
 
   // ping
   const t = await new Promise((r) => dA2.emit('ping_rtt', 42, r));
   assert.strictEqual(t, 42);
+
+  // 녹화·사진 임시 보관: 큰 화면 키가 있어야 올릴 수 있고, 받을 수 있으며, 같은 종류를 다시 올리면 예전 것은 지워집니다.
+  const dC = mk();
+  dC.emit('join', { role: 'display', game: 'photobooth' });
+  const roomC = await once(dC, 'room');
+  assert.ok(roomC.key, '큰 화면은 올리기 키를 받아야 함');
+  const up = (key, body) => fetch(`${url}/api/clip?room=${roomC.code}&kind=photo&name=four.png`, { method: 'POST', headers: { 'x-display-key': key, 'content-type': 'image/png' }, body });
+  assert.strictEqual((await up('wrong', 'x')).status, 403);
+  const c1 = await (await up(roomC.key, 'first')).json();
+  const clipGet = await fetch(`${url}${c1.url}`);
+  assert.strictEqual(clipGet.status, 200);
+  assert.strictEqual(await clipGet.text(), "first");
+  assert.match(clipGet.headers.get('content-disposition'), /attachment/);
+  const c2 = await (await up(roomC.key, 'second')).json();
+  assert.strictEqual((await fetch(`${url}${c1.url}`)).status, 404, '같은 방·같은 종류의 예전 것은 지워져야 함');
+  assert.strictEqual(await (await fetch(`${url}${c2.url}`)).text(), 'second');
+
+  // 공통 이벤트(settings)는 모든 종목에서 화면으로 넘어갑니다.
+  const pC = mk();
+  pC.emit('join', { role: 'controller', room: roomC.code, token: 'token-photo-abcdef' });
+  await once(pC, 'assigned');
+  const gotSettings = once(dC, 'settings');
+  pC.emit('c2d', { event: 'settings', data: { difficulty: 'easy' } });
+  const st = await gotSettings;
+  assert.strictEqual(st.difficulty, 'easy');
 
   await wait(150);
   assert.ok(!leaked, '다른 방 화면으로 새면 안 됨');

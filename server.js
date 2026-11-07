@@ -87,8 +87,39 @@ const GAMES = {
     fromController: ['pose', 'aim', 'address', 'stroke', 'cancel', 'start_game'],
     fromDisplay: ['game_state', 'result'],
     volatile: ['pose', 'aim']
+  },
+  rhythm: {
+    title: '리듬 스텝',
+    play: '/play/rhythm/',
+    fromController: ['step', 'release', 'pose', 'nav', 'pick', 'mode', 'calibrate', 'start_game'],
+    fromDisplay: ['game_state', 'cue', 'judge', 'result', 'picker'],
+    volatile: ['pose']
+  },
+  orchestra: {
+    title: '오케스트라',
+    play: '/play/orchestra/',
+    fromController: ['instrument', 'play', 'release', 'beat', 'pose', 'level', 'nav', 'pick', 'calibrate', 'start_game'],
+    fromDisplay: ['game_state', 'cue', 'judge', 'result', 'picker', 'tempo'],
+    volatile: ['pose', 'level']
+  },
+  photobooth: {
+    title: '네컷 사진관',
+    play: '/play/photobooth/',
+    fromController: ['photo', 'draw', 'sticker', 'undo', 'clear', 'nav', 'pick', 'start_game'],
+    fromDisplay: ['game_state', 'countdown', 'shot', 'result', 'picker'],
+    volatile: []
   }
 };
+
+// 모든 종목에 공통으로 오가는 이벤트입니다.
+// settings: 폰에서 난이도·옵션을 바꿈 / tutorial: 폰 튜토리얼 진행 상황
+// msg, msg_v: 종목 안에서 자유롭게 쓰는 범용 통로(msg_v 는 밀리면 버려도 되는 값)
+// haptic: 화면이 특정 폰에 진동·불빛을 요청 / clip: 녹화·사진 임시 다운로드 주소 알림
+for (const g of Object.values(GAMES)) {
+  g.fromController = [...new Set([...g.fromController, 'settings', 'tutorial', 'msg', 'msg_v'])];
+  g.fromDisplay = [...new Set([...g.fromDisplay, 'haptic', 'clip', 'msg', 'msg_v'])];
+  g.volatile = [...new Set([...g.volatile, 'msg_v'])];
+}
 
 const PLAYER_SLOTS = {
   1: { slot: 1, name: '1P', color: '#ff5a5f' },
@@ -111,6 +142,51 @@ app.use('/vendor/three-addons', express.static(mod('three/examples/jsm'), longCa
 app.use('/vendor/pretendard', express.static(mod('pretendard/dist/web'), longCache));
 app.use('/vendor/anton', express.static(mod('@fontsource/anton'), longCache));
 app.get('/healthz', (req, res) => res.json({ ok: true }));
+
+// ---------- 녹화·사진 임시 보관 ----------
+// 큰 화면이 끝난 판의 녹화(오케스트라)나 완성 사진(네컷 사진관)을 올리면, 폰들도 잠깐 받을 수 있게 메모리에만 둡니다.
+// 디스크에 쓰지 않고, CLIP_TTL_MS 가 지나거나 같은 방이 새로 올리면 바로 지웁니다. 안 받으면 그대로 사라집니다.
+const CLIP_TTL_MS = Number(process.env.CLIP_TTL_MS || 10 * 60 * 1000);
+const CLIP_MAX_BYTES = 90 * 1024 * 1024; // 한 개
+const CLIP_TOTAL_BYTES = 220 * 1024 * 1024; // 전체(무료 서버 메모리 512MB)
+const clips = new Map(); // id -> { buf, type, name, room, kind, exp, timer }
+function dropClip(id) {
+  const c = clips.get(id);
+  if (!c) return;
+  clearTimeout(c.timer);
+  clips.delete(id);
+}
+function clipBytes() {
+  let n = 0;
+  for (const c of clips.values()) n += c.buf.length;
+  return n;
+}
+app.post('/api/clip', express.raw({ type: () => true, limit: CLIP_MAX_BYTES }), (req, res) => {
+  const room = rooms.get(cleanCode(req.query.room));
+  if (!room || !room.displayKey || req.get('x-display-key') !== room.displayKey) return res.status(403).json({ error: 'forbidden' });
+  const buf = req.body;
+  if (!Buffer.isBuffer(buf) || !buf.length) return res.status(400).json({ error: 'empty' });
+  const kind = String(req.query.kind || 'file').replace(/[^a-z0-9_-]/gi, '').slice(0, 20) || 'file';
+  // 같은 방·같은 종류의 예전 것은 지웁니다.
+  for (const [id, c] of clips) if (c.room === room.code && c.kind === kind) dropClip(id);
+  // 전체가 넘치면 오래된 것부터 지웁니다.
+  const byAge = [...clips.entries()].sort((a, b) => a[1].exp - b[1].exp);
+  while (byAge.length && clipBytes() + buf.length > CLIP_TOTAL_BYTES) dropClip(byAge.shift()[0]);
+  const id = require('crypto').randomBytes(9).toString('base64url');
+  const type = String(req.get('content-type') || 'application/octet-stream').slice(0, 100);
+  const name = String(req.query.name || `${kind}`).replace(/[^\w.가-힣-]/g, '_').slice(0, 80);
+  const exp = Date.now() + CLIP_TTL_MS;
+  clips.set(id, { buf, type, name, room: room.code, kind, exp, timer: setTimeout(() => dropClip(id), CLIP_TTL_MS) });
+  res.json({ id, url: `/api/clip/${id}`, expiresAt: exp });
+});
+app.get('/api/clip/:id', (req, res) => {
+  const c = clips.get(req.params.id);
+  if (!c) return res.status(404).send('이미 지워졌어요. 녹화·사진은 잠깐만 보관합니다.');
+  res.set('Content-Type', c.type);
+  res.set('Cache-Control', 'no-store');
+  res.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(c.name)}`);
+  res.send(c.buf);
+});
 
 // 방 코드는 헷갈리는 글자(0/O, 1/I)를 뺀 4글자입니다.
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -146,7 +222,8 @@ app.get('/api/qr', async (req, res) => {
 
 const httpServer = http.createServer(app);
 // 폰이 조용히 끊긴 것(LTE 음영, 화면 잠금)을 빨리 알아채도록 하트비트를 짧게 둡니다.
-const io = new Server(httpServer, { pingInterval: 6000, pingTimeout: 5000 });
+// 네컷 사진관은 사진(수백 KB)을 소켓으로 보내서 한 메시지 상한을 4MB 로 올립니다.
+const io = new Server(httpServer, { pingInterval: 6000, pingTimeout: 5000, maxHttpBufferSize: 4e6 });
 const CODE_RE = /^[A-HJ-NP-Z2-9]{4}$/;
 
 function publicPlayer(entry) {
@@ -163,18 +240,22 @@ function broadcastPlayers(room) {
   io.to(`${room.code}:controllers`).emit('players', payload);
   // 사람이 들어오거나 나가면 준비 인원을 다시 셉니다(준비 안 한 사람이 나가면 바로 시작될 수 있음).
   if (room.ready) {
-    for (const s of room.ready) if (!room.slots.get(s) || !room.slots.get(s).connected) room.ready.delete(s);
+    // 자리가 완전히 빠진 사람만 준비 목록에서 지웁니다. 잠깐 끊긴 사람(자리 잡아 둠)은 준비 표시를 그대로 둡니다.
+    for (const s of room.ready) if (!room.slots.get(s)) room.ready.delete(s);
     if (room.ready.size) checkReady(room);
     else emitReady(room);
   }
 }
 
-// 모두 준비: 폰의 start_game 은 바로 넘기지 않고, 연결된 사람이 모두 누르면 그때 화면에 한 번 넘깁니다.
+// 모두 준비: 폰의 start_game 은 바로 넘기지 않고, 들어온 사람이 모두 누르면 그때 화면에 한 번 넘깁니다.
+// 들어온 사람 = 자리를 가진 사람. 화면이 꺼지거나 잠깐 끊겨 자리를 잡아 둔 사람도 셉니다(RESERVE_MS 뒤 자리가 빠지면 그때 빠짐).
 // gate:false 인 종목(늘 열린 낚시)은 예전처럼 바로 넘깁니다.
 function readyState(room) {
-  const live = [...room.slots.values()].filter((e) => e.connected).map((e) => e.slot);
-  const ready = live.filter((s) => room.ready.has(s));
-  return { ready, players: live, need: live.length };
+  const held = [...room.slots.values()].sort((a, b) => a.slot - b.slot);
+  const players = held.map((e) => e.slot);
+  const away = held.filter((e) => !e.connected).map((e) => e.slot);
+  const ready = players.filter((s) => room.ready.has(s));
+  return { ready, players, away, need: players.length };
 }
 function emitReady(room) {
   const st = readyState(room);
@@ -229,9 +310,11 @@ function registerDisplay(socket, payload) {
   }
   room.displayId = socket.id;
   room.lastState = { phase: 'lobby' };
+  // 녹화·사진 올리기용 비밀 키. 큰 화면만 압니다(새로고침하면 새로 받음).
+  room.displayKey = require('crypto').randomBytes(12).toString('base64url');
   socket.data = { role: 'display', room: room.code };
   socket.join(`${room.code}:display`);
-  socket.emit('room', { code: room.code, game, fresh, players: playerList(room), max: maxOf(room) });
+  socket.emit('room', { code: room.code, game, fresh, players: playerList(room), max: maxOf(room), key: room.displayKey });
   io.to(`${room.code}:controllers`).emit('display_status', { connected: true });
 }
 
