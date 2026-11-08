@@ -18,7 +18,7 @@
   .eyebrow { font-size: 14px; font-weight: 800; letter-spacing: 0.24em; color: var(--gold); }
   h1 { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: clamp(48px, 7vw, 96px); line-height: 0.95; margin: 12px 0 14px; }
   p.lede { color: #c9d3e1; font-size: 19px; margin: 0 0 40px; }
-  .games { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+  .games { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 20px; }
   a.card { position: relative; isolation: isolate; display: flex; flex-direction: column; justify-content: flex-end; min-height: 320px; padding: 28px;
     border-radius: 24px; color: inherit; text-decoration: none; overflow: hidden; border: 1px solid rgba(255,255,255,.1);
     transition: transform .25s cubic-bezier(.2,1.2,.4,1), border-color .25s; }
@@ -64,6 +64,7 @@
       <span class="tag">1~4인</span>
       <h2>PHONE GOLF</h2>
       <div class="ko">폰 컨트롤 골프</div>
+      <div class="desc">티샷부터 퍼팅까지 한 게임에서</div>
     </a>
     <a class="card pingpong" href="/pingpong/">
       <img class="pv" src="/previews/pingpong.gif" alt="" loading="lazy">
@@ -95,12 +96,6 @@
       <h2>AIR HOCKEY</h2>
       <div class="ko">에어하키</div>
     </a>
-    <a class="card putting" href="/putting/">
-      <img class="pv" src="/previews/putting.gif" alt="" loading="lazy">
-      <span class="tag">1~4인</span>
-      <h2>PUTTING</h2>
-      <div class="ko">퍼팅 챌린지</div>
-    </a>
     <a class="card kart" href="/kart/">
       <img class="pv" src="/previews/kart.gif" alt="" loading="lazy">
       <span class="tag">1~4인</span>
@@ -114,16 +109,19 @@
       <div class="ko">좀비 건 아케이드</div>
     </a>
     <a class="card rhythm" href="/rhythm/">
+      <img class="pv" src="/previews/rhythm.gif" alt="" loading="lazy">
       <span class="tag">1~4인</span>
       <h2>RHYTHM STEP</h2>
       <div class="ko">리듬 스텝</div>
     </a>
     <a class="card orchestra" href="/orchestra/">
+      <img class="pv" src="/previews/orchestra.gif" alt="" loading="lazy">
       <span class="tag">1~4인</span>
       <h2>PHONE ORCHESTRA</h2>
       <div class="ko">폰 오케스트라</div>
     </a>
     <a class="card photobooth" href="/photobooth/">
+      <img class="pv" src="/previews/photobooth.gif" alt="" loading="lazy">
       <span class="tag">1~4인</span>
       <h2>PHOTO BOOTH</h2>
       <div class="ko">네컷 사진관</div>

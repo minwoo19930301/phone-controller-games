@@ -134,6 +134,10 @@ const PLAYER_SLOTS = {
 };
 
 const app = express();
+// 예전 퍼팅 주소는 하나로 합친 골프 입구로 안내합니다. 퍼팅 챌린지는
+// 골프 안의 모드로 유지해 기존 그린과 폰 컨트롤러를 그대로 사용할 수 있습니다.
+app.get(['/putting', '/putting/', '/putting/index.html'], (req, res) => res.redirect(302, '/golf/'));
+app.use('/golf/putting', express.static(path.join(__dirname, 'public', 'putting')));
 app.use(express.static(path.join(__dirname, 'public')));
 // 3D 엔진과 글꼴은 npm 패키지에서 바로 내보냅니다. 외부 CDN 에 기대지 않습니다.
 const mod = (p) => path.join(__dirname, 'node_modules', p);

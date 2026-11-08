@@ -17,6 +17,20 @@ async function main() {
   const sockets = [];
   const mk = () => { const s = client(url, { transports: ['websocket'], forceNew: true }); sockets.push(s); return s; };
 
+  // 기존 퍼팅 주소는 골프 입구로 안내하고, 챌린지는 골프 안에서 계속 실행됩니다.
+  for (const oldPath of ['/putting', '/putting/', '/putting/index.html']) {
+    const old = await fetch(url + oldPath, { redirect: 'manual' });
+    assert.strictEqual(old.status, 302);
+    assert.strictEqual(old.headers.get('location'), '/golf/');
+  }
+  const golf = await (await fetch(url + '/golf/')).text();
+  assert.match(golf, /href="\/golf\/putting\/"/);
+  const practice = await fetch(url + '/golf/putting/');
+  assert.strictEqual(practice.status, 200);
+  assert.match(await practice.text(), /퍼팅 챌린지/);
+  assert.strictEqual((await fetch(url + '/golf/putting/game.js')).status, 200);
+  assert.strictEqual((await fetch(url + '/play/putting/')).status, 200);
+
   // 큰 화면 두 개 = 방 두 개
   const dA = mk();
   dA.emit('join', { role: 'display', game: 'baseball' });
@@ -121,6 +135,19 @@ async function main() {
   let swingInGolf = false;
   dG.on('swing', () => { swingInGolf = true; });
   g1.emit('c2d', { event: 'swing', data: {} });
+
+  // 골프 안 퍼팅 모드도 기존 폰으로 방에 참여하고 스트로크가 전달됩니다.
+  const dP = mk();
+  dP.emit('join', { role: 'display', game: 'putting' });
+  const roomP = await once(dP, 'room');
+  const qrP = await fetch(`${url}/api/qr?room=${roomP.code}`).then((r) => r.json());
+  assert.ok(qrP.url.endsWith(`/play/putting/?room=${roomP.code}`));
+  const putter = mk();
+  putter.emit('join', { role: 'controller', room: roomP.code, token: 'putt-1-abcdef' });
+  assert.strictEqual((await once(putter, 'assigned')).game, 'putting');
+  const stroke = once(dP, 'stroke');
+  putter.emit('c2d', { event: 'stroke', data: { speed: 0.7 } });
+  assert.strictEqual((await stroke).speed, 0.7);
 
   // 잘못된 종목 이름(프로토타입 키)으로 서버가 죽지 않음
   const evil = mk();
