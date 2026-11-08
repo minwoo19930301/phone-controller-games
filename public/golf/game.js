@@ -4,7 +4,7 @@ import { createScene, CLUBS } from './scene-round.js';
 import { COURSES } from './courses/index.js';
 import { recommendClub } from './clubs.js';
 import { analyzeSwing, summarize, renderPanel } from './analysis.js';
-import { nextFarthest, nextTeeOrder } from './turn-order.mjs';
+import { nextFarthest, nextTeeOrder, skipHole } from './turn-order.mjs';
 
 const ROUNDS = 3;
 const RD = Math.PI / 180;
@@ -339,8 +339,7 @@ function watchTurn(now) {
       prompt(`${slot}P 연결을 기다려요`, '15초 안에 돌아오지 않으면 다음 사람 차례로 넘어가요');
     }
     if (now - game.awaySince > 15000) {
-      const score = game.scores[slot], remaining = Math.max(0, hole.par + 5 - score.strokes);
-      score.holed = true; score.strokes += remaining; score.total += remaining;
+      skipHole(game.scores[slot], hole.par);
       callout(`${slot}P 건너뜀`, '연결이 끊겼어요', 'miss', 1800);
       nextTurn();
     }
@@ -351,8 +350,7 @@ function watchTurn(now) {
     prompt(`${playerInfo(slot).name} 차례`, '폰에서 방향을 맞추고 어드레스를 눌러요');
   }
   if (now - game.activity > 75000) {
-    const score = game.scores[slot], remaining = Math.max(0, hole.par + 5 - score.strokes);
-    score.holed = true; score.strokes += remaining; score.total += remaining;
+    skipHole(game.scores[slot], hole.par);
     callout(`${slot}P 건너뜀`, '오래 기다려서 다음 차례로 넘어가요', 'miss', 1800);
     nextTurn();
   }

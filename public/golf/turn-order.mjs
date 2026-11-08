@@ -25,3 +25,12 @@ export function nextFarthest(order, scores, distanceToPin) {
 export function nextTeeOrder(order, scores) {
   return [...order].sort((a, b) => scores[a].strokes - scores[b].strokes);
 }
+
+// When a disconnected or inactive player is skipped, record the hole maximum
+// only once, including any strokes they have already taken on that hole.
+export function skipHole(score, par) {
+  const remaining = Math.max(0, par + 5 - score.strokes);
+  score.holed = true;
+  score.strokes += remaining;
+  score.total += remaining;
+}
