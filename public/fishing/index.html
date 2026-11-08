@@ -16,12 +16,16 @@
 <canvas id="cv"></canvas>
 <div class="vignette"></div>
 
-<!-- 왼쪽 위: 조과 순위 -->
-<aside id="board" class="board hidden">
-  <div class="bh"><span>오늘의 조과</span><span class="cols"><i></i><i>합계</i><i>최대어</i></span></div>
-  <div id="rows"></div>
-  <div class="rec hidden" id="rec"></div>
-</aside>
+<!-- 왼쪽 위: 조과 순위 · 난이도(D) · 처음 온 사람 연습 현황 -->
+<div class="leftcol" id="leftcol">
+  <aside id="board" class="board hidden">
+    <div class="bh"><span>오늘의 조과</span><span class="cols"><i></i><i>합계</i><i>최대어</i></span></div>
+    <div id="rows"></div>
+    <div class="rec hidden" id="rec"></div>
+  </aside>
+  <div class="setbox" id="setBox"></div>
+  <div class="tutbox" id="tutBox"></div>
+</div>
 
 <!-- 오른쪽 위: 늘 떠 있는 참가 QR -->
 <aside class="qr" id="qr">

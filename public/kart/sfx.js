@@ -117,5 +117,51 @@ export const sfx = {
   join() {
     if (!ready()) return;
     phrase(440, [[7, 0.25], [0, 0.25], [5, 0.4]], 200, (f, sec, at) => chip(actx, actx.destination, f, sec, { gain: 0.05, when: at }));
+  },
+  // 아이템 상자 깨짐: 유리 같은 반짝 두 음
+  pickup() {
+    if (!ready()) return;
+    bell(actx, actx.destination, 1568, { gain: 0.06, sec: 0.35 });
+    bell(actx, actx.destination, 2093, { gain: 0.05, sec: 0.4, when: 0.05 });
+  },
+  // 룰렛 똑딱
+  tick() {
+    tone(1900 + Math.random() * 300, 0.03, 0.025, 'square');
+  },
+  // 아이템이 정해짐: 위로 오르는 칩튠 세 음
+  itemGet() {
+    if (!ready()) return;
+    phrase(660, [[0, 0.12], [4, 0.12], [7, 0.3]], 360, (f, sec, at) => chip(actx, actx.destination, f, sec, { gain: 0.05, when: at }));
+  },
+  /** 아이템 쓰기 */
+  use(kind) {
+    if (!ready()) return;
+    if (kind === 'banana') tone(320, 0.22, 0.1, 'triangle', 0.5);
+    else if (kind === 'nitro' || kind === 'turbo') {
+      grit(actx, actx.destination, { sec: kind === 'turbo' ? 0.7 : 0.4, freq: 380, q: 1.1, gain: 0.3, sweep: 2600 });
+      tone(300, kind === 'turbo' ? 0.6 : 0.35, 0.08, 'sawtooth', 3);
+    } else if (kind === 'missile') {
+      grit(actx, actx.destination, { sec: 0.5, freq: 2200, q: 0.8, gain: 0.25, sweep: 500 });
+      tone(880, 0.4, 0.06, 'square', 0.6);
+    } else if (kind === 'star') {
+      phrase(523, [[0, 0.1], [4, 0.1], [7, 0.1], [12, 0.1], [16, 0.1], [19, 0.35]], 600, (f, sec, at) => chip(actx, actx.destination, f, sec, { gain: 0.045, when: at }));
+    }
+  },
+  // 미끄러져 돎: 내려가는 휘파람
+  spin() {
+    tone(1200, 0.6, 0.07, 'sine', 0.3);
+    tone(900, 0.5, 0.05, 'triangle', 0.4, 0.05);
+  },
+  // 번개: 지지직 + 낮은 쿵
+  thunder() {
+    if (!ready()) return;
+    grit(actx, actx.destination, { sec: 0.9, freq: 1800, q: 0.5, gain: 0.45, type: 'highpass' });
+    tone(70, 0.8, 0.25, 'sine', 0.6);
+  },
+  // 유도탄 터짐
+  boom() {
+    if (!ready()) return;
+    grit(actx, actx.destination, { sec: 0.5, freq: 300, q: 0.6, type: 'lowpass', gain: 0.6 });
+    tone(90, 0.4, 0.2, 'sine', 0.5);
   }
 };

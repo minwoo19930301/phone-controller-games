@@ -5,9 +5,11 @@ import { createScene } from './scene.js';
 import { sfx, audio, setAmbience } from './sfx.js';
 import { createPond, POP } from './fishai.js';
 import {
-  HOOK_WINDOW, LINE_PER_TURN, AIM_MAX, CAST_MIN, CAST_MAX, RETRIEVE_DONE, BAIT_DEPTH, AREA, EYE,
-  castTarget, aimFor, newFight, stepFight, jumpThrow, botReel, lakeQ, bedDepth, laneFracs
+  LINE_PER_TURN, AIM_MAX, CAST_MIN, CAST_MAX, RETRIEVE_DONE, BAIT_DEPTH, AREA, EYE, NEAR_POWER, TUTORIAL_ASSIST,
+  castTarget, aimFor, newFight, stepFight, jumpThrow, botReel, lakeQ, bedDepth, laneFracs, assistFor
 } from './logic.js';
+import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
+import { createTutorialBoard } from '/common/tutorial-board.js';
 
 const SLOT_INFO = {
   1: { name: '1P', color: '#ff5a5f' },
@@ -33,8 +35,21 @@ await Promise.race([
   Promise.all([document.fonts.load('400 64px Anton'), document.fonts.load('800 64px "Pretendard Variable"')]),
   new Promise((r) => setTimeout(r, 2000))
 ]).catch(() => {});
+// 난이도: 늘 열린 호수라 대기실이 없습니다. 큰 화면 D 키, 왼쪽 위 알약, 폰 어디서든 바꿀 수 있고 잠그지 않습니다.
+// 어려움 = 예전 그대로, 보통은 눈에 띄게 너그럽게, 쉬움은 아주 너그럽게(logic.js ASSIST).
+const settings = createSettings({
+  game: 'fishing',
+  fields: [fields.difficulty({ hints: { easy: '입질 1.7초 · 톡톡 두 번 뒤 물고 · 줄이 잘 안 끊겨요', normal: '입질 1.25초 · 톡톡 뒤 물어요', hard: '입질 0.8초 · 봐주는 것 없이' } })],
+  onChange: (vals, change) => {
+    A = assistFor(vals.difficulty);
+    pond.setAssist(A);
+    pushState();
+    if (change && change.key === 'difficulty') toastAll(`난이도 ${DIFF_LABEL[vals.difficulty] || ''}`);
+  }
+});
+let A = assistFor(settings.difficulty());
 const view = createScene($('cv'));
-const pond = createPond({ count: FISH_N, now: performance.now() / 1000, inView: (x, y, z, r) => view.inView(x, y, z, r) });
+const pond = createPond({ count: FISH_N, now: performance.now() / 1000, inView: (x, y, z, r) => view.inView(x, y, z, r), assist: A });
 
 // 화면 크기에 맞춰 HUD 를 키우고 줄입니다(1600×900 기준).
 let UI = 1;
@@ -49,6 +64,11 @@ applyUi();
 // 연결
 // ================================================================
 const socket = io({ transports: ['websocket', 'polling'], tryAllTransports: true });
+settings.attach(socket);
+settings.mount($('setBox'), { compact: true });
+// 처음 하는 사람 연습 현황: 왼쪽 열(조과 아래)에 칸으로 띄웁니다. 낚시는 대기가 없어 다른 사람은 그냥 계속 낚시합니다.
+const tutBoard = createTutorialBoard({ mount: $('tutBox'), title: '처음 온 사람이 연습 중이에요 · 같은 호수에서 진짜로 낚아요' });
+tutBoard.attach(socket);
 let serverPlayers = [];
 let roomCode = null;
 const rtts = [];
@@ -109,6 +129,11 @@ socket.on('calibrate', (d) => onCalibrate(d.slot, d));
 socket.on('cast', (d) => onCast(d.slot, d));
 socket.on('hookset', (d) => onHookset(d.slot, d, performance.now()));
 socket.on('reel', (d) => onReel(d.slot, d));
+// 폰 튜토리얼: 진행 칸(tutorial)과, 지금 연습 단계(msg {type:'tut', stage})
+socket.on('tutorial', (d) => onTutorial(d && d.slot, d || {}));
+socket.on('msg', (d) => {
+  if (d && d.type === 'tut') onTutStage(d.slot, d.stage || null);
+});
 
 // ================================================================
 // 사람(낚싯대) 목록
@@ -135,6 +160,7 @@ function newAngler(info) {
     reel: { omega: 0, at: 0, total: null, spin: 0, idleSince: 0, wasIdle: true }, pullPending: 0,
     rtt: 80, lastTension: 0, ripAt: 0, landBounce: -1e9, manualUntil: 0,
     toast: null,
+    tut: null, tutInfo: null, guideFish: null, guideAt: 0, nibLast: false,
     bot2: { castAt: 0, reelNext: 0, hookAt: 0, lapse: 0, tilt: 0, total: 0, twitchAt: 0, hookPlan: null, target: null, patience: 18000 }
   };
 }
@@ -189,6 +215,8 @@ function dropAngler(a) {
   if (a.biteFish && a.state === 'bite') pond.steal(a.biteFish);
   a.fish = null;
   a.fight = null;
+  // 이 자리에 다음에 들어올 사람이 물고기 기억(외면 시간)을 물려받지 않게 지웁니다.
+  pond.forgetSlot(a.slot);
   removeChip(a.slot);
 }
 
@@ -214,8 +242,13 @@ function pushState() {
     players[a.slot] = { state: a.state, count: a.count, total: +a.total.toFixed(2), best: a.best ? { name: a.best.name, weight: a.best.weight } : null };
   }
   const r = game.record;
-  send('game_state', { phase: 'open', players, record: r ? { slot: r.slot, weight: r.weight, name: r.name, fish: r.fish } : null });
+  send('game_state', {
+    phase: 'open', players, record: r ? { slot: r.slot, weight: r.weight, name: r.name, fish: r.fish } : null,
+    settings: settings.forState(), hookWin: A.hookWin
+  });
 }
+// 이 사람에게 지금 적용하는 도움(튜토리얼 중인 사람은 더 순하게)
+const assistOf = (a) => (a && a.tut ? TUTORIAL_ASSIST : A);
 
 // ---------- 초릿대 ----------
 function tipOf(a) {
@@ -315,18 +348,54 @@ function onHookset(slot, d, arrival) {
   const est = arrival - ago - a.rtt / 2 - displayRtt() / 2;
   const speed = Math.max(0, Number(d.speed) || 0);
   a.rod.kickAt = performance.now();
+  const win = assistOf(a).hookWin;
   if (a.state === 'bite') {
     const oneWay = (a.rtt + displayRtt()) / 2;
-    if (est >= a.biteAt - 160 && est <= a.biteAt + HOOK_WINDOW * 1000 + oneWay) hookFish(a, speed, est - a.biteAt);
-    else if (est < a.biteAt - 160) tooEarly(a);
+    if (est >= a.biteAt - 160 && est <= a.biteAt + win * 1000 + oneWay) hookFish(a, speed, est - a.biteAt);
+    else if (est < a.biteAt - 160) earlyHook(a);
     else missBite(a, 'late');
     return;
   }
   if (a.state === 'wait') {
-    // 예신(톡톡)에 바로 채면 물고기가 놀라 도망갑니다. 그 밖에는 찌를 크게 한 번 당긴 것입니다.
-    if (a.nibFish && est > a.nibAt - 150 && est - a.nibAt < 650) tooEarly(a);
+    // 예신(톡톡)에 바로 채면 물고기가 놀라 도망갑니다(난이도가 쉬울수록 덜 놀람). 그 밖에는 찌를 크게 한 번 당긴 것입니다.
+    if (a.nibFish && est > a.nibAt - 150 && est - a.nibAt < 650) earlyHook(a);
     else twitch(a, performance.now(), 0.55);
   }
+}
+
+// ================================================================
+// 처음 하는 사람(폰 튜토리얼): 같은 호수에서 진짜로 해 봅니다.
+// 챔질 단계부터는 찌 근처의 작은 물고기를 데려와 톡톡 두 번 뒤 꼭 물게 하고, 파이팅은 아주 순하게 합니다.
+// ================================================================
+const TUT_GUIDED = new Set(['hook', 'reel']);
+function onTutStage(slot, stage) {
+  const a = game.players.get(slot);
+  if (!a || a.bot) return;
+  const prev = a.tut;
+  a.tut = typeof stage === 'string' && stage ? stage.slice(0, 16) : null;
+  if (!a.tut) {
+    a.guideFish = null;
+    if (prev) toast(a, '연습 끝! 이제 마음껏 낚아요', 'got', 2200);
+  } else if (a.tut !== prev) {
+    a.guideAt = performance.now();
+  }
+}
+function onTutorial(slot, d) {
+  const a = game.players.get(slot);
+  if (!a || a.bot) return;
+  a.tutInfo = d.done ? null : { step: Number(d.step) || 1, total: Number(d.total) || 1, title: String(d.title || '').slice(0, 24) };
+  if (d.done) onTutStage(slot, null);
+}
+function guideTick(a, now) {
+  if (!a.tut || !TUT_GUIDED.has(a.tut) || !a.lure.active) return;
+  const g = a.guideFish != null ? pond.byId(a.guideFish) : null;
+  const busy = g && g.lure === a.slot && (g.mode === 'approach' || g.mode === 'inspect' || g.mode === 'bite');
+  if (busy) return;
+  // 찌가 내려앉고 잠깐 뒤(또는 놓친 뒤 조금 쉬었다가) 데려옵니다.
+  if (now - Math.max(a.stateAt, a.guideAt) < 1100) return;
+  const f = pond.guide(a.lure);
+  a.guideFish = f ? f.id : null;
+  a.guideAt = now;
 }
 
 // ================================================================
@@ -387,13 +456,15 @@ function landLure(a) {
   setState(a, 'wait');
 }
 
-function onNibble(a, fish, now) {
+function onNibble(a, fish, now, last) {
   a.nibAt = now;
   a.nibAnim = now;
   a.nibFish = fish;
+  a.nibLast = Boolean(last);
   view.ripple(a.lure.x, a.lure.z, 0.6, 0.6);
   sfx.nibble();
-  sendTo(a, 'cue', { kind: 'nibble' });
+  // last: 다음은 곧 쑥(쉬움·보통은 물기 전에 톡톡을 꼭 하고, 마지막 톡톡을 알려 줍니다)
+  sendTo(a, 'cue', { kind: 'nibble', last: Boolean(last) });
   if (a.bot) botOnNibble(a, now);
 }
 
@@ -424,7 +495,8 @@ function hookFish(a, speed, lateMs) {
   const hookQ = clamp((speed - 150) / 550, 0.3, 1);
   pond.hook(fish, a.slot);
   a.fish = fish;
-  a.fight = newFight({ species: fish.sp, power: fish.power, weight: fish.w }, dist, lat, hookQ);
+  a.guideFish = null;
+  a.fight = newFight({ species: fish.sp, power: fish.power, weight: fish.w }, dist, lat, hookQ, Math.random, assistOf(a));
   a.fx = fish.x;
   a.fz = fish.z;
   a.biteFish = null;
@@ -443,11 +515,30 @@ function missBite(a, why) {
   const fish = a.biteFish;
   a.biteFish = null;
   if (fish) pond.steal(fish);
+  a.guideFish = null;
+  a.guideAt = performance.now();
   view.ripple(a.lure.x, a.lure.z, 1.0, 0.5);
-  sendTo(a, 'result', { text: why === 'late' ? '조금 늦었어요' : '미끼만 먹고 갔어요', sub: '찌가 쏙 들어가면 바로 폰을 위로 확!', kind: 'miss' });
+  sendTo(a, 'result', {
+    text: why === 'late' ? '조금 늦었어요' : '미끼만 먹고 갔어요', kind: 'miss', why,
+    sub: a.tut ? '괜찮아요, 다른 물고기가 곧 와요. 쑥 들어가면 바로 위로 확!' : '찌가 쏙 들어가면 바로 폰을 위로 확!'
+  });
   toast(a, why === 'late' ? '늦었어요' : '미끼만 먹고 갔어요', 'miss', 1800);
   sfx.miss();
   setState(a, 'wait');
+}
+
+// 톡톡(예신)에 챘을 때: 어려움은 늘 놀라 도망(예전 그대로), 쉬울수록 "아직이에요"만 알려 주고 물고기는 그대로 둡니다.
+function earlyHook(a) {
+  const fish = a.nibFish || a.biteFish;
+  const soft = a.tut || Math.random() >= assistOf(a).early;
+  if (!soft || !fish) {
+    tooEarly(a);
+    return;
+  }
+  pond.startle(fish);
+  view.ripple(a.lure.x, a.lure.z, 0.8, 0.5);
+  sendTo(a, 'result', { text: '아직이에요!', sub: '톡톡은 간 보기예요. 물고기는 아직 있어요. 찌가 쑥 들어갈 때 채요', kind: 'early', soft: true });
+  toast(a, '아직! 물고기는 그대로', 'nib', 1800);
 }
 
 function tooEarly(a) {
@@ -456,7 +547,7 @@ function tooEarly(a) {
   a.biteFish = null;
   if (fish) pond.scare(fish, a.lure.x, a.lure.z);
   view.ripple(a.lure.x, a.lure.z, 1.1, 0.6);
-  sendTo(a, 'result', { text: '너무 일찍 챘어요', sub: '톡톡은 간 보기예요. 찌가 쭉 들어갈 때 채요', kind: 'miss' });
+  sendTo(a, 'result', { text: '너무 일찍 챘어요', sub: '톡톡은 간 보기예요. 찌가 쭉 들어갈 때 채요', kind: 'miss', why: 'early' });
   toast(a, '너무 일찍!', 'miss', 1800);
   sfx.miss();
   setState(a, 'wait');
@@ -506,6 +597,7 @@ function loseFish(a, why) {
   const fish = a.fish;
   finishFight(a);
   a.fish = null;
+  a.guideAt = performance.now();
   if (fish) pond.lose(fish, nominalTip(a)[0], nominalTip(a)[1]);
   view.splash(a.fx, a.fz, 20, 0.75);
   view.ripple(a.fx, a.fz, 1.4, 0.8);
@@ -567,6 +659,7 @@ function updateAngler(a, now, dt) {
       a.ripAt = now;
       view.ripple(L.x, L.z, 0.5, 0.2);
     }
+    guideTick(a, now);
   } else if (a.state === 'bite') {
     const f = a.biteFish;
     if (f && f.mode === 'bite') {
@@ -574,7 +667,7 @@ function updateAngler(a, now, dt) {
       a.lure.x = mouthV.x;
       a.lure.z = mouthV.z;
     }
-    const decideAt = a.biteAt + HOOK_WINDOW * 1000 + a.rtt + displayRtt() + 120;
+    const decideAt = a.biteAt + assistOf(a).hookWin * 1000 + a.rtt + displayRtt() + 120;
     if (!f || f.mode !== 'bite') {
       a.biteFish = null;
       setState(a, 'wait');
@@ -834,7 +927,8 @@ function botReelBurst(a, turns) {
 }
 
 // ================================================================
-// 키보드(시험용): 1P 자리(없으면 첫 자리)를 조종합니다. R 은 조과 초기화, F 는 전체 화면.
+// 키보드(시험용): 1P 자리(없으면 첫 자리)를 조종합니다. Space 물고기 쪽으로 던지기, N 살짝 던지기(바로 앞), H 챔질, T 툭, J 누르고 있으면 감기.
+// R 은 조과 초기화, F 는 전체 화면, D 는 난이도(공통 설정 모듈).
 // ================================================================
 const keys = new Set();
 const kb = { reelTotal: 0, lastReel: 0 };
@@ -876,7 +970,8 @@ window.addEventListener('keydown', (e) => {
     const f = nearestFish(a);
     if (f) castFor(a.slot, f.x + Math.sin(f.yaw) * 2.2, f.z + Math.cos(f.yaw) * 2.2);
     else onCast(a.slot, { power: 0.45, aim: 0, exact: true, rtt: 0 });
-  } else if (e.code === 'KeyH') onHookset(a.slot, { speed: 650, ago: 0, rtt: 0 }, now);
+  } else if (e.code === 'KeyN') onCast(a.slot, { power: NEAR_POWER, aim: 0, exact: true, rtt: 0, near: true });
+  else if (e.code === 'KeyH') onHookset(a.slot, { speed: 650, ago: 0, rtt: 0 }, now);
   else if (e.code === 'KeyT') {
     kb.reelTotal += 0.5;
     onReel(a.slot, { rate: 1.6, turns: 0.5, total: kb.reelTotal });
@@ -1104,7 +1199,7 @@ function ensureChip(a) {
   if (c) return c;
   c = document.createElement('div');
   c.className = 'chip';
-  c.innerHTML = '<div class="toast"></div><div class="cb"><span class="badge"></span><span class="st"></span></div>' +
+  c.innerHTML = '<div class="toast"></div><div class="cb"><span class="badge"></span><span class="tp"></span><span class="st"></span></div>' +
     '<div class="fight"><div class="tbar"><i></i><em></em></div><b class="dist">0.0m</b></div>';
   c.querySelector('.badge').textContent = a.name;
   $('chips').appendChild(c);
@@ -1153,7 +1248,7 @@ function updateHud(now) {
     let cls = `chip s-${a.state}`;
     if (a.state === 'wait') {
       if (now - a.nibAt < 900) {
-        text = '톡톡… 아직';
+        text = a.nibLast ? '톡… 곧 물어요' : '톡톡… 아직';
         cls += ' nib';
       } else if (a.reel.omega > 0.3) text = '감는 중…';
     }
@@ -1168,6 +1263,11 @@ function updateHud(now) {
     if (a.state === 'lost') text = a.lostKind === 'break' ? '줄이 끊어졌어요' : '놓쳤어요';
     if (!a.bot && !a.connected) cls += ' away';
     if (a.bot) cls += ' bot';
+    // 튜토리얼 중: 작은 '연습 2/5' 표시
+    const tp = c.querySelector('.tp');
+    const tt = a.tutInfo ? `연습 ${a.tutInfo.step}/${a.tutInfo.total}` : '';
+    if (tp.textContent !== tt) tp.textContent = tt;
+    if (a.tutInfo) cls += ' tut';
     if (st.textContent !== text) st.textContent = text;
     if (c.className !== cls) c.className = cls;
     c.style.setProperty('--c', a.color);
@@ -1314,7 +1414,7 @@ function handlePondEvent(e, now) {
   if (e.slot == null) return;
   const a = game.players.get(e.slot);
   if (!a) return;
-  if (e.type === 'nibble' && a.state === 'wait') onNibble(a, e.fish, now);
+  if (e.type === 'nibble' && a.state === 'wait') onNibble(a, e.fish, now, e.last);
   else if (e.type === 'bite') {
     if (a.state === 'wait') onBite(a, e.fish, now);
     else pond.steal(e.fish);
@@ -1430,5 +1530,14 @@ window.__fishing = {
     return anglers().map((a) => ({ slot: a.slot, bot: a.bot, state: a.state, count: a.count, total: +a.total.toFixed(2), best: a.best, lure: { x: +a.lure.x.toFixed(2), z: +a.lure.z.toFixed(2), active: a.lure.active }, T: a.fight ? +a.fight.T.toFixed(2) : null, D: a.fight ? +a.fight.D.toFixed(1) : null }));
   },
   get fps() { return +game.fps.toFixed(1); },
+  get assist() { return A; },
+  get difficulty() { return settings.difficulty(); },
+  get pool() { return view.pool; },
+  settings, tutBoard,
+  setDifficulty: (lv) => settings.set('difficulty', lv),
+  // 시험용: 폰 없이 튜토리얼 단계 흉내(onTutStage) · 연습 칸(onTutorial)
+  tutStage: (slot, stage) => onTutStage(slot, stage),
+  tutorial: (slot, d) => { onTutorial(slot, d); tutBoard.update({ key: 'fishing', ...d, slot }); },
+  nearCast: (slot = 1, aim = 0) => onCast(slot, { power: NEAR_POWER, aim, exact: true, rtt: 0, near: true }),
   spawnFish, castFor, forceBite, forceHook, forceLand, forceJump, onCast, onHookset, onReel, onPose, clearTallies, displayRtt
 };

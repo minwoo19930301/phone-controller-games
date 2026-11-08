@@ -30,12 +30,12 @@ export function tex(c, srgb = true, repeat = false) {
   if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 }
-function hash2(x, y, s) {
+export function hash2(x, y, s) {
   let h = (x * 374761393 + y * 668265263 + s * 982451653) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
-function vnoise(x, y, s, px = 1e9, py = 1e9) {
+export function vnoise(x, y, s, px = 1e9, py = 1e9) {
   const xi = Math.floor(x);
   const yi = Math.floor(y);
   const xf = x - xi;
@@ -47,7 +47,7 @@ function vnoise(x, y, s, px = 1e9, py = 1e9) {
   const a = hash2(x0, y0, s), b = hash2(x1, y0, s), c = hash2(x0, y1, s), d = hash2(x1, y1, s);
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
-function fbm(x, y, s, oct = 4, px = 1e9, py = 1e9) {
+export function fbm(x, y, s, oct = 4, px = 1e9, py = 1e9) {
   let f = 0;
   let amp = 0.5;
   let k = 1;
@@ -58,7 +58,7 @@ function fbm(x, y, s, oct = 4, px = 1e9, py = 1e9) {
   }
   return f;
 }
-function pixels(w, h, fn) {
+export function pixels(w, h, fn) {
   return canvas(w, h, (g) => {
     const img = g.createImageData(w, h);
     const d = img.data;
@@ -92,7 +92,7 @@ function normalFromCanvas(src, strength) {
     c[3] = 255;
   });
 }
-const hdr = (hex, k) => new THREE.Color(hex).multiplyScalar(k);
+export const hdr = (hex, k) => new THREE.Color(hex).multiplyScalar(k);
 
 // ---------- 공용 빛 텍스처 ----------
 export const glowTex = tex(canvas(128, 128, (g, w, h) => {
@@ -239,7 +239,7 @@ function fresnelMat(color, intensity, pow) {
 // ================================================================
 export const HILT = { bottom: -0.105, emitter: 0.159, top: 0.178 };
 
-const brushedTex = tex(pixels(64, 512, (x, y, c) => {
+export const brushedTex = tex(pixels(64, 512, (x, y, c) => {
   // 둘레 방향 헤어라인: 줄(v)마다 거칠기가 조금씩 다릅니다. (lathe 의 v = 단면 위치)
   const line = hash2(0, y, 7) * 0.55 + hash2(1, y >> 1, 9) * 0.3 + vnoise(x / 9, y / 2, 3) * 0.15;
   const v = 120 + line * 90;
@@ -260,7 +260,7 @@ function hiltMaterials() {
   return hiltShared;
 }
 
-function smoothProfile(pts, steps = 3) {
+export function smoothProfile(pts, steps = 3) {
   // 꺾인 점 사이를 캐트멀-롬으로 이어 매끈한 단면을 만듭니다(모서리는 점을 겹쳐 두면 날카롭게 남음).
   const out = [];
   for (let i = 0; i < pts.length - 1; i++) {

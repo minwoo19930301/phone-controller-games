@@ -70,6 +70,37 @@
   .tools button { flex: 1; padding: 11px; border-radius: 14px; background: rgba(255,255,255,.07); color: var(--fg); border: 1.5px solid var(--line);
     font-size: 14px; font-weight: 800; }
   .tools button.on { background: var(--c); color: #0b0f17; border-color: var(--c); }
+  /* 대기실 */
+  /* 스크롤 상자를 화면 끝까지 넓혀 준비 버튼 빛(그림자)이 상자 가장자리에서 네모나게 잘리지 않게 합니다. */
+  #vWait { overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; margin: 0 -14px; padding: 0 14px; }
+  .wait { margin: auto 0; width: 100%; display: flex; flex-direction: column; align-items: stretch; gap: 14px; padding: 8px 2px 18px; }
+  .wait-head { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; }
+  .wait-head .chips:empty { display: none; }
+  .set:empty { display: none; }
+  .set { padding: 12px 12px 10px; border-radius: 18px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
+  .roster { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .roster > span { font-size: 13px; font-weight: 800; color: var(--dim); margin-right: 2px; }
+  .roster .rp { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px 5px 9px; border-radius: 999px; font-size: 14px; font-weight: 800;
+    box-shadow: inset 0 0 0 1.5px var(--pc); color: var(--pc); }
+  .roster .rp b { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 15px; letter-spacing: .02em; }
+  .roster .rp.on { background: var(--pc); color: #0b0f17; }
+  .roster .rp.you { outline: 2px solid rgba(255,255,255,.75); outline-offset: 2px; }
+  .roster .rp.away { opacity: .45; }
+  .ready-btn { position: relative; width: 100%; min-height: 76px; padding: 14px 18px; border-radius: 22px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 3px; background: var(--c); color: #0b0f17; border: 2px solid var(--c);
+    box-shadow: 0 12px 34px color-mix(in srgb, var(--c) 35%, transparent); transition: transform .12s, background .25s, color .25s, box-shadow .25s; }
+  .ready-btn b { font-size: 26px; font-weight: 900; letter-spacing: -.02em; line-height: 1.1; }
+  .ready-btn small { font-size: 13px; font-weight: 700; opacity: .72; }
+  .ready-btn:active { transform: scale(.98); }
+  .ready-btn.done { background: color-mix(in srgb, var(--c) 14%, #0e0c1c); color: var(--fg); box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 22%, transparent);
+    animation: readyPulse 1.6s ease-in-out infinite; }
+  .ready-btn.done b { color: #9dffb5; }
+  .ready-btn.done small { opacity: .85; color: var(--dim); }
+  @keyframes readyPulse { 50% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--c) 12%, transparent); } }
+  .go-note { min-height: 18px; margin-top: -6px; text-align: center; font-size: 13px; font-weight: 700; color: #ffcf8a; }
+  .go-note:empty { display: none; }
+  .tut-link { display: flex; justify-content: center; margin-top: -6px; }
+  body.roster-on #readyBar { display: none !important; }
   .debug { position: fixed; left: 8px; bottom: calc(env(safe-area-inset-bottom) + 2px); font: 11px ui-monospace, monospace; color: rgba(255,255,255,.4); pointer-events: none; }
   .flash { animation: flash .45s; }
   @keyframes flash { from { box-shadow: inset 0 0 0 6px var(--c), 0 0 40px var(--c); } }
@@ -104,13 +135,21 @@
   <!-- 메시지 -->
   <section class="view center" id="vMsg"><h1 id="msgT"></h1><p id="msgB"></p></section>
 
-  <!-- 대기실·결과 -->
-  <section class="view center" id="vWait">
-    <div class="big" id="waitT">대기실</div>
-    <div class="side hidden" id="waitSide"><i></i><span id="waitSideT"></span></div>
-    <p id="waitB"></p>
-    <div class="chips" id="myStats"></div>
-    <button class="primary" id="btnGo" style="margin-top:14px">게임 시작</button>
+  <!-- 대기실·결과: 난이도 · 준비 현황 · 준비 버튼 · 튜토리얼 다시 하기 -->
+  <section class="view" id="vWait">
+    <div class="wait">
+      <div class="wait-head">
+        <div class="big" id="waitT">대기실</div>
+        <div class="side hidden" id="waitSide"><i></i><span id="waitSideT"></span></div>
+        <p id="waitB"></p>
+        <div class="chips" id="myStats"></div>
+      </div>
+      <div class="set" id="setBox"></div>
+      <div class="roster hidden" id="roster"></div>
+      <button class="ready-btn" id="btnGo" type="button"><b id="goT">준비</b><small id="goS">누르면 준비 완료</small></button>
+      <div class="go-note" id="goNote"></div>
+      <div class="tut-link" id="tutLink"></div>
+    </div>
   </section>
 
   <!-- 경기: 내 쪽 반 코트 패드 -->
@@ -134,6 +173,6 @@
 <div class="debug" id="debug"></div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
-<script src="controller.js"></script>
+<script type="module" src="controller.js"></script>
 </body>
 </html>

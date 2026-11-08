@@ -1257,12 +1257,17 @@ export function createScene(cvEl) {
           float along = (fract((vD - uTime * 0.9) / period) - 0.5) * period;
           float rad = 0.04 + 0.0065 * vD;
           float dots = 1.0 - smoothstep(rad * 0.6, rad, length(vec2(along, vS * w)));
-          // 던져서 닿을 수 있는 거리(가장 약하게 ~ 가장 세게) 띠
-          float band = smoothstep(uMin - 0.6, uMin + 0.6, vD) * (1.0 - smoothstep(uEnd - 1.2, uEnd, vD));
+          // 던져서 닿을 수 있는 거리(살짝 ~ 힘껏) 띠. 선착장 바로 앞(uMin)부터 물가 앞(uEnd)까지
+          float band = smoothstep(uMin - 0.5, uMin + 0.4, vD) * (1.0 - smoothstep(uEnd - 1.2, uEnd, vD));
           float glow = band * pow(max(0.0, 1.0 - s), 1.2) * (0.18 + 0.12 * smoothstep(uMin, uMax, vD));
           float edges = band * smoothstep(0.76, 0.93, s) * (1.0 - smoothstep(0.93, 1.0, s)) * 0.32;
-          float near = smoothstep(0.6, 2.6, vD);
-          float a = (dots * 0.7 + glow + edges) * near * uOp;
+          // 5m 마다 가로 눈금(얼마나 세게 던질지 가늠). 가운데 점선은 비워 둡니다.
+          float m5 = abs(mod(vD + 2.5, 5.0) - 2.5);
+          float tick = band * (1.0 - smoothstep(0.035, 0.07 + 0.005 * vD, m5)) * smoothstep(0.22, 0.5, s) * step(4.0, vD) * 0.5;
+          // 살짝 던지면 떨어지는 가까운 물(선착장 바로 앞)은 조금 밝게
+          float nearZ = band * (1.0 - smoothstep(4.6, 6.4, vD)) * pow(max(0.0, 1.0 - s), 0.7) * 0.16;
+          float near = smoothstep(0.6, 2.2, vD);
+          float a = (dots * 0.7 + glow + edges + tick + nearZ) * near * uOp;
           if (a < 0.003) discard;
           gl_FragColor = vec4(mix(uColor, vec3(1.0), dots * 0.3), a);
           #include <colorspace_fragment>
@@ -1290,47 +1295,98 @@ export function createScene(cvEl) {
       if (o.geometry) o.geometry.dispose();
       const m = o.material;
       if (m) for (const x of Array.isArray(m) ? m : [m]) {
+        if (x.userData && x.userData.shared) continue;
         if (x.map && x.map !== ringTex) x.map.dispose();
         x.dispose();
       }
     });
   }
-  function setPlayers(list) {
-    for (const [slot, R] of rigs) {
-      if (!list.some((p) => p.slot === slot && p.color === R.color)) {
-        scene.remove(R.rod.root, R.line, R.bobber, R.bait, R.leader, R.marker, R.aim);
-        R.rod.dispose();
-        for (const o of [R.line, R.bobber, R.bait, R.leader, R.marker, R.aim]) disposeObj(o);
-        const li = lineMats.indexOf(R.line.material);
-        if (li >= 0) lineMats.splice(li, 1);
-        rigs.delete(slot);
-      }
+  // 들어오고 나갈 때마다 장비를 새로 만들고 지우면(예전 방식) 지울 때 셰이더 프로그램도 같이 내려가서,
+  // 다음 사람이 들어올 때 반사용 프로그램을 다시 컴파일합니다. 느린 PC·TV 에서는 그때마다 화면이 멈칫했습니다.
+  // 그래서 자리 4개 분을 처음에 다 만들어 두고(반사용까지 미리 컴파일) 보이기/숨기기만 합니다.
+  const POOL = [
+    { slot: 1, color: '#ff5a5f', name: '1P' }, { slot: 2, color: '#3ab4ff', name: '2P' },
+    { slot: 3, color: '#ffc93c', name: '3P' }, { slot: 4, color: '#5ee07a', name: '4P' }
+  ];
+  function makeRig(p) {
+    const rod = makeRod(p.color);
+    scene.add(rod.root);
+    const line = newLine();
+    scene.add(line);
+    const bobber = makeBobber(p.color);
+    scene.add(bobber);
+    const bait = under(makeBait());
+    bait.traverse((m) => m.layers.set(L_UNDER));
+    scene.add(bait);
+    const leader = makeLeader();
+    scene.add(leader);
+    const marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: markerTexture(p.color, p.name), depthTest: false, transparent: true, sizeAttenuation: false, fog: false }));
+    marker.center.set(0.5, 0);
+    marker.renderOrder = 20;
+    scene.add(under(marker));
+    const aim = newAim(p.color);
+    scene.add(aim);
+    const R = {
+      slot: p.slot, color: p.color, name: p.name, rod, line, bobber, bait, leader, marker, aim, on: true,
+      pend: { p: new THREE.Vector3(), v: new THREE.Vector3(), init: false, mode: null },
+      aimOp: 0, hasTip: false, bobVis: false, end: new THREE.Vector3(), bobP: new THREE.Vector3()
+    };
+    setRigOn(R, false);
+    return R;
+  }
+  function rigParts(R) {
+    return [R.rod.root, R.line, R.bobber, R.bait, R.leader, R.marker, R.aim];
+  }
+  function setRigOn(R, on) {
+    R.on = on;
+    for (const o of rigParts(R)) o.visible = on;
+    if (!on) {
+      // 다음 사람이 처음부터 시작하게 비웁니다.
+      R.pend.init = false;
+      R.aimOp = 0;
+      R.hasTip = false;
+      R.bobVis = false;
+      R.bobber.visible = false;
+      R.bait.visible = false;
+      R.leader.visible = false;
+      R.marker.visible = false;
+      R.aim.visible = false;
     }
-    for (const p of list) {
-      if (rigs.has(p.slot)) continue;
-      const rod = makeRod(p.color);
-      scene.add(rod.root);
-      const line = newLine();
-      scene.add(line);
-      const bobber = makeBobber(p.color);
-      scene.add(bobber);
-      const bait = under(makeBait());
-      bait.traverse((m) => m.layers.set(L_UNDER));
-      scene.add(bait);
-      const leader = makeLeader();
-      scene.add(leader);
-      const marker = new THREE.Sprite(new THREE.SpriteMaterial({ map: markerTexture(p.color, p.name), depthTest: false, transparent: true, sizeAttenuation: false, fog: false }));
-      marker.center.set(0.5, 0);
-      marker.renderOrder = 20;
-      marker.visible = false;
-      scene.add(under(marker));
-      const aim = newAim(p.color);
-      scene.add(aim);
-      rigs.set(p.slot, {
-        slot: p.slot, color: p.color, rod, line, bobber, bait, leader, marker, aim,
-        pend: { p: new THREE.Vector3(), v: new THREE.Vector3(), init: false, mode: null },
-        aimOp: 0, hasTip: false, bobVis: false, end: new THREE.Vector3(), bobP: new THREE.Vector3()
-      });
+  }
+  function dropRig(R) {
+    for (const o of rigParts(R)) scene.remove(o);
+    R.rod.dispose();
+    for (const o of [R.line, R.bobber, R.bait, R.leader, R.marker, R.aim]) disposeObj(o);
+    const li = lineMats.indexOf(R.line.material);
+    if (li >= 0) lineMats.splice(li, 1);
+  }
+  for (const p of POOL) rigs.set(p.slot, makeRig(p));
+  const poolStats = { made: POOL.length, rebuilt: 0 };
+  function setPlayers(list) {
+    const want = new Map(list.map((p) => [p.slot, p]));
+    for (const [slot, R] of rigs) {
+      const p = want.get(slot);
+      if (!p) {
+        if (R.on) setRigOn(R, false);
+        continue;
+      }
+      if (p.color !== R.color || (p.name && p.name !== R.name)) {
+        // 자리 색이 바뀌는 일은 없지만(서버가 정함), 혹시 바뀌면 그 자리 장비만 새로 만듭니다.
+        // 다른 자리 장비가 같은 프로그램을 쓰고 있어 다시 컴파일하지 않습니다.
+        dropRig(R);
+        const N = makeRig({ slot, color: p.color, name: p.name || R.name });
+        rigs.set(slot, N);
+        poolStats.rebuilt += 1;
+        setRigOn(N, true);
+      } else if (!R.on) setRigOn(R, true);
+    }
+    // 4자리 밖(있을 수 없지만)은 새로 만듭니다.
+    for (const [slot, p] of want) {
+      if (rigs.has(slot)) continue;
+      const N = makeRig(p);
+      rigs.set(slot, N);
+      poolStats.rebuilt += 1;
+      setRigOn(N, true);
     }
     layoutLanes();
   }
@@ -1339,7 +1395,7 @@ export function createScene(cvEl) {
   const HAND_UP = 0.62; // 눈보다 아래(m)
   const HAND_FWD = 0.85; // 눈보다 앞(m)
   function layoutLanes() {
-    const slots = [...rigs.keys()].sort((a, b) => a - b);
+    const slots = [...rigs.values()].filter((R) => R.on).map((R) => R.slot).sort((a, b) => a - b);
     const fr = laneFracs(slots.length);
     const tanH = Math.tan((EYE.fov / 2) * RD) * baseCam.aspect;
     const depth = HAND_FWD * Math.cos(EYE.pitch * RD) + HAND_UP * Math.sin(EYE.pitch * RD);
@@ -1686,7 +1742,7 @@ export function createScene(cvEl) {
     fanRods(v.players);
     for (const d of v.players) {
       const R = rigs.get(d.slot);
-      if (R) updateRig(R, d, t, dt);
+      if (R && R.on) updateRig(R, d, t, dt);
     }
     // 물결
     for (const r of ripples) {
@@ -1756,19 +1812,19 @@ export function createScene(cvEl) {
   }
   function tipOf(slot) {
     const R = rigs.get(slot);
-    if (!R || !R.hasTip) return null;
+    if (!R || !R.on || !R.hasTip) return null;
     const t = R.rod.st.tip;
     return [t.x, t.y, t.z];
   }
   function reelOf(slot) {
     const R = rigs.get(slot);
-    if (!R || !R.hasTip) return null;
+    if (!R || !R.on || !R.hasTip) return null;
     const p = R.rod.st.spoolW;
     return [p.x, p.y, p.z];
   }
   function bobberPos(slot) {
     const R = rigs.get(slot);
-    if (!R || !R.bobVis) return null;
+    if (!R || !R.on || !R.bobVis) return null;
     return [R.bobP.x, R.bobP.y, R.bobP.z];
   }
   // 이 방향으로 던질 수 있는 가장 먼 거리(물가에 닿기 전)
@@ -1789,28 +1845,35 @@ export function createScene(cvEl) {
   }
 
   // 셰이더를 미리 컴파일해 둡니다(첫 사람이 들어오거나 첫 조과 카드가 뜰 때 화면이 멈칫하지 않게).
-  // 미리 만든 장비는 지우지 않고(지우면 프로그램도 같이 내려감) 장면에서만 뺍니다.
-  const warm = new THREE.Group();
+  // 미리 만든 4벌의 장비는 숨겨 둔 채로도 컴파일됩니다(compile 은 숨긴 물체도 훑음). 물고기도 종마다 한 마리씩 미리 둡니다.
+  // 수면 반사는 다른 출력(렌더 타깃: 톤매핑 없음·선형 색)으로 그려서 프로그램이 따로 있습니다.
+  // 예전에는 화면용만 미리 만들어, 처음 들어온 사람의 낚싯대·찌가 반사에 비칠 때 그 자리에서 컴파일했습니다.
   {
-    const rod = makeRod('#888888');
-    rod.pose(new THREE.Vector3(0, EYE.y - HAND_UP, EYE.z + HAND_FWD), new THREE.Vector3(0, 0.4, 1).normalize(), 0.2, null, 0);
-    const bait = makeBait();
-    bait.traverse((m) => m.layers.set(L_UNDER));
-    bait.position.set(0, -0.5, 6);
-    const bob = makeBobber('#888888');
-    bob.position.set(0, 0, 6);
-    const mk = new THREE.Sprite(new THREE.SpriteMaterial({ map: markerTexture('#888888', '·'), depthTest: false, transparent: true, sizeAttenuation: false, fog: false }));
-    warm.add(rod.root, bait, bob, newLine(), makeLeader(), under(mk), newAim('#888888'));
-    scene.add(warm);
+    for (const sp of ['lmb', 'smb', 'blg']) {
+      const g = under(makeFish(sp));
+      g.traverse((m) => { if (m.isMesh) m.layers.set(L_UNDER); });
+      g.visible = false;
+      scene.add(g);
+      fishPool[sp].push(g);
+    }
     for (const k of Object.keys(showFish)) showFish[k].visible = true;
     renderer.compile(scene, camera);
     renderer.compile(show, showCam);
     for (const k of Object.keys(showFish)) showFish[k].visible = false;
-    scene.remove(warm);
+    const prevRT = renderer.getRenderTarget();
+    renderer.setRenderTarget(water.getRenderTarget());
+    for (const R of rigs.values()) {
+      renderer.compile(R.rod.root, camera, scene);
+      renderer.compile(R.bobber, camera, scene);
+    }
+    renderer.setRenderTarget(prevRT);
+    // 사람 이름표(찌 위 핀) 텍스처도 미리 GPU 에 올려 둡니다.
+    for (const R of rigs.values()) if (R.marker.material.map) renderer.initTexture(R.marker.material.map);
   }
 
   return {
     frame, setPlayers, ripple, splash, project, tipOf, reelOf, bobberPos, setShowcase, inView, laneOf, nominalTip, reachAlong,
-    renderer, camera, scene, AREA
+    renderer, camera, scene, AREA,
+    get pool() { return { ...poolStats, on: [...rigs.values()].filter((R) => R.on).map((R) => R.slot) }; }
   };
 }

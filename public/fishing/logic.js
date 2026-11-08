@@ -6,11 +6,14 @@
 
 export const LINE_PER_TURN = 0.8; // 핸들 한 바퀴에 감기는 줄(m)
 export const DRAG = 0.85; // 이 장력을 넘으면 드랙이 미끄러지며 줄이 풀립니다
-export const HOOK_WINDOW = 0.8; // 찌가 들어간 뒤 챔질할 수 있는 시간(초)
-export const LAND_DIST = 2.2; // 이 거리 안으로 끌어오면 들어 올립니다
+export const HOOK_WINDOW = 0.8; // 찌가 들어간 뒤 챔질할 수 있는 시간(초). 어려움 기준(난이도별 값은 ASSIST.hookWin)
+export const LAND_DIST = 2.2; // 이 거리 안으로 끌어오면 들어 올립니다(어려움 기준)
 export const MAX_LINE = 70; // 스풀에 감긴 줄 길이(m). 다 풀리면 끊어집니다
-export const CAST_MIN = 4; // 가장 약하게 던졌을 때 초릿대에서 찌까지(m)
+// 가장 약하게 던졌을 때 초릿대에서 찌까지(m). 선착장 끝 바로 앞(약 3m)에 떨어집니다.
+// 예전(4m + 힘의 0.85 제곱)에는 실폰에서 살짝 던져도 15m 넘게 날아가서, 폰이 힘을 부드러운 곡선으로 줄여 보내고 여기서는 그대로(직선) 거리로 바꿉니다.
+export const CAST_MIN = 2.6;
 export const CAST_MAX = 30; // 가장 세게 던졌을 때
+export const NEAR_POWER = 0.03; // 폰의 '살짝 던지기' 버튼(약 3.4m)
 export const AIM_MAX = 35; // 좌우 조준 한계(도)
 export const RETRIEVE_DONE = 3; // 찌가 초릿대에서 이 거리 안으로 들어오면 줄이 다 감긴 것
 export const BAIT_DEPTH = 0.55; // 찌 아래 미끼 깊이(m)
@@ -108,8 +111,9 @@ export function laneFracs(n) {
 }
 
 // 찌가 떨어질 곳. 너무 멀리 던져 물가를 넘어가면 물 안쪽으로 당겨 줍니다.
+// power(0~1)는 폰이 이미 '살살 ~ 힘껏' 곡선을 거쳐 보낸 값이라 거리와 정비례합니다.
 export function castDist(power) {
-  return CAST_MIN + (CAST_MAX - CAST_MIN) * Math.pow(clamp(power, 0, 1), 0.85);
+  return CAST_MIN + (CAST_MAX - CAST_MIN) * clamp(power, 0, 1);
 }
 export function castTarget(tipX, tipZ, power, aimDeg) {
   let dist = castDist(power);
@@ -132,7 +136,7 @@ export function aimFor(tipX, tipZ, x, z) {
   const dz = Math.max(0.5, z - tipZ);
   const aim = clamp(Math.atan2(-dx, dz) / RD, -AIM_MAX, AIM_MAX);
   const dist = clamp(Math.hypot(dx, dz), CAST_MIN, CAST_MAX);
-  const power = Math.pow((dist - CAST_MIN) / (CAST_MAX - CAST_MIN), 1 / 0.85);
+  const power = (dist - CAST_MIN) / (CAST_MAX - CAST_MIN);
   return { aim, power: clamp(power, 0, 1), dist };
 }
 
@@ -165,16 +169,49 @@ export function bigness(species, weight) {
   return clamp((weight - 1.2) / 3, 0, 1);
 }
 
+// ---------- 난이도별 도움 ----------
+// 어려움 = 예전 그대로(사용자가 "생각보다 어렵다"고 한 값). 보통은 눈에 띄게 너그럽고, 쉬움은 아주 너그럽습니다.
+//  hookWin   찌가 들어간 뒤 챔질할 수 있는 시간(초)
+//  early     톡톡(예신)에 일찍 챘을 때 물고기가 놀라 도망갈 확률(나머지는 "아직이에요"만 알려 주고 그대로 둠)
+//  notice    찌를 알아채는 거리 배율 / curious 다가올 확률 더하기 / commit 살피는·망설이는 시간 배율(작을수록 빨리 묾)
+//  nibMin    물기 전에 꼭 하는 톡톡 횟수(물기 직전을 미리 알 수 있게) / biteP 살핀 뒤 물 확률 더하기
+//  ignore    놓친 뒤 같은 찌를 외면하는 시간 배율 / approach 다가오다 포기하기까지(초)
+//  pull      파이팅 중 물고기 힘 배율 / breakT 줄이 끊어지기 시작하는 장력 / breakRate 끊어지는 속도 배율
+//  reelEx    드랙이 풀리는데 계속 감을 때 장력에 더해지는 몫 배율 / slack 느슨해도 바늘이 버티는 시간 배율
+//  jump      점프 때 바늘이 털릴 확률 배율 / drain 물고기가 지치는 속도 배율 / run 달리기를 고를 확률 배율
+//  hookQ     챔질이 약해도 보장하는 바늘 걸림 / land 이 거리 안으로 오면 들어 올림(m)
+export const ASSIST = {
+  easy: {
+    hookWin: 1.7, early: 0.12, notice: 1.6, curious: 0.32, commit: 0.45, nibMin: 2, biteP: 0.3, ignore: 0.25, approach: 24,
+    pull: 0.62, breakT: 1.08, breakRate: 0.3, reelEx: 0.4, slack: 2.2, jump: 0.15, drain: 1.8, run: 0.6, hookQ: 0.8, land: 3.2
+  },
+  normal: {
+    hookWin: 1.25, early: 0.45, notice: 1.3, curious: 0.16, commit: 0.7, nibMin: 1, biteP: 0.14, ignore: 0.55, approach: 18,
+    pull: 0.85, breakT: 1, breakRate: 0.55, reelEx: 0.85, slack: 1.5, jump: 0.5, drain: 1.35, run: 0.82, hookQ: 0.55, land: 2.7
+  },
+  hard: {
+    hookWin: HOOK_WINDOW, early: 1, notice: 1, curious: 0, commit: 1, nibMin: 0, biteP: 0, ignore: 1, approach: 14,
+    pull: 1, breakT: 1, breakRate: 1, reelEx: 1, slack: 1, jump: 1, drain: 1, run: 1, hookQ: 0.3, land: LAND_DIST
+  }
+};
+// 처음 해 보는 사람(튜토리얼) 파이팅: 쉬움보다 조금 더 순하게 해서 첫 물고기는 거의 꼭 잡게 합니다.
+export const TUTORIAL_ASSIST = { ...ASSIST.easy, pull: 0.5, breakRate: 0.15, reelEx: 0.3, slack: 3, jump: 0, drain: 2.4, run: 0.4, hookQ: 1 };
+export function assistFor(level) {
+  return ASSIST[level] || ASSIST.normal;
+}
+
 // ---------- 파이팅 ----------
 // T(장력, 0~1+) = 물고기가 당기는 힘 + 감는 힘. DRAG 를 넘으면 줄이 풀리고, 1 을 넘으면 끊어지기 시작합니다.
 // 너무 느슨하면(T 가 아주 낮으면) 바늘이 빠집니다. 물고기가 달릴 때는 감기를 멈추고, 쉴 때 감는 게 요령입니다.
 export const K_REEL = 0.2;
 const RUN_FORCE = 1.3;
 
-export function newFight(fish, dist, lat, hookQ = 1, rand = Math.random) {
+export function newFight(fish, dist, lat, hookQ = 1, rand = Math.random, assist = ASSIST.hard) {
+  const A = assist || ASSIST.hard;
   const f = {
     fish,
-    P: fish.power,
+    A,
+    P: fish.power * A.pull,
     S: 1,
     D: dist,
     lat, // 정면 기준 좌우 각도(rad, + = 오른쪽)
@@ -188,7 +225,7 @@ export function newFight(fish, dist, lat, hookQ = 1, rand = Math.random) {
     slackM: 0,
     warnedSlack: false,
     t: 0,
-    hookQ,
+    hookQ: Math.max(hookQ, A.hookQ),
     out: null,
     jumps: 0
   };
@@ -200,8 +237,9 @@ function chooseMode(f, rand, events) {
   const S = f.S;
   const r = rand();
   let next = 'hold';
+  const runK = f.A ? f.A.run : 1;
   if (f.mode === 'run') next = r < 0.22 * S ? 'charge' : 'hold';
-  else if (f.mode === 'hold') next = r < 0.18 + 0.42 * S ? 'run' : r < 0.3 + 0.42 * S ? 'charge' : 'hold';
+  else if (f.mode === 'hold') next = r < (0.18 + 0.42 * S) * runK ? 'run' : r < 0.3 + 0.42 * S ? 'charge' : 'hold';
   f.mode = next;
   if (next === 'run') {
     f.modeT = (0.7 + rand() * 1.5) * (0.55 + 0.45 * S);
@@ -226,6 +264,7 @@ function chooseMode(f, rand, events) {
 export function stepFight(f, dt, input, rand = Math.random) {
   const events = [];
   if (f.out) return events;
+  const A = f.A || ASSIST.hard;
   f.t += dt;
   f.modeT -= dt;
   if (f.modeT <= 0) chooseMode(f, rand, events);
@@ -271,7 +310,7 @@ export function stepFight(f, dt, input, rand = Math.random) {
     // 드랙이 미끄러지면 물고기 힘은 거의 흡수됩니다. 그때 감고 있으면 그 몫이 그대로 줄에 걸립니다.
     const ex = Traw - DRAG;
     const reelEx = Math.min(R, ex);
-    f.T = DRAG + 0.13 * (1 - Math.exp(-(ex - reelEx) / 0.4)) + reelEx * 0.32;
+    f.T = DRAG + 0.13 * (1 - Math.exp(-(ex - reelEx) / 0.4)) + reelEx * 0.32 * A.reelEx;
   } else f.T = Traw;
 
   // 줄 길이
@@ -294,10 +333,10 @@ export function stepFight(f, dt, input, rand = Math.random) {
 
   // 체력
   const drain = (0.016 + 0.05 * f.T + (f.mode === 'run' ? 0.03 : 0)) / (0.55 + 0.45 * P);
-  f.S = Math.max(0.05, f.S - drain * (1 + 0.9 * opp) * dt);
+  f.S = Math.max(0.05, f.S - drain * A.drain * (1 + 0.9 * opp) * dt);
 
-  // 끊어짐
-  if (f.T > 1) f.breakM += dt * (1.0 + (f.T - 1) * 16);
+  // 끊어짐(쉬울수록 더 높은 장력부터, 더 천천히)
+  if (f.T > A.breakT) f.breakM += dt * (1.0 + (f.T - A.breakT) * 16) * A.breakRate;
   else f.breakM = Math.max(0, f.breakM - dt * 1.4);
   if (f.breakM > 1 || f.D > MAX_LINE) {
     f.out = 'break';
@@ -312,12 +351,12 @@ export function stepFight(f, dt, input, rand = Math.random) {
     events.push('slack');
   }
   if (f.slackM < 0.3) f.warnedSlack = false;
-  if (f.slackM > 2.3 + 0.5 * f.hookQ) {
+  if (f.slackM > (2.3 + 0.5 * f.hookQ) * A.slack) {
     f.out = 'unhook';
     events.push('unhook');
     return events;
   }
-  if (f.D <= LAND_DIST) {
+  if (f.D <= A.land) {
     f.out = 'landed';
     events.push('landed');
   }
@@ -327,7 +366,7 @@ export function stepFight(f, dt, input, rand = Math.random) {
 // 점프 중에 줄이 느슨하면 바늘이 털릴 수 있습니다(챔질이 약했으면 더 잘 털립니다).
 export function jumpThrow(f, rand = Math.random) {
   if (f.T > 0.22) return false;
-  return rand() < (1 - f.hookQ) * 0.5;
+  return rand() < (1 - f.hookQ) * 0.5 * (f.A ? f.A.jump : 1);
 }
 
 // 시험용·봇: 장력을 보며 감는 속도를 고릅니다.

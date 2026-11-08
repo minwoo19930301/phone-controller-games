@@ -2,10 +2,14 @@
 // 폰을 겨누면(aim) 자기 색 조준점이 움직이고, 방아쇠(shoot)를 누르면 그 순간의 조준점에서 광선을 쏴 좀비를 맞힙니다.
 // 판정은 전부 여기서 하고, 서버는 중계만 합니다. 카메라는 구역(거리 → 쇼핑몰 → 주차장)을 따라 정해진 길로 앞으로 가고,
 // 멈춰 설 때마다 웨이브가 몰려옵니다. 마지막 웨이브는 보스입니다.
+// 난이도(쉬움·보통·어려움)는 대기실·결과 화면에서 고르고(키보드 D, 폰의 알약 버튼), 판 중에는 잠급니다.
+// 처음 하는 폰의 연습(튜토리얼) 진행은 대기실 칸으로 보여 줍니다.
 import * as THREE from 'three';
 import { createScene, STAGE_Z } from './scene.js';
 import { KINDS, HALF_W } from './models.js';
 import { sfx, audio } from './sfx.js';
+import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
+import { createTutorialBoard } from '/common/tutorial-board.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -20,19 +24,43 @@ const MOUSE = params.has('mouse'); // 센서 없는 PC 시험: 마우스가 1P(�
 // ---------- 규칙과 조정 값 ----------
 const MAX_HP = 100;
 const MAG = 12; // 탄창
-const RELOAD_MS = 1300;
 const FIRE_GAP_MS = 110; // 한 사람이 이보다 빨리 쏠 수는 없음
 const DMG_CORE = 55;
 const PTS = { body: 10, head: 30, core: 40, headKill: 100, crate: 50 };
 const COMBO_STEP = 6; // 이만큼 연속 명중할 때마다 배율 +1
 const COMBO_MAX = 5;
-const AIM_ASSIST = 0.12; // 맞는 범위를 조금 넉넉히(비율)
 const INTRO_S = 3.4;
 const CLEAR_S = 2.0;
 const END_S = 3.4;
 const TRAVEL_SPEED = 6.5; // 레일 이동 속도(m/s)
-const REVIVE_HP = 50;
 const CAM_Y = 1.62;
+
+// ---------- 난이도 ----------
+// 어려움 = 예전 그대로입니다. 보통·쉬움은 좀비가 느리고 적고 약하며, 조준점이 과녁에 달라붙고(자석) 장전이 빠릅니다.
+//   speed·count·hp·dmg: 좀비 속도·마릿수·체력·주는 피해 배율, bite: 무는 간격 배율(클수록 느리게 묾)
+//   interval: 새로 나오는 간격 배율, maxK: 한꺼번에 나와 있는 최대 마릿수 배율
+//   hitbox: 맞는 범위를 넓히는 비율
+//   magnet: 조준점이 과녁 쪽으로 끌리기 시작하는 거리(화면 높이 비율), pull: 끌리는 세기(0~1)
+//   snap: 빗나가도 이 거리 안에 과녁이 있으면 그 과녁을 맞힘(화면 높이 비율)
+//   reload: 장전 시간(ms), revive: 부활 체력, heal: 구급상자 회복
+//   bossHp·bossDmg: 보스 체력·내려치기 피해 배율, coreNeed: 공격을 끊는 데 필요한 코어 피해 배율, charge: 보스가 힘 모으는 시간(초)
+//   adds: 보스전 졸개가 나오는 간격(초)
+const DIFF = {
+  easy: {
+    speed: 0.66, count: 0.62, hp: 0.75, dmg: 0.45, bite: 1.5, interval: 1.35, maxK: 0.7, hitbox: 0.34, magnet: 0.14, pull: 0.55, snap: 0.09,
+    reload: 650, revive: 80, heal: 45, bossHp: 0.6, bossDmg: 0.45, coreNeed: 0.55, charge: 2.7, adds: 12
+  },
+  normal: {
+    speed: 0.82, count: 0.8, hp: 0.88, dmg: 0.7, bite: 1.22, interval: 1.15, maxK: 0.85, hitbox: 0.22, magnet: 0.08, pull: 0.32, snap: 0.045,
+    reload: 950, revive: 65, heal: 35, bossHp: 0.8, bossDmg: 0.7, coreNeed: 0.75, charge: 2.2, adds: 10
+  },
+  hard: {
+    speed: 1, count: 1, hp: 1, dmg: 1, bite: 1, interval: 1, maxK: 1, hitbox: 0.12, magnet: 0, pull: 0, snap: 0,
+    reload: 1300, revive: 50, heal: 30, bossHp: 1, bossDmg: 1, coreNeed: 1, charge: 1.8, adds: 8
+  }
+};
+let diff = 'normal';
+let D = DIFF.normal;
 const SLOT_INFO = {
   1: { name: '1P', color: '#ff5a5f' }, 2: { name: '2P', color: '#3ab4ff' }, 3: { name: '3P', color: '#ffc93c' }, 4: { name: '4P', color: '#5ee07a' },
   5: { name: '5P', color: '#c77dff' }, 6: { name: '6P', color: '#ff8fd1' }, 7: { name: '7P', color: '#3ee6d6' }, 8: { name: '8P', color: '#ff9b3d' }
@@ -125,6 +153,52 @@ socket.on('shoot', (d) => onShoot(d, false));
 socket.on('reload', (d) => onReload(d));
 socket.on('calibrate', (d) => onCalibrate(d));
 
+// ---------- 난이도(공통 설정) · 연습 현황 · 준비 현황 ----------
+// 값의 주인은 이 화면입니다(localStorage 'pcg-settings-gun'). 폰의 알약 버튼·키보드 D 로 바꾸고, 판 중에는 잠급니다.
+const settings = createSettings({
+  game: 'gun',
+  fields: [fields.difficulty({ hints: { easy: '느리고 적은 좀비 · 강한 조준 자석 · 빠른 장전', normal: '조금 느린 좀비 · 약한 조준 자석', hard: '빠르고 많은 좀비 · 조준 도움 없음' } })],
+  onChange: () => {
+    applyDifficulty();
+    renderLobby();
+    pushState(true);
+  }
+});
+settings.attach(socket);
+settings.mount($('setBox'));
+settings.mount($('setBoxOver'), { compact: true });
+// 대기실과 결과 화면(바로 다시 하기) 양쪽에 연습 칸을 둡니다.
+const boards = [createTutorialBoard({ mount: $('tutBox') }), createTutorialBoard({ mount: $('tutBoxOver') })];
+for (const b of boards) b.attach(socket);
+const practicing = new Map(); // slot → 연습 중인 단계 제목
+socket.on('tutorial', (d) => {
+  const s = Number(d && d.slot);
+  if (!s) return;
+  if (d.done) practicing.delete(s);
+  else practicing.set(s, String(d.title || ''));
+  renderLobby();
+});
+// 나간 사람의 연습 표시는 지웁니다.
+socket.on('players', (p) => {
+  const here = new Set((p && p.players ? p.players : []).map((x) => Number(x.slot)));
+  for (const s of [...practicing.keys()]) if (!here.has(s)) practicing.delete(s);
+});
+let readyNow = new Set();
+socket.on('ready_state', (st) => {
+  readyNow = new Set(st && Array.isArray(st.ready) ? st.ready : []);
+  renderLobby();
+});
+// 폰 튜토리얼의 '쏘기' 단계: 그 사람 앞 가까이에 천천히 걷는 연습 좀비를 세워 줍니다.
+socket.on('msg', (d) => {
+  if (d && d.type === 'gun-target') practiceTargets();
+});
+function applyDifficulty() {
+  // 판 중에는 시작할 때 정한 값을 그대로 씁니다(설정도 잠겨 있음).
+  if (game.phase === 'playing') return;
+  diff = settings.difficulty();
+  D = DIFF[diff] || DIFF.normal;
+}
+
 // ================================================================
 // 선수(자리)
 // ================================================================
@@ -154,7 +228,7 @@ function newP(slot) {
     aim: { x: 0.5, y: 0.5 }, shown: { x: 0.5, y: 0.5 }, hist: [], aimAt: 0,
     el: null, ui: null, card: null,
     botTarget: null, botNext: 0, botNextShot: 0, botSkill: rnd(0.55, 0.95), botWander: rnd(0, 6),
-    lastSent: ''
+    lastSent: '', lockKey: null
   };
 }
 function ensureP(slot) {
@@ -200,6 +274,8 @@ function syncRoster() {
       P.calibrated = false;
     }
   }
+  // 대기실에서 새로 들어온 폰의 조준점을 바로 띄우고, 나간 폰의 조준점은 치웁니다.
+  syncXh();
 }
 const lobbyList = () => [...roster.values()].filter((p) => p.present).sort((a, b) => a.slot - b.slot);
 const players = () => [...roster.values()].filter((p) => p.play).sort((a, b) => a.slot - b.slot);
@@ -286,8 +362,11 @@ function buildXh(P) {
     .map(([a, b, c, d]) => `<line class="tick-bg" x1="${a}" y1="${b}" x2="${c}" y2="${d}"/>`).join('') +
     [[36, 3, 36, 13], [36, 59, 36, 69], [3, 36, 13, 36], [59, 36, 69, 36]]
       .map(([a, b, c, d]) => `<line class="tick" x1="${a}" y1="${b}" x2="${c}" y2="${d}"/>`).join('');
+  // 조준 자석이 과녁을 잡으면 네 귀퉁이 꺾쇠(lk)가 조여 들어옵니다.
+  const lock = 'M8 20V8H20M52 8H64V20M64 52V64H52M20 64H8V52';
   e.innerHTML =
-    `<svg viewBox="0 0 72 72"><circle class="ring-bg" cx="36" cy="36" r="22"/><circle class="ring" cx="36" cy="36" r="22"/>` +
+    `<svg viewBox="0 0 72 72"><g class="lk"><path class="lk-bg" d="${lock}"/><path class="lk-fg" d="${lock}"/></g>` +
+    `<circle class="ring-bg" cx="36" cy="36" r="22"/><circle class="ring" cx="36" cy="36" r="22"/>` +
     `<circle class="rld" cx="36" cy="36" r="22" pathLength="100" stroke-dasharray="0 100"/>${ticks}<circle class="pip" cx="36" cy="36" r="2.6"/></svg>` +
     `<svg class="hm" viewBox="0 0 40 40"><path d="M6 6L15 15M34 6L25 15M6 34L15 25M34 34L25 25" fill="none"/></svg>` +
     `<div class="tag" style="left:${tx.toFixed(1)}px;top:${ty.toFixed(1)}px">${P.name}</div><div class="ammo"></div>`;
@@ -319,15 +398,22 @@ function syncXh() {
 function updateXh(P, dt, now) {
   const u = P.ui;
   if (!u) return;
+  // 보이는 조준점 = 폰이 보낸 조준 + 조준 자석(난이도). 쏠 때도 같은 계산을 써서 보이는 곳에 맞습니다.
+  const a = P.down ? { x: P.aim.x, y: P.aim.y, lock: null } : assistAim(P.aim.x, P.aim.y, P);
   const k = 1 - Math.exp(-dt * 30);
-  P.shown.x += (P.aim.x - P.shown.x) * k;
-  P.shown.y += (P.aim.y - P.shown.y) * k;
+  P.shown.x += (a.x - P.shown.x) * k;
+  P.shown.y += (a.y - P.shown.y) * k;
   u.el.style.transform = `translate(${(P.shown.x * innerWidth).toFixed(1)}px,${(P.shown.y * innerHeight).toFixed(1)}px)`;
+  const locked = Boolean(a.lock && a.w > 0.12);
+  if (u.locked !== locked) {
+    u.el.classList.toggle('lock', locked);
+    u.locked = locked;
+  }
   const reloading = P.reloading;
   u.el.classList.toggle('reloading', reloading);
   u.el.classList.toggle('empty', P.ammo <= 0 && !reloading);
   u.el.classList.toggle('down', P.down);
-  if (reloading) u.rld.setAttribute('stroke-dasharray', `${clamp(((now - P.reloadStart) / RELOAD_MS) * 100, 0, 100).toFixed(1)} 100`);
+  if (reloading) u.rld.setAttribute('stroke-dasharray', `${clamp(((now - P.reloadStart) / D.reload) * 100, 0, 100).toFixed(1)} 100`);
   const txt = P.down ? '쓰러짐' : reloading ? '장전' : P.ammo <= 0 ? '장전!' : P.ammo <= 3 ? `${P.ammo}` : '';
   if (u.ammo.textContent !== txt) u.ammo.textContent = txt;
 }
@@ -434,23 +520,42 @@ function lobbyMessage(t) {
   clearTimeout(msgTimer);
   msgTimer = setTimeout(() => m.classList.remove('on'), 3600);
 }
+// 자리 칸은 한 번 만들고 글자·상태만 바꿉니다(들어올 때만 튀어나오는 효과가 나도록).
+const slotEls = [];
 function renderLobby() {
   const box = $('slots');
   if (!box) return;
-  const list = lobbyList();
-  box.innerHTML = '';
-  for (let s = 1; s <= 8; s++) {
-    const P = list.find((p) => p.slot === s);
-    const d = el('div', 'slot');
-    d.style.setProperty('--c', SLOT_INFO[s].color);
-    if (P) {
-      d.classList.add('on');
-      if (!P.connected) d.classList.add('away');
-      if (P.calibrated || P.bot) d.classList.add('cal');
-      d.innerHTML = `<b>${P.name}</b><small>${P.bot ? 'BOT' : P.calibrated ? '조준 완료' : '연결됨'}</small>`;
-    } else d.innerHTML = `<b>${SLOT_INFO[s].name}</b><small>비어 있음</small>`;
-    box.appendChild(d);
+  if (!slotEls.length) {
+    for (let s = 1; s <= 8; s++) {
+      const d = el('div', 'slot', `<b>${SLOT_INFO[s].name}</b><small>비어 있음</small>`);
+      d.style.setProperty('--c', SLOT_INFO[s].color);
+      box.appendChild(d);
+      slotEls.push({ d, b: d.querySelector('b'), sm: d.querySelector('small') });
+    }
   }
+  const list = lobbyList();
+  for (let s = 1; s <= 8; s++) {
+    const { d, sm } = slotEls[s - 1];
+    const P = list.find((p) => p.slot === s);
+    let txt = '비어 있음';
+    if (P) {
+      if (P.bot) txt = 'BOT';
+      else if (practicing.has(s)) txt = '연습 중';
+      else if (readyNow.has(s)) txt = '준비 완료';
+      else if (P.calibrated) txt = '조준 완료';
+      else txt = '연결됨';
+    }
+    d.classList.toggle('on', Boolean(P));
+    d.classList.toggle('away', Boolean(P && !P.connected));
+    d.classList.toggle('cal', Boolean(P && (P.calibrated || P.bot)));
+    d.classList.toggle('rdy', Boolean(P && !P.bot && readyNow.has(s)));
+    d.classList.toggle('prac', Boolean(P && !P.bot && practicing.has(s)));
+    if (sm.textContent !== txt) sm.textContent = txt;
+  }
+  // 판 중 위쪽 띠의 난이도 표시(결과 화면의 표시는 끝난 판의 난이도라 showResults 에서 정합니다)
+  const t = $('diffTag');
+  t.textContent = DIFF_LABEL[diff] || '보통';
+  t.dataset.d = diff;
 }
 
 // ================================================================
@@ -479,7 +584,7 @@ function castRay(x, y) {
   for (const zb of game.zombies) {
     if (zb.state === 'dying' || zb.state === 'dead') continue;
     for (const sp of zb.spheres) {
-      const t = raySphere(o, d, sp.p, sp.r * (1 + AIM_ASSIST) + 0.03);
+      const t = raySphere(o, d, sp.p, sp.r * (1 + D.hitbox) + 0.03);
       if (t < 0) continue;
       // 머리·코어는 몸통과 겹칠 때 우선합니다.
       const eff = sp.part === 'body' ? t : t - 0.45;
@@ -492,6 +597,47 @@ function castRay(x, y) {
   }
   if (best) best.point = new THREE.Vector3().copy(o).addScaledVector(d, best.t);
   return best;
+}
+
+// ---------- 조준 도움(자석) ----------
+// 화면 좌표(0~1) 근처에서 가장 가까운 과녁(좀비의 머리·몸·코어, 구급상자)을 찾습니다.
+// 거리는 화면 높이 기준이고, 과녁이 화면에서 보이는 크기(반지름)만큼 빼서 '가장자리까지의 거리'로 잽니다.
+// prefer: 바로 전에 잡고 있던 과녁. 조금 더 멀어도 놓지 않고(1.3배), 같은 거리면 그쪽을 고릅니다(두 과녁 사이에서 떨지 않게).
+const _sp = new THREE.Vector3();
+function nearestTarget(x, y, radius, prefer) {
+  if (!(radius > 0)) return null;
+  const asp = innerWidth / innerHeight;
+  const k = 1 / (2 * Math.tan((camera.fov * Math.PI) / 360));
+  let best = null;
+  const test = (p, r, part, key) => {
+    _sp.copy(p).project(camera);
+    if (_sp.z > 1 || _sp.z < -1) return;
+    const sx = (_sp.x + 1) / 2;
+    const sy = (1 - _sp.y) / 2;
+    if (sx < -0.05 || sx > 1.05 || sy < -0.05 || sy > 1.05) return;
+    const pr = (r * k) / Math.max(0.5, camera.position.distanceTo(p));
+    const d = Math.max(0, Math.hypot((sx - x) * asp, sy - y) - pr);
+    const held = prefer != null && key === prefer;
+    if (d > (held ? radius * 1.3 : radius)) return;
+    // 머리·코어는 같은 거리라면 조금 더 끌리게
+    const score = d - (part === 'body' ? 0 : pr * 0.3) - (held ? radius * 0.18 : 0);
+    if (!best || score < best.score) best = { sx, sy, d, score, part, key };
+  };
+  for (const zb of game.zombies) {
+    if (zb.state === 'dying' || zb.state === 'dead') continue;
+    zb.spheres.forEach((s, i) => test(s.p, s.r, s.part, `${zb.id}:${i}`));
+  }
+  for (const cr of game.crates) test(cr.pos, 0.45, 'crate', `c:${cr.t0}`);
+  return best;
+}
+// 조준점을 과녁 쪽으로 끌어당긴 위치. 가까울수록 세게(난이도의 pull 까지) 끌립니다. w = 이번에 끌린 정도.
+// 끌린 위치 = 과녁 + (폰 조준 − 과녁) × (1 − w) 이라, 과녁 위에서는 조준점이 덜 움직여 '달라붙는' 느낌이 납니다.
+function assistAim(x, y, P) {
+  const t = D.magnet > 0 ? nearestTarget(x, y, D.magnet, P ? P.lockKey : null) : null;
+  if (P) P.lockKey = t ? t.key : null;
+  if (!t) return { x, y, lock: null, w: 0 };
+  const w = D.pull * clamp((1 - t.d / D.magnet) * 1.4, 0, 1);
+  return { x: x + (t.sx - x) * w, y: y + (t.sy - y) * w, lock: t, w };
 }
 
 function startReload(P) {
@@ -526,7 +672,13 @@ function fire(P, x, y, now) {
   sfx.shot(P.slot);
   view.muzzleFlash(P.color, 0.8);
   pulse(P, 'fire');
-  const hit = castRay(x, y);
+  // 조준 자석으로 끌린 곳을 쏘고, 그래도 빗나갔는데 아주 가까이에 과녁이 있으면(쉬움·보통) 그 과녁을 맞힙니다.
+  const a = assistAim(x, y, P);
+  let hit = castRay(a.x, a.y);
+  if (!hit && D.snap > 0) {
+    const t = nearestTarget(a.x, a.y, D.snap);
+    if (t) hit = castRay(t.sx, t.sy);
+  }
   const playing = game.phase === 'playing';
   if (!hit) {
     // 빗나감: 연속 명중이 끊기고, 먼 곳에 작은 불꽃
@@ -550,7 +702,7 @@ function hitCrate(P, hit) {
   sfx.medkit();
   P.hits += 1;
   if (game.phase !== 'playing') return;
-  const heal = 30;
+  const heal = D.heal;
   P.hp = Math.min(MAX_HP, P.hp + heal);
   P.score += PTS.crate;
   floater(`HP +${heal}`, 'kill', P, cr.pos);
@@ -595,6 +747,9 @@ function hitZombie(P, zb, part, point) {
     P.score += pts;
     floater(part === 'head' ? `HEAD +${pts}` : part === 'core' ? `CORE +${pts}` : `+${pts}`, killed ? 'kill' : part === 'body' ? '' : 'head', P, point);
     if (!P.bot) send('hit', { kind: killed ? 'kill' : part === 'head' || part === 'core' ? 'head' : 'hit', combo: m }, P.slot);
+  } else if (!P.bot) {
+    // 대기실 연습: 맞힌 폰도 진동하고, 처음 하는 사람의 튜토리얼 '쏘기' 단계가 이걸로 넘어갑니다.
+    send('hit', { kind: killed ? 'kill' : part === 'head' || part === 'core' ? 'head' : 'hit', practice: true }, P.slot);
   }
   if (killed) killZombie(zb, P, part, point);
 }
@@ -612,11 +767,11 @@ function spawnZombie(kind, o = {}) {
   const n = Math.max(1, players().length || BOTS || 1);
   const x = o.x ?? clamp(cam.x + rnd(-half, half), -half, half);
   const z = o.z ?? cam.z - rnd(16, 26);
-  const hpScale = kind === 'boss' ? 700 + 220 * n : cfg.hp;
-  const waveBoost = 1 + 0.03 * Math.max(0, game.stopIdx);
+  const hpScale = Math.round((kind === 'boss' ? (700 + 220 * n) * D.bossHp : cfg.hp * D.hp));
+  const waveBoost = (1 + 0.03 * Math.max(0, game.stopIdx)) * D.speed;
   const zb = {
     id: ++zid, kind, cfg, model, state: 'walk', hp: hpScale, maxHp: hpScale,
-    speed: rnd(cfg.speed[0], cfg.speed[1]) * (kind === 'boss' ? 1 : waveBoost), stop: 0, offX: rnd(-2.2, 2.2),
+    speed: rnd(cfg.speed[0], cfg.speed[1]) * (kind === 'boss' ? D.speed : waveBoost), stop: 0, offX: o.offX ?? rnd(-2.2, 2.2),
     atkT: 0, biteDone: false, stagger: 0, flinch: 0, flashT: 0, flashColor: '#fff', dyingT: 0, deadT: 0,
     wob: rnd(0, 6), lastHitBy: 0, dmgBy: {}, spheres: [], practice: Boolean(o.practice),
     // 보스: 약점 공격 준비
@@ -624,8 +779,8 @@ function spawnZombie(kind, o = {}) {
   };
   zb.stop = kind === 'boss' ? 11 : kind === 'brute' ? 2.6 + rnd(0, 1) : 1.7 + rnd(0, 1.5);
   if (zb.practice) {
-    zb.stop = 9 + rnd(0, 6);
-    zb.speed = rnd(0.45, 0.8);
+    zb.stop = o.stop ?? 9 + rnd(0, 6);
+    zb.speed = o.speed ?? rnd(0.45, 0.8);
   }
   model.root.position.set(x, 0, z);
   const r = model.radii;
@@ -664,7 +819,7 @@ function bite(zb) {
   const targets = aliveTargets();
   if (!targets.length) return;
   const P = pick(targets);
-  const dmg = zb.cfg.dmg;
+  const dmg = Math.max(1, Math.round(zb.cfg.dmg * D.dmg));
   damagePlayer(P, dmg);
   sfx.bite();
 }
@@ -747,7 +902,7 @@ function updateZombie(zb, dt, gdt) {
     if (pos.z < tz - 1.2) zb.state = 'walk';
     else if (zb.kind === 'boss') bossAttack(zb, dt);
     else if (zb.stagger <= 0) {
-      zb.atkT += dt / zb.cfg.bite;
+      zb.atkT += dt / (zb.cfg.bite * D.bite);
       if (zb.atkT >= 0.55 && !zb.biteDone) {
         zb.biteDone = true;
         bite(zb);
@@ -802,7 +957,7 @@ function bossAttack(zb, dt) {
     zb.cool -= dt;
     zb.charge = Math.max(0, zb.charge - dt * 2);
     if (zb.cool <= 0) {
-      zb.chargeT = 1.8;
+      zb.chargeT = D.charge;
       zb.coreDmg = 0;
       sfx.alarm();
       banner('코어를 쏴요!', '가슴의 주황빛 약점에 집중 사격', 'warn', 1600);
@@ -811,8 +966,8 @@ function bossAttack(zb, dt) {
     return;
   }
   zb.chargeT -= dt;
-  zb.charge = clamp(1 - zb.chargeT / 1.8, 0, 1);
-  const need = 120 + 20 * Math.max(1, players().length);
+  zb.charge = clamp(1 - zb.chargeT / D.charge, 0, 1);
+  const need = Math.round((120 + 20 * Math.max(1, players().length)) * D.coreNeed);
   if (zb.coreDmg >= need) {
     zb.chargeT = 0;
     zb.charge = 0;
@@ -830,7 +985,7 @@ function bossAttack(zb, dt) {
     zb.cool = 4.2;
     sfx.boom();
     cam.shake = 1;
-    for (const P of aliveTargets()) damagePlayer(P, zb.cfg.dmg);
+    for (const P of aliveTargets()) damagePlayer(P, Math.max(1, Math.round(zb.cfg.dmg * D.bossDmg)));
   }
 }
 function bossDown(zb, P) {
@@ -865,14 +1020,14 @@ function startWave(i) {
   const { k, max, interval } = scaleFor();
   const queue = [];
   for (const [kind, c] of Object.entries(st.wave)) {
-    const cnt = st.boss ? c : Math.max(1, Math.round(c * k));
+    const cnt = st.boss ? c : Math.max(1, Math.round(c * k * D.count));
     for (let j = 0; j < cnt; j++) queue.push(kind);
   }
   // 섞되 덩치는 중간 이후에 나오게
   queue.sort(() => Math.random() - 0.5);
   queue.sort((a, b) => (a === 'brute') - (b === 'brute'));
   if (st.boss) queue.unshift('boss');
-  game.wave = { queue, nextSpawn: game.gt + 0.4, max, interval, total: queue.length };
+  game.wave = { queue, nextSpawn: game.gt + 0.4, max: Math.max(4, Math.round(max * D.maxK)), interval: interval * D.interval, total: queue.length };
   game.stage = 'fight';
   game.stageT = 0;
   game.nextAdd = game.gt + 9;
@@ -915,7 +1070,7 @@ function waveClear() {
   for (const P of players()) {
     if (P.down) {
       P.down = false;
-      P.hp = REVIVE_HP;
+      P.hp = D.revive;
       revived.push(P.name);
     } else if (P.connected) {
       P.hp = Math.min(MAX_HP, P.hp + 10);
@@ -963,7 +1118,7 @@ function updateWave(dt) {
   }
   // 보스전: 졸개가 계속 나옴
   if (st.boss && game.gt >= game.nextAdd && alive.length < 9 && alive.some((z) => z.kind === 'boss')) {
-    game.nextAdd = game.gt + 8;
+    game.nextAdd = game.gt + D.adds;
     for (let i = 0; i < 2; i++) spawnZombie(i ? 'runner' : 'walker');
   }
   if (!w.queue.length && !alive.length && game.stageT > 1) waveClear();
@@ -1048,9 +1203,43 @@ function clearField() {
   game.crates = [];
   game.wave = null;
 }
+// ---------- 대기실 연습 사격장 ----------
+// 대기실 가운데 빈 곳(#range)이 화면 가로에서 차지하는 범위(0~1). 대기실이 접혀 있거나 안 보이면 화면 가운데.
+function rangeBand() {
+  const r = $('range');
+  if (r && !$('lobby').classList.contains('hidden')) {
+    const b = r.getBoundingClientRect();
+    if (b.width > 120) return { a: b.left / innerWidth, b: b.right / innerWidth };
+  }
+  return { a: 0.3, b: 0.7 };
+}
+// 화면 가로 위치 sx(0~1)에 보이는, 카메라에서 dist(m) 앞의 x 좌표(대기실 카메라는 거의 정면을 봅니다)
+function worldXAt(sx, dist) {
+  const half = Math.tan((camera.fov * Math.PI) / 360) * camera.aspect;
+  return cam.x + (sx * 2 - 1) * half * dist;
+}
+// 연습 좀비 하나: 사격장 안의 먼 곳에서 나와(fromD) 사격장 안의 가까운 곳(stop)까지 걸어와 섭니다.
+function spawnRangeZombie(kind, o = {}) {
+  const { a, b } = rangeBand();
+  const m = Math.min(0.06, (b - a) * 0.2); // 가장자리는 좀비 몸 폭만큼 비움
+  const at = (u) => a + m + (b - a - 2 * m) * clamp(u, 0, 1);
+  const u = o.u ?? Math.random();
+  const fromD = o.fromD ?? rnd(20, 28);
+  const stop = o.stop ?? rnd(9, 15);
+  return spawnZombie(kind, {
+    practice: true, x: worldXAt(at(u + rnd(-0.15, 0.15)), fromD), z: cam.z - fromD, stop, speed: o.speed,
+    offX: worldXAt(at(u), stop) - cam.x
+  });
+}
 function startPractice() {
   clearField();
-  for (let i = 0; i < 4; i++) spawnZombie(i % 2 ? 'walker' : 'runner', { practice: true, x: rnd(-4, 4), z: cam.z - rnd(14, 20) });
+  for (let i = 0; i < 4; i++) spawnRangeZombie(i % 2 ? 'walker' : 'runner', { u: (i + 0.5) / 4, fromD: rnd(14, 20) });
+}
+// 튜토리얼 '쏘기' 단계용: 사격장 가운데 가까이에 아주 천천히 걷다 멈춰 서는 연습 좀비를 둘까지 채웁니다.
+function practiceTargets() {
+  if (game.phase !== 'lobby') return;
+  const near = game.zombies.filter((z) => z.practice && z.state === 'walk' && cam.z - z.model.root.position.z < 14).length;
+  for (let i = near; i < 2; i++) spawnRangeZombie('walker', { u: i % 2 ? rnd(0.58, 0.8) : rnd(0.2, 0.42), fromD: rnd(10.5, 12), stop: rnd(7.5, 8.6), speed: 0.4 });
 }
 function startGame() {
   if (game.phase === 'playing') return;
@@ -1060,6 +1249,10 @@ function startGame() {
     return;
   }
   audio();
+  // 난이도는 시작할 때 정한 값으로 판 끝까지 갑니다.
+  applyDifficulty();
+  settings.lock(true);
+  for (const b of boards) b.hide(true);
   clearField();
   for (const P of roster.values()) {
     P.play = list.includes(P);
@@ -1103,6 +1296,8 @@ function showResults() {
   const box = $('podium');
   box.innerHTML = '';
   $('overEyebrow').textContent = game.victory ? 'MISSION COMPLETE' : 'MISSION FAILED';
+  $('diffOver').textContent = DIFF_LABEL[diff] || '보통';
+  $('diffOver').dataset.d = diff;
   $('overTitle').textContent = game.victory ? '작전 성공' : '작전 실패';
   rows.forEach((P, k) => {
     const acc = P.shots ? Math.round((P.hits / P.shots) * 100) : 0;
@@ -1124,6 +1319,9 @@ function showResults() {
     }
   });
   clearField();
+  settings.lock(false);
+  for (const b of boards) b.hide(false);
+  renderLobby();
   $('over').classList.remove('hidden');
   $('join').classList.add('hidden');
   $('topbar').classList.add('hidden');
@@ -1136,6 +1334,9 @@ function backToLobby(why) {
   for (const P of roster.values()) P.play = false;
   game.phase = 'lobby';
   game.stage = 'intro';
+  settings.lock(false);
+  for (const b of boards) b.hide(false);
+  applyDifficulty();
   clearField();
   resetCamera();
   $('over').classList.add('hidden');
@@ -1175,7 +1376,11 @@ function buildState() {
     waves: STOPS.length,
     foes: game.zombies.filter(hostile).length + (game.wave ? game.wave.queue.length : 0),
     victory: game.victory,
-    players: statePlayers()
+    difficulty: diff,
+    reloadMs: D.reload, // 폰의 탄창 차오르는 모습에 씀
+    players: statePlayers(),
+    // 판 중에는 자주 보내므로 항목 정의(fields)는 빼고 값만 보냅니다(폰이 마지막 정의를 기억).
+    settings: settings.forState({ lite: game.phase === 'playing' })
   };
 }
 function pushState(force) {
@@ -1237,7 +1442,7 @@ function tick() {
     // 대기실·결과: 연습 좀비를 채워 둡니다.
     if (game.phase === 'lobby') {
       const alive = game.zombies.filter((z) => z.practice && z.state === 'walk').length;
-      if (alive < 3 && Math.random() < dt * 0.8) spawnZombie(Math.random() < 0.4 ? 'runner' : 'walker', { practice: true, x: rnd(-4.5, 4.5), z: cam.z - rnd(22, 30) });
+      if (alive < 3 && Math.random() < dt * 0.8) spawnRangeZombie(Math.random() < 0.4 ? 'runner' : 'walker');
     }
   }
 
@@ -1269,7 +1474,7 @@ function tick() {
   // ----- 선수(재장전·봇·조준점) -----
   for (const P of roster.values()) {
     if (!P.present) continue;
-    if (P.reloading && now - P.reloadStart >= RELOAD_MS) {
+    if (P.reloading && now - P.reloadStart >= D.reload) {
       P.reloading = false;
       P.ammo = MAG;
       pushState();
@@ -1303,7 +1508,10 @@ renderLobby();
 startPractice();
 syncXh();
 requestAnimationFrame(tick);
-if (AUTOSTART && (BOTS > 0 || MOUSE)) setTimeout(() => startGame(), 1500);
+applyDifficulty();
+renderLobby();
+// ?autostart 는 봇·마우스 시험 전용입니다. 폰이 한 대라도 들어와 있으면 모두 준비로만 시작합니다.
+if (AUTOSTART && (BOTS > 0 || MOUSE)) setTimeout(() => { if (!serverPlayers.length) startGame(); }, 1500);
 
 // 디버그: 콘솔에서 상태 보기·조작
 function skipToWave(i) {
@@ -1318,6 +1526,9 @@ function skipToWave(i) {
 }
 window.__gun = {
   game, roster, cam, view, startGame, backToLobby, showResults, skipToWave, spawnZombie, fire, onAim, onShoot, onReload, onCalibrate,
-  setAim, displayRtt, STOPS, players, aimAt,
-  victory, defeat, constants: { MAG, RELOAD_MS, DMG_CORE, STOPS, KINDS }
+  setAim, displayRtt, STOPS, players, aimAt, settings, boards, assistAim, nearestTarget, practiceTargets, rangeBand, worldXAt, spawnRangeZombie,
+  victory, defeat, DIFF,
+  get D() { return D; },
+  get diff() { return diff; },
+  constants: { MAG, DMG_CORE, STOPS, KINDS, DIFF }
 };

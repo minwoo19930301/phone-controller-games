@@ -1,7 +1,13 @@
 // 광선검 컨트롤러. 폰이 칼자루입니다.
 // 폰 방향(pose)을 경기 중에만 큰 화면으로 흘려보내고, 빠른 휘두르기는 폰에서 직접 잡아 swing 으로 보냅니다.
 // 칼날 소리(웅웅 · 휘두르는 바람 소리 · 부딪는 소리)는 모두 이 폰 스피커에서 냅니다.
-// 좌표는 '준비' 때 정한 기준축으로 보냅니다: u = 위, f = TV 쪽(화면이 나를 보던 방향의 반대), r = f × u = 오른쪽.
+// 좌표는 자세를 맞출 때 정한 기준축으로 보냅니다: u = 위, f = TV 쪽(화면이 나를 보던 방향의 반대), r = f × u = 오른쪽.
+// 대기 화면: 모드(로봇 검투 · 드론 훈련)·난이도(큰 화면이 정한 값, 공통 phone-settings), 준비(모두 준비하면 시작), 처음이면 연습(공통 tutorial).
+// 진동: 휘두르는 순간 폰이 가볍게 울리고, 큰 화면이 막기·베기·피격을 판정하면 d2c haptic 으로 울립니다(겹치면 한 번만).
+import { haptics } from '/common/haptics.js';
+import { createPhoneSettings } from '/common/phone-settings.js';
+import { createTutorial } from '/common/tutorial.js';
+
 (() => {
   const $ = (id) => document.getElementById(id);
   const RD = Math.PI / 180;
@@ -18,6 +24,8 @@
   const HUM_FULL_DPS = 900; // 이 회전 속도면 웅웅 소리가 가장 높고 큼
   const CAL_GUARD_MS = 400; // 자세를 맞춘 직후 흔들림은 휘두르기로 보지 않음
   const SENSOR_WAIT_MS = 1500; // 이 시간 안에 동작 센서 값이 없으면 버튼 모드
+  const TILT_SIDE = 22; // 연습: 칼끝이 이만큼(도) 기울면 그쪽 막기
+  const TILT_HOLD_MS = 260; // 연습: 그 자세로 이만큼 버티면 인정
   const PLAY_URL = (g) => (g === 'baseball' ? '/play/' : `/play/${g}/`);
 
   let token = null;
@@ -141,13 +149,47 @@
     oriCount += 1;
     ori = deviceVectors(e.alpha || 0, e.beta || 0, e.gamma || 0);
     oriBuf.push({ t, top: ori.top, face: ori.face });
-    while (oriBuf.length && oriBuf[0].t < t - 400) oriBuf.shift();
+    while (oriBuf.length && oriBuf[0].t < t - 1500) oriBuf.shift();
     if (!gotOri) {
       gotOri = true;
       fallback = false;
       sensorsChanged();
     }
-    if (!fallback) streamPose(ori.top, ori.face, t);
+    if (!fallback) {
+      streamPose(ori.top, ori.face, t);
+      feedTilt(performance.now());
+    }
+  }
+
+  // ---------- 칼 기울기(막기 방향) ----------
+  // 칼 방향을 앞에서 본 기울기 th(도): 0 = 똑바로 위, - 왼쪽, + 오른쪽. 큰 화면의 판정과 같은 식입니다.
+  function curTilt() {
+    let s = null;
+    if (fallback && fakeTimer) s = inBasis(FAKE_BASIS, fakeVectors().top);
+    else if (ori && basis) s = inBasis(basis, ori.top);
+    if (!s) return null;
+    return { th: Math.atan2(s[0], s[1]) / RD, up: s[1] };
+  }
+  function zoneOf(t) {
+    if (!t) return null;
+    if (t.th <= -TILT_SIDE) return 'left';
+    if (t.th >= TILT_SIDE) return 'right';
+    if (Math.abs(t.th) <= 12 && t.up > 0.3) return 'center';
+    return null;
+  }
+  const blk = { zone: null, since: 0, fired: false, t: null };
+  function feedTilt(now) {
+    const t = curTilt();
+    blk.t = t;
+    const z = zoneOf(t);
+    if (z !== blk.zone) {
+      blk.zone = z;
+      blk.since = now;
+      blk.fired = false;
+    } else if (z && !blk.fired && now - blk.since >= TILT_HOLD_MS) {
+      blk.fired = true;
+      if (tut.isRunning()) tut.signal('block', { dir: z, th: t.th });
+    }
   }
 
   // 휘두르기: rotationRate 크기(도/초)의 최고값. 방향 표본 차이로 속도를 재지 않습니다(iPhone 은 같은 값이 겹쳐 와서 두 배로 튐).
@@ -191,10 +233,23 @@
   }
   // 센서 휘두르기와 버튼 휘두르기가 같은 길로 나갑니다.
   function deliverSwing(data) {
-    if (state.phase === 'playing' && myInfo()) send('swing', data);
     lastSwing = { data, at: performance.now() };
     debug(`swing ${JSON.stringify(data)}`);
-    if (mode === 'wait') $('practice').textContent = `연습 휘두르기 · ${data.speed}°/s`;
+    const k = clamp((data.speed - 200) / 1000, 0.25, 0.8);
+    // 연습 중이면 게임으로 보내지 않고 연습 판정에만 씁니다.
+    if (tut.isRunning()) {
+      haptics.hit(k);
+      tut.signal('swing', data);
+      return;
+    }
+    if (state.phase === 'playing' && myInfo()) {
+      send('swing', data);
+      // 휘두르는 순간 가볍게(지연 없음). 큰 화면이 막기·베기로 판정하면 그 진동이 한 번 더 옵니다.
+      if (mode === 'play') haptics.hit(k * 0.6);
+    } else if (mode === 'wait') {
+      haptics.tick();
+      $('practice').textContent = `연습 휘두르기 · ${data.speed}°/s`;
+    }
   }
 
   // ---------- 서버까지 왕복 시간 ----------
@@ -386,12 +441,19 @@
     noise(0.45, 2200, 260, 1.2, 0.3, 'bandpass', 0.01);
     tone(130, 0.5, 0.15, 'sawtooth', 0.4);
   }
-  function clash() {
-    // '츠캉': 높은 금속성 배음 + 지직거리는 잔향
+  function clash(big) {
+    // '츠캉': 높은 금속성 배음 + 지직거리는 잔향. 칼끼리 부딪히면(big) 더 길고 낮은 울림까지
     noise(0.1, 5200, 5200, 0.7, 0.55, 'highpass', 0.002);
-    for (const [f, g] of [[1870, 0.09], [2630, 0.07], [3410, 0.05], [990, 0.07]]) tone(f * (0.97 + Math.random() * 0.06), 0.28 + Math.random() * 0.1, g, 'sawtooth', 0.9);
-    for (let i = 0; i < 6; i++) setTimeout(() => noise(0.035, 2500 + Math.random() * 3000, 0, 2, 0.18, 'bandpass', 0.002), 20 + Math.random() * 220);
-    tone(150, 0.12, 0.2, 'sine', 0.5);
+    for (const [f, g] of [[1870, 0.09], [2630, 0.07], [3410, 0.05], [990, 0.07]]) tone(f * (0.97 + Math.random() * 0.06), (big ? 0.45 : 0.28) + Math.random() * 0.1, g, 'sawtooth', 0.9);
+    for (let i = 0; i < (big ? 9 : 6); i++) setTimeout(() => noise(0.035, 2500 + Math.random() * 3000, 0, 2, 0.18, 'bandpass', 0.002), 20 + Math.random() * (big ? 360 : 220));
+    tone(big ? 90 : 150, big ? 0.3 : 0.12, big ? 0.3 : 0.2, 'sine', 0.5);
+  }
+  function slashHit(n) {
+    // 로봇 장갑을 벰: 지글거림 + 쇠 울림(연타일수록 높게)
+    const k = Math.min(3, n || 1);
+    noise(0.3, 3400, 900, 0.8, 0.45, 'bandpass', 0.003);
+    tone(560 + k * 140, 0.3, 0.12, 'triangle', 0.6);
+    tone(150, 0.18, 0.25, 'sine', 0.5);
   }
   function zap() {
     tone(75, 0.34, 0.3, 'square', 0.6);
@@ -403,19 +465,12 @@
     tone(110, 0.7, 0.3, 'sine', 0.3);
     [1047, 1319, 1568].forEach((f, i) => tone(f, 0.25, 0.08, 'triangle', 1, 0.12 + i * 0.07));
   }
+  function fanfare() {
+    boom();
+    [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.4, 0.12, 'triangle', 1, 0.25 + i * 0.12));
+  }
   const beep = () => tone(1760, 0.07, 0.18, 'square');
   const tick = () => tone(1320, 0.09, 0.25, 'triangle');
-
-  function buzz(pattern, kind) {
-    if (navigator.vibrate) {
-      try { navigator.vibrate(pattern); } catch (e) {}
-    }
-    // iPhone 은 진동이 없어 화면을 번쩍입니다.
-    const f = $('flash');
-    f.className = '';
-    void f.offsetWidth;
-    f.className = `go ${kind || 'deflect'}`;
-  }
 
   // ---------- 자세 맞추기 ----------
   let countTimer = null;
@@ -426,7 +481,7 @@
     $('btnReady').classList.remove('hidden');
     $('btnCalCancel').classList.toggle('hidden', !(basis || state.phase !== 'playing' || !myInfo()));
     $('calT').textContent = basis ? '다시 맞춥니다' : '칼자루처럼 쥡니다';
-    $('calB').textContent = '폰을 칼자루처럼 세워 쥐고\n화면이 나를 보게 한 뒤 준비를 누릅니다.';
+    $('calB').textContent = '폰을 칼자루처럼 세워 쥐고\n화면이 나를 보게 한 뒤 버튼을 누릅니다.';
     show('vCal');
   }
   function startCountdown() {
@@ -443,28 +498,30 @@
     $('calT').textContent = '그대로 멈추세요';
     $('calB').textContent = '칼자루를 세워 든 자세 그대로, 화면이 나를 보게 둡니다.';
     tick();
-    if (navigator.vibrate) navigator.vibrate(15);
+    haptics.tick();
     clearInterval(countTimer);
     countTimer = setInterval(() => {
       n -= 1;
       if (n > 0) {
         $('calN').textContent = n;
         tick();
-        if (navigator.vibrate) navigator.vibrate(15);
+        haptics.tick();
         return;
       }
       clearInterval(countTimer);
       captureBasis();
     }, 1000);
   }
-  function captureBasis() {
+  // quiet: 연습(튜토리얼) 안에서 맞출 때. 화면을 바꾸지 않고 성공 여부만 돌려줍니다.
+  function captureBasis(quiet) {
     const t = performance.now();
     let src = oriBuf.filter((o) => o.t >= t - 250);
     if (!src.length && ori) src = [ori];
     if (!src.length) {
+      if (quiet) return false;
       openCal();
-      $('calB').textContent = '방향 센서 값이 끊겼어요.\n다시 준비를 눌러 주세요.';
-      return;
+      $('calB').textContent = '방향 센서 값이 끊겼어요.\n다시 버튼을 눌러 주세요.';
+      return false;
     }
     const top = norm(src.reduce((a, o) => add(a, o.top), [0, 0, 0]));
     const face = norm(src.reduce((a, o) => add(a, o.face), [0, 0, 0]));
@@ -472,11 +529,18 @@
     calAt = t;
     nextPoseAt = 0;
     announceCal();
-    buzz([30, 40, 30], 'deflect');
     tone(1320, 0.12, 0.3);
-    mode = 'idle';
     debug(`calibrate f=${basis.f.map((x) => x.toFixed(2))} top=${top.map((x) => x.toFixed(2))} face=${face.map((x) => x.toFixed(2))}`);
+    if (quiet) return true;
+    haptics.play('success');
+    mode = 'idle';
+    // 준비를 눌렀는데 자세가 없어서 맞춘 것이면, 맞추자마자 준비 완료로 넘어갑니다.
+    if (pendingReady) {
+      pendingReady = false;
+      sendReady();
+    }
     render();
+    return true;
   }
   // 큰 화면은 이 신호로 칼 기준을 다시 잡습니다. 이 뒤의 pose 는 새 기준축 값입니다.
   function announceCal() {
@@ -487,6 +551,8 @@
   // 같은 기준축 계산(inBasis)과 pose/swing 전송 길을 그대로 씁니다.
   const FAKE_BASIS = { r: [1, 0, 0], u: [0, 1, 0], f: [0, 0, -1] };
   const fake = { yaw: -12, pitch: 58, sweep: 0 };
+  // 검투 막기 버튼: 칼끝 방향(yaw 좌우, pitch 위아래)
+  const FAKE_ZONE = { left: [-70, 30], right: [70, 30], overhead: [-76, 2], center: [0, 75] };
   let fakeRot = 0;
   let fakeTimer = null;
   function fakeVectors() {
@@ -515,6 +581,7 @@
       prev = v.top;
       prevT = t;
       streamPose(v.top, v.face, t);
+      feedTilt(t);
       drawPadDot();
     }, POSE_MS);
   }
@@ -529,7 +596,7 @@
   }
   function padSet(e) {
     const r = $('pad').getBoundingClientRect();
-    fake.yaw = clamp(((e.clientX - r.left) / r.width) * 140 - 70, -70, 70);
+    fake.yaw = clamp(((e.clientX - r.left) / r.width) * 140 - 70, -80, 80);
     fake.pitch = clamp((1 - (e.clientY - r.top) / r.height) * 100 - 10, -10, 90);
   }
   let padDown = false;
@@ -546,16 +613,25 @@
   $('pad').addEventListener('pointercancel', padUp);
   function fakeSwing() {
     audio();
-    // 오른쪽 위에서 왼쪽 아래로 0.2초 동안 쓸어 내립니다.
+    // 지금 칼끝 쪽에서 반대쪽으로 0.2초 동안 쓸어 내립니다.
     const t0 = performance.now();
+    const dir = fake.yaw > 20 ? -1 : 1;
     const run = () => {
       const u = (performance.now() - t0) / 200;
-      fake.sweep = u < 1 ? 0.5 - u : 0;
+      fake.sweep = u < 1 ? (0.5 - u) * dir : 0;
       if (u < 1) requestAnimationFrame(run);
     };
     requestAnimationFrame(run);
     whoosh(950);
     deliverSwing({ speed: 950, ago: 0, rtt: Math.round(rtt()) });
+  }
+  function fakeZone(z) {
+    const p = FAKE_ZONE[z];
+    if (!p) return;
+    audio();
+    fake.yaw = p[0];
+    fake.pitch = p[1];
+    haptics.tick();
   }
   $('btnSwing').addEventListener('pointerdown', (e) => {
     e.preventDefault();
@@ -565,15 +641,24 @@
     fake.yaw = -12;
     fake.pitch = 58;
   });
+  for (const b of document.querySelectorAll('#dpads button')) {
+    b.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      fakeZone(b.dataset.z);
+    });
+  }
   document.addEventListener('keydown', (e) => {
-    if (!fallback || mode !== 'play') return;
+    if (!fallback || (mode !== 'play' && !tut.isRunning())) return;
     if (e.code === 'Space') {
       e.preventDefault();
       if (!e.repeat) fakeSwing();
-    } else if (e.key === 'ArrowLeft') fake.yaw = clamp(fake.yaw - 8, -70, 70);
-    else if (e.key === 'ArrowRight') fake.yaw = clamp(fake.yaw + 8, -70, 70);
+    } else if (e.key === 'ArrowLeft') fake.yaw = clamp(fake.yaw - 8, -80, 80);
+    else if (e.key === 'ArrowRight') fake.yaw = clamp(fake.yaw + 8, -80, 80);
     else if (e.key === 'ArrowUp') fake.pitch = clamp(fake.pitch + 8, -10, 90);
     else if (e.key === 'ArrowDown') fake.pitch = clamp(fake.pitch - 8, -10, 90);
+    else if (e.key === 'q' || e.key === 'Q') fakeZone('left');
+    else if (e.key === 'w' || e.key === 'W') fakeZone('overhead');
+    else if (e.key === 'e' || e.key === 'E') fakeZone('right');
   });
 
   // ---------- 화면 상태 ----------
@@ -581,6 +666,7 @@
     if (!me || !state || !state.players) return null;
     return state.players[me.slot] || state.players[String(me.slot)] || null;
   }
+  const curMode = () => (state && (state.mode === 'drone' || state.mode === 'duel') ? state.mode : ps.get('mode') || 'duel');
   function setChips(list, target) {
     const box = $(target);
     box.textContent = '';
@@ -597,12 +683,16 @@
     }
   }
   const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const RESULT_TEXT = { win: '승리!', tw: '판정승', tl: '판정패', ko: '패배' };
 
   let lastStage = null;
   let lastResult = null;
   function showPlay(info) {
     mode = 'play';
+    const duel = curMode() === 'duel';
     $('fallback').classList.toggle('hidden', !fallback);
+    document.body.classList.toggle('fb', fallback);
+    $('dpads').classList.toggle('hidden', !duel);
     $('fallbackHint').textContent = fallbackReason();
     const live = state.stage === 'live' && !info.down && displayOn;
     // 칼날: 경기가 진행 중이면 켜짐, 쓰러지거나 끝나거나 큰 화면이 꺼지면 꺼짐
@@ -613,14 +703,64 @@
     $('hpT').textContent = String(hp);
     $('hpFill').style.width = `${hp}%`;
     $('hpBar').classList.toggle('low', hp <= 30 && hp > 0);
-    setChips([['막기', info.deflects || 0], ['격추', info.kills || 0], ['남은 시간', fmtTime(state.t || 0)]], 'stats');
+    const robot = duel ? info.robot : null;
+    $('robotRow').classList.toggle('hidden', !robot);
+    if (robot) {
+      $('rName').textContent = robot.name || '로봇';
+      $('rHp').textContent = String(Math.max(0, robot.hp));
+      $('rFill').style.width = `${clamp(robot.hp, 0, 100)}%`;
+      $('robotRow').classList.toggle('open', Boolean(robot.open));
+    }
+    if (duel) setChips([['막기', info.parries || 0], ['베기', info.strikes || 0], ['남은 시간', fmtTime(state.t || 0)]], 'stats');
+    else setChips([['막기', info.deflects || 0], ['격추', info.kills || 0], ['남은 시간', fmtTime(state.t || 0)]], 'stats');
     const st = $('status');
     st.className = 'status';
-    if (info.down) st.textContent = '쓰러졌어요. 다른 사람이 끝날 때까지 기다려요';
-    else if (state.stage === 'intro') st.textContent = '곧 시작해요! 칼을 세워 들고 기다려요';
-    else if (state.stage === 'end') st.textContent = '훈련 끝! 큰 화면을 보세요';
-    else if (!cueOn) st.textContent = fallback ? '끌어서 칼을 광탄 길목에 대고, 닿을 때 휘두르기' : '광탄 길목에 칼날을 대요. 닿을 때 휘두르면 격추!';
+    if (info.result === 'win') st.textContent = '로봇을 쓰러뜨렸어요! 다른 사람을 기다려요';
+    else if (info.down) st.textContent = duel ? '쓰러졌어요. 다른 사람이 끝날 때까지 기다려요' : '쓰러졌어요. 다른 사람이 끝날 때까지 기다려요';
+    else if (state.stage === 'intro') st.textContent = duel ? '로봇이 들어와요! 칼을 세워 들고 기다려요' : '곧 시작해요! 칼을 세워 들고 기다려요';
+    else if (state.stage === 'end') st.textContent = info.result ? `${RESULT_TEXT[info.result] || '끝'} · 큰 화면을 보세요` : '끝! 큰 화면을 보세요';
+    else if (!cueOn) {
+      st.textContent = duel
+        ? (fallback ? '예고된 쪽 버튼으로 막고, 비틀거리면 휘두르기' : '예고된 쪽으로 칼끝을 기울여 막고, 비틀거리면 베요')
+        : (fallback ? '끌어서 칼을 광탄 길목에 대고, 닿을 때 휘두르기' : '광탄 길목에 칼날을 대요. 닿을 때 휘두르면 격추!');
+    }
     show('vPlay');
+  }
+
+  // ---------- 준비(모두 준비하면 시작) ----------
+  let readySt = null; // 서버 ready_state { ready, players, away, need }
+  let pendingReady = false; // 준비를 눌렀는데 자세를 먼저 맞추는 중
+  let readySent = false; // 눌렀고 서버의 ready_state 를 아직 못 받음(바로 '준비 완료'로 보이게)
+  const iAmReady = () => readySent || Boolean(me && readySt && Array.isArray(readySt.ready) && readySt.ready.includes(me.slot));
+  function sendReady() {
+    if (!send('start_game', {})) return;
+    readySent = true;
+    haptics.tick();
+    if (mode === 'wait') paintReady();
+  }
+  const COLORS = { 1: '#ff5a5f', 2: '#3ab4ff', 3: '#ffc93c', 4: '#5ee07a' };
+  // 준비 버튼과 그 위 '누가 아직 준비 전인지' 줄
+  function paintReady() {
+    const btn = $('btnGo');
+    const over = state.phase === 'over';
+    const done = iAmReady();
+    btn.classList.toggle('done', done);
+    if (done) btn.innerHTML = '준비 완료 ✓<small>다른 사람을 기다려요</small>';
+    else btn.textContent = over ? '다시 하기' : '준비';
+    const row = $('readyRow');
+    const st = readySt;
+    const list = st && Array.isArray(st.players) ? st.players : [];
+    if (!me || list.length < 2 || state.phase === 'playing') {
+      row.classList.add('hidden');
+      return;
+    }
+    const away = st.away || [];
+    const notYet = list.filter((x) => !st.ready.includes(x));
+    row.innerHTML = list.map((x) => {
+      const on = st.ready.includes(x);
+      return `<span class="rp${on ? ' on' : ''}${away.includes(x) ? ' off' : ''}${x === me.slot ? ' mine' : ''}" style="--pc:${COLORS[x] || '#fff'}">${x}P${on ? ' ✓' : ''}</span>`;
+    }).join('') + `<span class="rt">${notYet.length ? `아직 준비 전: ${notYet.map((x) => `${x}P`).join(' · ')}` : '모두 준비 완료'}</span>`;
+    row.classList.remove('hidden');
   }
 
   function showWait(info) {
@@ -632,32 +772,41 @@
     if (fallback) chips.push(['조작', '버튼']);
     else if (gotOri) chips.push(['칼자루 자세', basis ? '맞춤' : '아직', basis ? 'ok' : '']);
     $('btnGo').style.display = '';
+    $('setBox').classList.remove('hidden');
     if (phase === 'over') {
-      if (info && info.rank) {
+      const r = lastResult;
+      const res = (info && info.result) || (r && r.result);
+      if (res) {
+        $('waitT').textContent = RESULT_TEXT[res] || '끝';
+        const s = r ? r : info;
+        $('waitB').textContent = `${Number(s.score || 0).toLocaleString('ko-KR')}점 · 막기 ${s.parries || 0} · 베기 ${s.strikes || 0}` +
+          `${res === 'win' && r && r.winAt != null ? ` · ${r.winAt}초` : ''}\n모두 다시 하기를 누르면 한 판 더 해요.`;
+      } else if (info && info.rank) {
         $('waitT').textContent = info.rank === 1 ? '1위!' : `${info.rank}위`;
-        $('waitB').textContent = `${Number(info.score || 0).toLocaleString('ko-KR')}점 · 막기 ${info.deflects || 0} · 격추 ${info.kills || 0}\n큰 화면에서 순위를 확인해요.`;
+        $('waitB').textContent = `${Number(info.score || 0).toLocaleString('ko-KR')}점 · 막기 ${info.deflects || 0} · 격추 ${info.kills || 0}\n모두 다시 하기를 누르면 한 판 더 해요.`;
       } else {
-        $('waitT').textContent = '훈련 끝';
-        $('waitB').textContent = lastResult ? lastResult.text : '큰 화면에서 순위를 확인해요.';
+        $('waitT').textContent = '경기 끝';
+        $('waitB').textContent = r ? r.text : '큰 화면에서 결과를 확인해요.';
       }
-      $('btnGo').textContent = '다시 하기';
     } else if (phase === 'playing') {
       $('waitT').textContent = '관전 중';
-      $('waitB').textContent = '지금 훈련이 끝나면 함께할 수 있어요.';
+      $('waitB').textContent = '지금 판이 끝나면 함께할 수 있어요.';
       $('btnGo').style.display = 'none';
+      $('setBox').classList.add('hidden');
     } else {
       $('waitT').textContent = '대기실';
       $('waitB').textContent = basis || fallback || !gotOri
-        ? '모두 들어오면 게임 시작을 눌러요.'
-        : '모두 들어오면 게임 시작을 눌러요.\n먼저 칼자루 자세를 맞춰 두면 바로 시작해요.';
-      $('btnGo').textContent = '게임 시작';
+        ? '모두 준비를 누르면 시작해요.'
+        : '모두 준비를 누르면 시작해요.\n준비를 누르면 칼자루 자세부터 맞춰요.';
     }
+    paintReady();
     setChips(chips, 'waitChips');
     const canCal = gotOri && !fallback;
-    $('btnCalLobby').classList.toggle('hidden', !canCal);
+    $('btnCalLobby').classList.toggle('hidden', !canCal || phase === 'playing');
     $('btnCalLobby').textContent = basis ? '칼자루 자세 다시 맞추기' : '칼자루 자세 맞추기';
     const recent = lastSwing && performance.now() - lastSwing.at < 4000;
     if (!recent) $('practice').textContent = basis && gotMotion && phase !== 'playing' ? '휘둘러 보면 바람 소리가 나요.' : '';
+    tut.setLinkVisible(!(phase === 'playing' && myInfo()));
     show('vWait');
   }
 
@@ -669,6 +818,7 @@
     // 버튼 모드는 기준축이 정해져 있어 자세 맞추기 없이 바로 준비 완료입니다.
     if (fallback) startFake();
     if (state.phase === 'playing' && info) {
+      if (tut.isRunning()) tut.cancel(); // 다시 하기로 연습하던 중에 경기가 시작됨
       if (!basis && gotOri && !fallback) {
         openCal();
         return;
@@ -684,7 +834,7 @@
     if (!window.isSecureContext) why = 'https 주소가 아니라 동작 센서가 꺼져 있어요. 버튼으로 해요.';
     else if (permDenied) why = '동작 권한이 거절돼 버튼으로 해요.';
     else if (isTouch) why = '동작 센서 값이 없어 버튼으로 해요. Android 는 주소창 자물쇠 → 사이트 설정 → 동작 센서를 허용해 주세요.';
-    return `${why} (키보드: Space 휘두르기 · 방향키)`;
+    return `${why} (키보드: Space 휘두르기 · 방향키 · Q/W/E 막기)`;
   }
   function sensorsChanged() {
     // 센서가 늦게 살아나면 시험 모드를 멈추고, 진짜 자세로 다시 맞추게 합니다.
@@ -701,6 +851,7 @@
     }
     if (mode === 'play') $('fallback').classList.toggle('hidden', !fallback);
     render();
+    maybeTutorial();
   }
   function sensorHelp() {
     message('동작 센서를 쓸 수 없어요',
@@ -710,6 +861,272 @@
   }
   function keepAwake() {
     if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
+  }
+
+  // ---------- 모드·난이도(큰 화면이 정하고, 아무 폰이나 바꿀 수 있음) ----------
+  const ps = createPhoneSettings();
+  ps.attach(socket);
+  ps.mount($('setBox'));
+  ps.bindReady($('btnGo'));
+  // 큰 화면이 판정한 막기·베기·피격 진동(내 자리 것만)
+  haptics.listen(socket, { slot: () => (me ? me.slot : null) });
+
+  // ================================================================
+  // 처음 하는 사람 연습(튜토리얼): 칼자루 쥐기 → 왼쪽 막기 → 오른쪽 막기 → 베기
+  // ================================================================
+  let tutChecked = false;
+  let tutLive = null; // 연습 단계 안의 '지금: …' 줄
+  // 칼자루 쥐기 그림: 세워 쥔 폰 위로 칼날, 화면은 나를 봄
+  const gripArt = () => '<svg class="pcgt-svg" viewBox="0 0 200 160" aria-hidden="true">' +
+    '<rect x="96" y="6" width="8" height="78" rx="4" fill="var(--pcgt-c)" opacity=".55"/><rect x="98" y="8" width="4" height="74" rx="2" fill="#fff"/>' +
+    '<g transform="translate(100 108)"><rect x="-15" y="-26" width="30" height="58" rx="7" class="pcgt-ph"/><rect x="-11" y="-20" width="22" height="44" rx="3" class="pcgt-scr"/>' +
+    '<rect x="-19" y="6" width="38" height="24" rx="10" class="pcgt-hand"/><path d="M-14 13h28M-14 20h28" class="pcgt-handl"/></g>' +
+    '<circle cx="100" cy="104" r="32" class="pcgt-ring"><animate attributeName="r" values="30;44" dur="2.2s" repeatCount="indefinite"/>' +
+    '<animate attributeName="opacity" values=".7;0" dur="2.2s" repeatCount="indefinite"/></circle>' +
+    '<text x="100" y="156" text-anchor="middle" fill="#9aa8bf" font-size="10" font-weight="800">화면이 나를 보게</text></svg>';
+  // 막기 그림: 칼끝을 한쪽으로 기울이고, 그쪽에서 로봇 칼(적 색)이 들어옴
+  function blockArt(dir) {
+    const s = dir === 'left' ? -1 : 1;
+    const tip = [100 + s * 62, 34];
+    const enemy = dir === 'left' ? 'M14 96 Q44 50 86 44' : 'M186 96 Q156 50 114 44';
+    return '<svg class="pcgt-svg" viewBox="0 0 200 160" aria-hidden="true">' +
+      `<path d="${enemy}" fill="none" stroke="#ff3ddf" stroke-width="5" stroke-linecap="round" stroke-dasharray="6 7"><animate attributeName="stroke-dashoffset" values="26;0" dur=".7s" repeatCount="indefinite"/></path>` +
+      `<g><animateTransform attributeName="transform" type="rotate" values="0 100 128;${s * 38} 100 128;${s * 38} 100 128;0 100 128" keyTimes="0;.3;.75;1" dur="2.2s" repeatCount="indefinite"/>` +
+      '<rect x="96" y="22" width="8" height="74" rx="4" fill="var(--pcgt-c)" opacity=".55"/><rect x="98" y="24" width="4" height="70" rx="2" fill="#fff"/>' +
+      '<g transform="translate(100 120)"><rect x="-13" y="-24" width="26" height="50" rx="6" class="pcgt-ph"/><rect x="-16" y="4" width="32" height="20" rx="9" class="pcgt-hand"/></g></g>' +
+      `<circle cx="${tip[0]}" cy="${tip[1] + 12}" r="9" fill="#fff" opacity="0"><animate attributeName="opacity" values="0;0;.95;0" keyTimes="0;.3;.4;.7" dur="2.2s" repeatCount="indefinite"/></circle>` +
+      `<text x="${100 + s * 70}" y="150" text-anchor="middle" fill="#ffc6f1" font-size="12" font-weight="900">${dir === 'left' ? '◀ 왼쪽' : '오른쪽 ▶'}</text></svg>`;
+  }
+  // 가만히 들고 있으면 차오르는 원
+  function holdStage(stage, api) {
+    stage.insertAdjacentHTML('beforeend',
+      '<svg class="tut-hold" viewBox="0 0 92 92"><circle class="bg" cx="46" cy="46" r="38"/><circle class="fg" cx="46" cy="46" r="38" stroke-dasharray="239" stroke-dashoffset="239"/>' +
+      '<text x="46" y="53" text-anchor="middle">0%</text></svg><div class="tut-live"></div>');
+    const fg = stage.querySelector('.fg');
+    const txt = stage.querySelector('text');
+    const live = stage.querySelector('.tut-live');
+    if (fallback || !gotOri) {
+      live.textContent = '동작 센서가 없어 버튼으로 해요.';
+      const row = document.createElement('div');
+      row.className = 'tut-row';
+      row.innerHTML = '<button type="button" class="tut-btn">버튼으로 할게요</button>';
+      row.querySelector('button').addEventListener('click', () => {
+        fallback = true;
+        startFake();
+        api.signal('hold', {});
+      });
+      stage.append(row);
+      return null;
+    }
+    let raf = 0;
+    let stillSince = 0;
+    let done = false;
+    const NEED = 1300;
+    const frame = () => {
+      raf = requestAnimationFrame(frame);
+      if (done) return;
+      const now = performance.now();
+      const recent = oriBuf.filter((o) => o.t >= now - 450);
+      const last = recent[recent.length - 1];
+      let k = 0;
+      let msg = '폰을 세워 쥐고 가만히 있어요';
+      if (last) {
+        let spread = 0;
+        for (const o of recent) spread = Math.max(spread, Math.acos(clamp(dot(o.top, last.top), -1, 1)) / RD);
+        const upright = last.top[1] > 0.35;
+        const still = spread < 5;
+        if (!upright) msg = '폰 윗부분이 위를 보게 세워요';
+        else if (!still) msg = '조금만 더 가만히…';
+        if (upright && still) {
+          if (!stillSince) stillSince = now;
+          k = clamp((now - stillSince) / NEED, 0, 1);
+          msg = '좋아요, 그대로!';
+        } else stillSince = 0;
+      }
+      fg.setAttribute('stroke-dashoffset', String(Math.round(239 * (1 - k))));
+      txt.textContent = `${Math.round(k * 100)}%`;
+      live.textContent = msg;
+      if (k >= 1) {
+        done = true;
+        if (captureBasis(true)) api.signal('hold', {});
+        else {
+          stillSince = 0;
+          done = false;
+        }
+      }
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }
+  // 칼 기울기 계기판: 반원 위에 지금 칼 방향, 원하는 쪽이 칠해짐
+  function gaugeStage(want) {
+    return (stage) => {
+      if (!basis && ori && !fallback) captureBasis(true); // 첫 단계를 건너뛰었으면 지금 자세를 기준으로
+      if (fallback) startFake();
+      const arc = (a0, a1, r = 70) => {
+        const p = (a) => [100 + r * Math.sin(a * RD), 104 - r * Math.cos(a * RD)];
+        const [x0, y0] = p(a0);
+        const [x1, y1] = p(a1);
+        return `M${x0.toFixed(1)} ${y0.toFixed(1)} A${r} ${r} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+      };
+      stage.insertAdjacentHTML('beforeend',
+        '<svg class="tut-gauge" viewBox="0 0 200 124">' +
+        `<path class="zone l${want === 'left' ? ' want' : ''}" d="${arc(-88, -TILT_SIDE)}"/>` +
+        `<path class="zone r${want === 'right' ? ' want' : ''}" d="${arc(TILT_SIDE, 88)}"/>` +
+        '<line class="bl" x1="100" y1="104" x2="100" y2="40"/><rect class="hl" x="94" y="100" width="12" height="20" rx="3"/>' +
+        '<text x="22" y="122" text-anchor="middle">왼쪽</text><text x="178" y="122" text-anchor="middle">오른쪽</text></svg><div class="tut-live"></div>');
+      tutLive = stage.querySelector('.tut-live');
+      const bl = stage.querySelector('.bl');
+      const zl = stage.querySelector('.zone.l');
+      const zr = stage.querySelector('.zone.r');
+      if (fallback) {
+        const row = document.createElement('div');
+        row.className = 'tut-row';
+        row.innerHTML = `<button type="button" class="tut-btn${want === 'left' ? '' : ' alt'}" data-z="left">◀ 왼쪽</button>` +
+          `<button type="button" class="tut-btn${want === 'right' ? '' : ' alt'}" data-z="right">오른쪽 ▶</button>`;
+        row.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => fakeZone(b.dataset.z)));
+        stage.append(row);
+      }
+      let raf = 0;
+      const frame = () => {
+        raf = requestAnimationFrame(frame);
+        const t = blk.t || curTilt();
+        if (!t) {
+          tutLive.textContent = '칼 방향을 읽는 중…';
+          return;
+        }
+        const a = clamp(t.th, -95, 95);
+        const x = 100 + 64 * Math.sin(a * RD);
+        const y = 104 - 64 * Math.cos(a * RD);
+        bl.setAttribute('x2', x.toFixed(1));
+        bl.setAttribute('y2', y.toFixed(1));
+        const z = zoneOf(t);
+        zl.classList.toggle('in', z === 'left');
+        zr.classList.toggle('in', z === 'right');
+        tutLive.textContent = z === want ? '좋아요, 잠깐 버텨요' : z === 'left' ? '지금: 왼쪽' : z === 'right' ? '지금: 오른쪽' : `지금: 가운데 (${Math.round(t.th)}°)`;
+      };
+      raf = requestAnimationFrame(frame);
+      return () => {
+        cancelAnimationFrame(raf);
+        tutLive = null;
+      };
+    };
+  }
+  function strikeStage(stage) {
+    stage.insertAdjacentHTML('beforeend', '<div class="tut-live"></div>');
+    tutLive = stage.querySelector('.tut-live');
+    if (fallback) {
+      const row = document.createElement('div');
+      row.className = 'tut-row';
+      row.innerHTML = '<button type="button" class="tut-btn">휘두르기</button>';
+      row.querySelector('button').addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        fakeSwing();
+      });
+      stage.append(row);
+    }
+    return () => { tutLive = null; };
+  }
+  const tut = createTutorial({
+    key: 'saber',
+    socket,
+    title: '처음이라 칼 쓰는 법을 연습해요',
+    steps: [
+      {
+        title: '칼자루 쥐기', body: '폰 아래쪽을 칼자루처럼 쥐고 세워요.\n화면이 나를 보게 들고 잠깐 가만히!',
+        svg: gripArt, waitFor: 'hold', hint: '가만히 들고 있어요', okText: '칼자루 자세를 맞췄어요', render: holdStage
+      },
+      {
+        title: '왼쪽 막기', body: '로봇 칼이 왼쪽에서 와요.\n칼끝을 왼쪽으로 기울여 잠깐 버텨요.',
+        svg: () => blockArt('left'), waitFor: 'block', hint: '칼끝을 왼쪽으로', okText: '막았어요!',
+        check: (d) => d.dir === 'left' || (d.dir === 'right' ? '반대쪽이에요. 칼끝을 왼쪽으로!' : '조금 더 왼쪽으로 기울여요'),
+        render: gaugeStage('left')
+      },
+      {
+        title: '오른쪽 막기', body: '이번엔 오른쪽에서 와요.\n칼끝을 오른쪽으로 기울여 버텨요.',
+        svg: () => blockArt('right'), waitFor: 'block', hint: '칼끝을 오른쪽으로', okText: '막았어요!',
+        check: (d) => d.dir === 'right' || (d.dir === 'left' ? '반대쪽이에요. 칼끝을 오른쪽으로!' : '조금 더 오른쪽으로 기울여요'),
+        render: gaugeStage('right')
+      },
+      {
+        title: '베기', body: '막으면 로봇이 비틀거려요.\n그때 크게 휘둘러 베요. 두 번!',
+        svg: 'swing', waitFor: 'swing', count: 2, hint: '크게 휘둘러요', okText: '베기 성공!',
+        check: (d) => {
+          if (tutLive) tutLive.textContent = `휘두르기 ${d.speed}°/s`;
+          return d.speed >= 300 || '조금 더 세게 휘둘러요';
+        },
+        render: strikeStage
+      }
+    ],
+    finish: { title: '연습 끝!', body: '이제 준비를 누르면 돼요.\n큰 화면에서 로봇이 칼을 드는 쪽으로 막고, 비틀거리면 베요.', button: '좋아요' },
+    onDone: () => {
+      tutLive = null;
+      // 버튼 모드: 연습에서 기울인 칼을 가운데로 되돌려 둡니다.
+      fake.yaw = -12;
+      fake.pitch = 58;
+      render();
+    }
+  });
+  tut.link($('tutLink'), {
+    // 내가 싸우는 중에는 열지 않습니다(대기 화면에만 있는 링크라 보통은 안 보임).
+    before: () => {
+      if (state.phase === 'playing' && myInfo()) return false;
+      humSet(false);
+      return true;
+    }
+  });
+  // 처음이면(이 폰 브라우저에 기록이 없으면) 자리를 받고 센서 여부가 정해진 뒤 연습을 띄웁니다.
+  function maybeTutorial() {
+    if (tutChecked || !me || !(gotOri || fallback)) return;
+    if (mode === 'start' || mode === 'connecting' || mode === 'msg' || mode === 'cal' || mode === 'count') return;
+    tutChecked = true;
+    if (!tut.firstTime()) return;
+    // 경기 중인 내 자리로 다시 들어온 경우는 건너뜁니다(대기 화면의 링크로 언제든 할 수 있음).
+    if (state.phase === 'playing' && myInfo()) return;
+    humSet(false);
+    tut.run();
+  }
+
+  // ---------- 경기 중 큰 표시: 공격 예고·빈틈 ----------
+  const CUE_ICON = {
+    left: '<svg viewBox="0 0 96 70"><path d="M52 8L22 35l30 27"/><path d="M78 8L48 35l30 27"/></svg>',
+    right: '<svg viewBox="0 0 96 70"><path d="M44 8l30 27-30 27"/><path d="M18 8l30 27-30 27"/></svg>',
+    overhead: '<svg viewBox="0 0 96 70"><path d="M20 40L48 12l28 28"/><path d="M20 62L48 34l28 28"/></svg>',
+    thrust: '<svg viewBox="0 0 96 70"><circle cx="48" cy="35" r="27"/><circle cx="48" cy="35" r="14"/><circle cx="48" cy="35" r="4" class="dot"/></svg>',
+    open: '<svg viewBox="0 0 96 70"><path d="M16 60L80 10"/><path d="M70 6l14 14"/><path d="M24 30l-10-6M34 20l-4-10" /></svg>'
+  };
+  const CUE_TEXT = {
+    left: ['왼쪽 막기', '칼끝을 왼쪽으로'],
+    right: ['오른쪽 막기', '칼끝을 오른쪽으로'],
+    overhead: ['위 막기', '칼을 옆으로 눕혀요'],
+    thrust: ['찌르기!', '칼을 세우거나 휘둘러 쳐내요']
+  };
+  let cueOn = false;
+  let cueTimer = null;
+  function showBigCue(kind, ms, combo) {
+    const box = $('dcue');
+    const open = kind === 'open';
+    const [t, b] = open ? ['지금 베기!', '크게 휘둘러요'] : CUE_TEXT[kind] || CUE_TEXT.left;
+    $('dcIc').innerHTML = CUE_ICON[kind] || '';
+    $('dcT').textContent = t;
+    $('dcB').textContent = b;
+    $('dcCb').textContent = combo || '';
+    box.className = `dcue${open ? ' open' : ''}`;
+    box.style.setProperty('--ms', `${Math.max(200, ms)}ms`);
+    void box.offsetWidth;
+    box.classList.add('on', 'go');
+    // 버튼 모드: 막아야 할 쪽 버튼을 깜빡입니다.
+    for (const btn of document.querySelectorAll('#dpads button')) btn.classList.toggle('hot', !open && btn.dataset.z === kind);
+    cueOn = true;
+    clearTimeout(cueTimer);
+    cueTimer = setTimeout(hideBigCue, Math.max(400, ms) + 250);
+  }
+  function hideBigCue() {
+    clearTimeout(cueTimer);
+    cueOn = false;
+    $('dcue').classList.remove('on', 'go');
+    for (const btn of document.querySelectorAll('#dpads button')) btn.classList.remove('hot');
+    if (mode === 'play') render();
   }
 
   // ---------- 소켓 ----------
@@ -739,6 +1156,7 @@
     me = p;
     noRoomTries = 0;
     document.documentElement.style.setProperty('--c', p.color);
+    tut.setColor(p.color);
     $('me').textContent = p.name;
     if (pendingCal && basis) {
       pendingCal = false;
@@ -747,10 +1165,16 @@
     // 동작 센서 켜는 법 안내는 연결이 늦게 끝나도 닫지 않습니다(버튼·센서로 닫힘).
     if (mode === 'connecting' || (mode === 'msg' && !helpOn)) mode = 'idle';
     render();
+    maybeTutorial();
   });
   socket.on('players', (payload) => {
     roster = payload && Array.isArray(payload.players) ? payload.players : [];
     if (mode === 'wait') render();
+  });
+  socket.on('ready_state', (st) => {
+    readySt = st || null;
+    readySent = false;
+    if (mode === 'wait') paintReady();
   });
   socket.on('display_status', ({ connected } = {}) => {
     displayOn = Boolean(connected);
@@ -781,21 +1205,36 @@
     if (info && stage !== lastStage) {
       if (stage === 'live' && !info.down) {
         ignite();
-        buzz([60], 'deflect');
+        haptics.buzz([60]);
       } else if (lastStage === 'live') retract();
     }
     if (info && prevInfo && info.down && !prevInfo.down) {
       retract();
-      buzz([200, 80, 300], 'hurt');
+      haptics.buzz([200, 80, 300], { color: '#ff3a5a' });
     }
+    if (stage !== 'live' && cueOn) hideBigCue();
     lastStage = stage;
     if (state.phase === 'playing' && prev.phase !== 'playing') lastResult = null;
     render();
   });
 
-  let cueOn = false;
-  let cueTimer = null;
-  socket.on('cue', () => {
+  socket.on('cue', (c) => {
+    const kind = c && c.kind;
+    if (kind === 'duel') {
+      // 로봇이 칼을 들어 올림: 막을 쪽 큰 표시 + 경고 진동
+      const combo = c.of > 1 ? `연속 ${Number(c.n || 0) + 1}/${c.of}` : '';
+      if (mode === 'play') showBigCue(c.dir, Number(c.ms) || 1000, combo);
+      beep();
+      haptics.play('warn', 0.8);
+      return;
+    }
+    if (kind === 'open') {
+      if (mode === 'play') showBigCue('open', Number(c.ms) || 1200, '');
+      tone(1568, 0.12, 0.2, 'triangle');
+      haptics.buzz([16, 30, 16], { color: '#ffd23a' });
+      return;
+    }
+    // 드론 훈련: 광탄이 곧 몸에 닿음
     cueOn = true;
     clearTimeout(cueTimer);
     cueTimer = setTimeout(() => {
@@ -806,34 +1245,48 @@
       const st = $('status');
       st.textContent = '광탄이 와요! 막아요!';
       st.className = 'status warn';
-      const c = $('cue');
-      c.classList.remove('on');
-      void c.offsetWidth;
-      c.classList.add('on');
+      const cel = $('cue');
+      cel.classList.remove('on');
+      void cel.offsetWidth;
+      cel.classList.add('on');
     }
     beep();
-    if (navigator.vibrate) {
-      try { navigator.vibrate(35); } catch (e) {}
-    }
+    haptics.play('warn', 0.6);
   });
 
+  // 결과 소리. 진동은 큰 화면이 같이 보내는 d2c haptic 이 맡습니다.
   socket.on('hit', (h) => {
     const kind = h && h.kind;
-    if (kind === 'deflect') {
-      clash();
-      buzz([25, 20, 45], 'deflect');
-    } else if (kind === 'hurt') {
+    const st = $('status');
+    const say = (t, cls) => {
+      if (mode !== 'play') return;
+      st.textContent = t;
+      st.className = `status${cls ? ` ${cls}` : ''}`;
+    };
+    if (kind === 'deflect') clash(false);
+    else if (kind === 'hurt') {
       zap();
-      buzz([90, 40, 140], 'hurt');
-    } else if (kind === 'kill') {
-      boom();
-      buzz([40, 30, 40, 30, 220], 'kill');
+      say(curMode() === 'duel' ? '베였어요!' : '맞았어요!', 'warn');
+    } else if (kind === 'kill') boom();
+    else if (kind === 'parry') {
+      clash(true);
+      say('막았다!');
+    } else if (kind === 'strike') {
+      slashHit(h.n);
+      say(h.n >= 2 ? `${h.n}연타!` : '베기!');
+    } else if (kind === 'blocked') {
+      clash(false);
+      say('로봇이 막았어요 · 먼저 막고 베요', 'warn');
+    } else if (kind === 'win') {
+      fanfare();
+      hideBigCue();
+      say('로봇을 쓰러뜨렸어요!');
     }
   });
 
   socket.on('result', (r) => {
     lastResult = r || null;
-    if (r && r.rank === 1) buzz([80, 60, 80, 60, 240], 'kill');
+    if (r && (r.result === 'win' || r.result === 'tw' || r.rank === 1)) haptics.play('success');
     render();
   });
 
@@ -846,6 +1299,7 @@
     keepAwake();
     audio();
     buildHum();
+    haptics.unlock();
     const asks = [];
     if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
       asks.push(DeviceOrientationEvent.requestPermission().catch(() => 'denied'));
@@ -884,7 +1338,14 @@
   $('btnGo').addEventListener('click', () => {
     audio();
     keepAwake();
-    send('start_game', {});
+    if (iAmReady()) return;
+    // 칼자루 자세를 아직 안 맞췄으면 먼저 맞추고, 맞추자마자 준비 완료로 넘어갑니다.
+    if (!basis && gotOri && !fallback && state.phase !== 'playing') {
+      pendingReady = true;
+      openCal();
+      return;
+    }
+    sendReady();
   });
   $('btnCalLobby').addEventListener('click', () => {
     audio();
@@ -901,6 +1362,7 @@
   });
   $('btnCalCancel').addEventListener('click', () => {
     clearInterval(countTimer);
+    pendingReady = false;
     mode = 'idle';
     render();
   });
@@ -933,5 +1395,19 @@
       lastM = motCount;
     }, 500);
   }
-  window.__saberPhone = { get state() { return state; }, get mode() { return mode; }, get basis() { return basis; }, fakeSwing, fake };
+  // 시험용: 상태 보기, 버튼 모드 조작, 연습 신호
+  window.__saberPhone = {
+    get state() { return state; }, get mode() { return mode; }, get basis() { return basis; }, get tilt() { return curTilt(); },
+    get ready() { return iAmReady(); }, fakeSwing, fakeZone, fake, tut, ps,
+    // 센서 흉내: 폰 윗부분 방향 top(세계 좌표, 위 +Y), 화면 방향 face 를 그대로 넣습니다.
+    feedOri(top, face) {
+      ori = { top: norm(top), face: norm(face) };
+      const t = performance.now();
+      oriBuf.push({ t, top: ori.top, face: ori.face });
+      while (oriBuf.length && oriBuf[0].t < t - 1500) oriBuf.shift();
+      if (!gotOri) { gotOri = true; fallback = false; sensorsChanged(); }
+      streamPose(ori.top, ori.face, t);
+      feedTilt(t);
+    }
+  };
 })();

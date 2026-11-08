@@ -22,7 +22,7 @@
 <div id="hud" class="hud hidden">
   <div class="sb">
     <div class="team a" id="tA"><span class="bar"></span><span class="names" id="nA">1P</span><b id="sA">0</b></div>
-    <div class="mid"><span class="mode" id="sbMode">1 : 1</span><span class="first" id="sbMid">7점 선승</span></div>
+    <div class="mid"><span class="mode" id="sbMode">1 : 1</span><span class="first" id="sbMid">7점 선승</span><span class="lv" id="sbLv"><i></i>보통</span></div>
     <div class="team b" id="tB"><b id="sB">0</b><span class="names" id="nB">2P</span><span class="bar"></span></div>
   </div>
   <div class="speed" id="speed">
@@ -65,7 +65,9 @@
       </ol>
       <div class="slots" id="slots"></div>
       <div class="pairs" id="pairs"></div>
-      <div class="hint"><kbd>Enter</kbd> 게임 시작 <span class="dot"></span> 한쪽 반에 8초 넘게 머물면 상대에게 넘어가요 <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
+      <div class="set-box" id="setBox"></div>
+      <div class="tut-box" id="tutBox"></div>
+      <div class="hint"><span>폰에서 모두 <b>준비</b>를 누르면 시작해요</span> <span class="dot"></span> <span>한쪽 반에 8초 넘게 머물면 상대에게 넘어가요</span> <span class="dot"></span> <span>화면을 한 번 누르면 소리가 켜져요</span><span class="kb-test hidden" id="kbTest"><span class="dot"></span> <kbd>Enter</kbd> 봇 시험 시작</span></div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
@@ -84,7 +86,8 @@
     <h1 class="over-title" id="overTitle">승리</h1>
     <div class="over-score" id="overScore"></div>
     <div class="podium" id="podium"></div>
-    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b></div>
+    <div class="over-set" id="overSet"></div>
+    <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 다음 판</span> <span class="dot"></span> <span>난이도는 지금 바꿔도 돼요</span></div>
   </div>
 </section>
 

@@ -179,5 +179,7 @@ export function createTrack() {
     { s: 0.5 * total, d: 3, len: 9, w: 5 },
     { s: 0.78 * total, d: -2.5, len: 9, w: 5 }
   ];
+  // 아이템 상자 줄(아이템전): 코너가 심하지 않은 곳 네 군데, 줄마다 도로를 가로질러 네 개
+  track.itemRows = [150, 540, 975, 1340].map((s) => ({ s: (s / 1618) * total, ds: [-5.4, -1.8, 1.8, 5.4] }));
   return track;
 }

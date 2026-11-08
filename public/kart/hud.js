@@ -1,4 +1,6 @@
 // 화면 분할 HUD: 칸마다 순위·랩·속도·미니맵·카운트다운·알림을 DOM 으로 얹습니다. 글자 크기는 칸 크기(container query)에 맞춰 줄어듭니다.
+// 아이템전이면 위 가운데에 아이템 칸(룰렛), 뒤처지면 아래 가운데에 '추격 부스트', 맞으면 빨간 번쩍임, 무적이면 무지개 테두리.
+import { ITEM_ICONS, ITEM_NAMES, CHASE_ICON } from './icons.js';
 
 function el(tag, cls, html) {
   const e = document.createElement(tag);
@@ -123,13 +125,18 @@ export function createHud(root, track) {
       '<div class="wrong">역주행!</div>' +
       '<div class="center"><b></b><span></span></div>' +
       '<div class="toast"></div>' +
+      '<div class="starfx"></div><div class="hitfx"></div><div class="boltfx"></div>' +
+      '<div class="islot"><div class="ib"><div class="ico"></div></div><span class="iname"></span></div>' +
+      `<div class="chase"><i>${CHASE_ICON}</i><span>추격 부스트</span><b>+0%</b></div>` +
       '<div class="fin"><div class="fin-r"></div><div class="fin-t"></div><div class="fin-s">다른 사람이 들어올 때까지 기다려요</div></div>';
     const q = (s) => c.querySelector(s);
     return {
       kind: 'player', root: c, map: q('.minimap'), cache: {},
       rank: q('.rk'), of: q('.of'), lap: q('.lp'), laps: q('.lap i'), time: q('.time'), speed: q('.sp'), speedfx: q('.speedfx'),
       boost: q('.boost'), wrong: q('.wrong'), center: q('.center'), cb: q('.center b'), cs: q('.center span'), toast: q('.toast'),
-      fin: q('.fin'), finR: q('.fin-r'), finT: q('.fin-t'), toastTimer: null
+      fin: q('.fin'), finR: q('.fin-r'), finT: q('.fin-t'), toastTimer: null,
+      islot: q('.islot'), ib: q('.ib'), ico: q('.ico'), iname: q('.iname'), chase: q('.chase'), chaseB: q('.chase b'),
+      hitfx: q('.hitfx'), starfx: q('.starfx'), boltfx: q('.boltfx')
     };
   }
   function boardCell() {
@@ -194,6 +201,40 @@ export function createHud(root, track) {
         c.finR.textContent = d.fin.rank ? `${ORD[d.fin.rank] || d.fin.rank + '등'}` : '완주 실패';
         c.finT.textContent = d.fin.time;
       }
+    }
+    // 아이템 칸: d.item = { on, state: 'none'|'roll'|'have', kind }
+    const it = d.item || { on: false };
+    c.islot.classList.toggle('on', Boolean(it.on));
+    if (it.on) {
+      const ik = `${it.state}|${it.kind || ''}`;
+      if (c.cache.item !== ik) {
+        const was = c.cache.item || '';
+        c.cache.item = ik;
+        c.ico.innerHTML = it.kind ? ITEM_ICONS[it.kind] || '' : '';
+        c.ib.className = 'ib ' + it.state;
+        c.iname.textContent = it.state === 'have' ? ITEM_NAMES[it.kind] || '' : it.state === 'roll' ? '' : '';
+        if (it.state === 'have' && was.startsWith('roll')) { c.ib.classList.add('land'); }
+      }
+    }
+    // 추격 부스트
+    const ch = d.chase || 0;
+    const chOn = ch >= 0.035;
+    c.chase.classList.toggle('on', chOn);
+    const pct = `+${Math.round(ch * 100)}%`;
+    if (chOn) setText(c, 'chase', c.chaseB, pct);
+    c.starfx.classList.toggle('on', Boolean(d.star));
+    // 맞음·번개 번쩍임: 키가 바뀔 때마다 애니메이션을 다시 겁니다.
+    if (d.hitKey && c.cache.hit !== d.hitKey) {
+      c.cache.hit = d.hitKey;
+      c.hitfx.classList.remove('go');
+      void c.hitfx.offsetWidth;
+      c.hitfx.classList.add('go');
+    }
+    if (d.boltKey && c.cache.bolt !== d.boltKey) {
+      c.cache.bolt = d.boltKey;
+      c.boltfx.classList.remove('go');
+      void c.boltfx.offsetWidth;
+      c.boltfx.classList.add('go');
     }
     drawMap(c, d.karts, d.ownId, false);
   }

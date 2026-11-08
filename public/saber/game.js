@@ -1,11 +1,18 @@
-// 광선검 큰 화면: 1~4명이 각자 훈련 스테이션에서 동시에 드론의 광탄을 막습니다.
-// 폰 방향(pose)이 그대로 칼 방향이 되고, 칼날이 광탄 경로에 닿으면 튕겨 냅니다. 닿는 순간 세게 휘둘렀거나(swing)
-// 튕긴 방향이 드론을 향하면 그 드론을 격추합니다. 판정은 모두 여기서 하고, 서버는 중계만 합니다.
+// 광선검 큰 화면: 1~4명이 각자 스테이션에서 동시에 싸웁니다. 모드는 대기실에서 고릅니다(M 키·폰 알약).
+//  - 드론 훈련: 드론의 광탄을 막습니다. 폰 방향(pose)이 그대로 칼 방향이 되고, 칼날이 광탄 경로에 닿으면 튕겨 냅니다.
+//    닿는 순간 휘둘렀거나(swing) 튕긴 방향이 드론 쪽이면 그 드론을 격추합니다(난이도에 따라 자동으로 드론을 향함).
+//  - 로봇 검투(duel.js): 자기 칸에서 로봇 검객과 1:1. 예고된 방향으로 막고, 비틀거릴 때 벱니다.
+// 판정은 모두 여기서 하고, 서버는 중계만 합니다. 난이도(쉬움·보통·어려움)는 판정 너그러움·속도·피해를 바꿉니다.
 import * as THREE from 'three';
 import { createScene, STATION_X } from './scene.js';
 import { BLADE_LEN, HILT, DRONE_R, ENEMY } from './models.js';
 import { createHud } from './hud.js';
 import { sfx, audio } from './sfx.js';
+import { createDuel, DUEL_LEVEL, KIND_TEXT } from './duel.js';
+import { ROBOT_Z } from './robot.js';
+import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
+import { createTutorialBoard } from '/common/tutorial-board.js';
+import { sendHaptic } from '/common/haptics.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -14,24 +21,62 @@ const num = (v, d) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Nu
 const BOTS = clamp(parseInt(params.get('bots'), 10) || 0, 0, 4);
 const AUTOSTART = params.has('autostart');
 
+// ---------- 난이도·모드 ----------
+// 큰 화면이 값을 갖고(localStorage 'pcg-settings-saber'), 폰 대기 화면에도 같은 알약이 뜹니다. 경기 중에는 잠깁니다.
+// 주소로 시험: ?mode=duel|drone, ?difficulty=easy|normal|hard
+const MODES = {
+  duel: { label: '로봇 검투', lede: '폰을 칼자루처럼 쥐고, 로봇 검객이 예고한 쪽을 막은 뒤 비틀거릴 때 베세요.', eyebrow: 'DUEL COMPLETE', title: '검투 결과' },
+  drone: { label: '드론 훈련', lede: '폰을 칼자루처럼 쥐고 날아오는 광탄을 쳐내세요. 휘둘러 되받으면 드론이 떨어져요.', eyebrow: 'TRAINING COMPLETE', title: '훈련 결과' }
+};
+let booted = false; // 장면·상태가 다 만들어지기 전(글꼴 기다리는 중)에 설정이 바뀌어도 무시
+const settings = createSettings({
+  game: 'saber',
+  fields: [
+    fields.choice('mode', '모드', [
+      { value: 'duel', label: '로봇 검투', hint: '로봇 검객의 칼을 막고, 비틀거릴 때 베요' },
+      { value: 'drone', label: '드론 훈련', hint: '광탄을 막고, 휘둘러 드론에 되받아쳐요' }
+    ], { default: 'duel', hotkey: 'm' }),
+    fields.difficulty({ hints: { easy: '방향만 맞으면 막혀요 · 아주 넉넉하게', normal: '적당히 봐줘요', hard: '빠른 연속 공격 · 봐주는 것 없이' } })
+  ],
+  onChange: () => { if (booted) onSettingsChanged(); }
+});
+// 드론 훈련 난이도. hard 가 예전 값입니다. guardR/guardMs: 칼이 광탄 길목 근처(guardR m)를 최근(guardMs)에 지났으면 막은 것으로 봐줍니다.
+// goodAng: 그냥 막기만 해도 튕긴 광탄이 드론으로 끌려가는 각도(쉬움은 넓게 = 거의 자동 조준, 방향은 어느 드론인지 고르는 정도)
+const DRONE_LEVEL = {
+  easy: {
+    hitR: 0.3, guardR: 0.55, guardMs: 280, preMs: 820, postMs: 420, swingKill: 220, goodAng: 60, assistAng: 180,
+    speed: 0.7, charge: 1.4, gap: 1.4, dmg: 0.55, maxDrones: 3, slow: 0.28, slowLead: 0.56
+  },
+  normal: {
+    hitR: 0.21, guardR: 0.32, guardMs: 170, preMs: 650, postMs: 300, swingKill: 290, goodAng: 30, assistAng: 120,
+    speed: 0.85, charge: 1.15, gap: 1.15, dmg: 0.8, maxDrones: 4, slow: 0.32, slowLead: 0.48
+  },
+  hard: {
+    hitR: 0.13, guardR: 0, guardMs: 0, preMs: 500, postMs: 220, swingKill: 380, goodAng: 13, assistAng: 80,
+    speed: 1, charge: 1, gap: 1, dmg: 1, maxDrones: 5, slow: 0.36, slowLead: 0.42
+  }
+};
+const levelOf = (P) => (P && P.level) || settings.difficulty();
+const dl = (P) => DRONE_LEVEL[levelOf(P)] || DRONE_LEVEL.normal;
+
 // ---------- 규칙과 조정 값 ----------
-const ROUND_S = clamp(num(params.get('round'), 90), 10, 600); // 한 판(초). ?round=20 으로 짧게 시험할 수 있습니다.
+const ROUND_S = clamp(num(params.get('round'), 90), 10, 600); // 드론 훈련 한 판(초). ?round=20 으로 짧게 시험할 수 있습니다.
+const DUEL_S = clamp(num(params.get('round'), 120), 10, 600); // 로봇 검투 제한 시간(초)
 const INTRO_S = 3.4; // 카운트다운(드론이 들어오는 시간)
 const END_S = 2.8; // '훈련 끝' 뒤 결과 화면까지
 const AWAY_OUT_MS = 10000; // 다른 사람이 모두 쓰러졌을 때, 폰이 이만큼 넘게 끊긴 사람은 쓰러진 것으로 칩니다
 const MAX_HP = 100;
 const DEFLECT_PTS = 10;
 const KILL_BONUS = 40; // 격추 보너스(막기 10 + 40 = 50)
-const HIT_R = 0.13; // 칼날 캡슐 반지름(넉넉하게: 광탄 굵기 + 빛 + 여유)
+const HIT_R = 0.13; // 칼날 캡슐 반지름(어려움). 난이도별 값은 DRONE_LEVEL.hitR
 const SUBSTEPS = 4;
 const SLOW = 0.36; // 슬로우 배율
 const SLOW_LEAD = 0.42; // 광탄이 몸에 닿기까지 이 시간(경기 초) 안이면 슬로우
 const SLOW_COOL_MS = 650; // 슬로우가 끝난 뒤 다음 슬로우까지 최소 간격(실제 ms)
-const GOOD_ANG = 13 * (Math.PI / 180); // 튕긴 방향이 드론에서 이 각도 안이면 격추
-const ASSIST_ANG = 80 * (Math.PI / 180); // 세게 휘둘렀을 때 끌어 줄 드론을 찾는 각도
-const SWING_KILL = 380; // 격추로 인정하는 휘두르기 회전 속도(도/초)
-const SWING_PRE_MS = 500; // 닿기 전 이만큼 일찍 휘두른 것까지 인정(화면의 칼은 폰보다 늦게 보이므로 넉넉히)
-const SWING_POST_MS = 220; // 닿은 뒤 이만큼 늦게 휘두른 것까지 인정
+const RAD = Math.PI / 180;
+// 격추 판정(난이도별, DRONE_LEVEL): goodAng = 튕긴 방향이 드론에서 이 각도 안이면 격추, assistAng = 휘둘렀을 때 끌어 줄 드론을 찾는 각도,
+// swingKill = 격추로 인정하는 휘두르기 회전 속도(도/초), preMs/postMs = 닿기 전·후 이만큼 어긋난 휘두르기까지 인정
+const SWING_KILL = DRONE_LEVEL.hard.swingKill;
 const DECIDE_MS = 240; // 격추 여부를 정하기 전, 늦게 도착하는 swing 을 기다리는 시간
 const WAVE_S = 18;
 const DRONE_SCALE = 1.7; // 드론 모델 크기 배율(멀리서도 잘 보이게)
@@ -67,6 +112,10 @@ await Promise.race([
 ]).catch(() => {});
 const view = createScene($('cv'));
 const hud = createHud($('views'));
+// 대기실: 설정 알약(모드·난이도)과 폰 연습(튜토리얼) 현황
+settings.mount($('setBox'));
+settings.mount($('setBoxOver'), { compact: true });
+const board = createTutorialBoard({ mount: $('tutBoard') });
 
 // ================================================================
 // 연결
@@ -92,6 +141,18 @@ setInterval(() => {
 function send(event, data, slot) {
   if (!socket.connected) return;
   socket.emit('d2c', slot != null ? { event, slot, data } : { event, data });
+}
+// 막기·맞힘 같은 결과를 그 폰에 알립니다. 소리는 폰이 'hit' 를 받아 내고, 진동은 공통 haptic 으로 보냅니다
+// (폰이 휘두르는 순간 스스로 울린 진동과 220ms 안에 겹치면 폰에서 한 번만 울립니다).
+const HIT_HAPTIC = {
+  deflect: ['block', 0.75], kill: ['strong', 1], hurt: ['fail', 1],
+  parry: ['clash', 1], strike: ['hit', 0.85], blocked: ['block', 0.5], win: ['success', 1]
+};
+function sendHit(slot, data) {
+  if (slot == null) return;
+  send('hit', data, slot);
+  const h = HIT_HAPTIC[data.kind];
+  if (h) sendHaptic(socket, slot, h[0], data.kind === 'strike' ? Math.min(1, h[1] + 0.06 * ((data.n || 1) - 1)) : h[1]);
 }
 
 socket.on('connect', () => {
@@ -127,10 +188,20 @@ socket.on('players', (p) => {
   pushState(true);
 });
 socket.on('display_replaced', () => $('replaced').classList.remove('hidden'));
+// 시작은 서버의 start_game 으로만 합니다(들어온 사람이 모두 준비를 눌렀을 때 한 번 옵니다).
 socket.on('start_game', () => startGame());
 socket.on('pose', (d) => onPose(d, false));
 socket.on('swing', (d) => onSwing(d, false));
 socket.on('calibrate', (d) => onCalibrate(d));
+// 준비 현황(누가 아직인지 대기실 칸에 표시)과 폰 연습 현황
+let readyState = null;
+socket.on('ready_state', (st) => {
+  readyState = st || null;
+  renderLobby();
+});
+socket.on('tutorial', () => setTimeout(renderLobby, 0));
+settings.attach(socket);
+board.attach(socket);
 
 function lobbyPlayers() {
   const list = serverPlayers.map((p) => ({ ...p, bot: false }));
@@ -161,8 +232,10 @@ const game = {
   wave: 1,
   lastCount: 0,
   allGoneSince: 0,
-  results: []
+  results: [],
+  mode: settings.get('mode') // 이번 판의 모드(시작할 때 정해짐)
 };
+const isDuel = () => game.mode === 'duel';
 
 const V = () => new THREE.Vector3();
 function newPlayer(p, stationIdx, demo = false) {
@@ -179,10 +252,22 @@ function newPlayer(p, stationIdx, demo = false) {
     swings: [], az: 0.55, shake: 0, cam: { x: 0, y: 0 },
     botS: new THREE.Vector3(-0.3, 0.8, -0.5).normalize(), botThreat: null, botReactAt: 0, botFail: false, botSwing: false, botSwung: false,
     botSweep: 0, botSweepAxis: new THREE.Vector3(0, 0, 1), botNextFlourish: 0, manualSweep: 0,
-    away: false, awaySince: 0
+    away: false, awaySince: 0,
+    level: settings.difficulty(), duel: null, result: null, winAt: 0, parries: 0, strikes: 0, hurts2: 0,
+    // 최근 칼 위치(드론 훈련의 '거의 막음' 보정용 고리 버퍼)
+    blades: Array.from({ length: 20 }, () => ({ t: -1e9, e: V(), tip: V(), on: false })), bladeHead: 0,
+    keyDir: null, keyUntil: 0
   };
 }
-const waveInfo = () => WAVES[clamp(game.wave, 1, WAVES.length) - 1];
+// 지금 웨이브 값에 난이도 배율을 곱합니다(쉬울수록 느리고 적고 약하게).
+function waveInfo(P) {
+  const w = WAVES[clamp(game.wave, 1, WAVES.length) - 1];
+  const L = dl(P);
+  return {
+    drones: Math.min(w.drones, L.maxDrones), gap: w.gap * L.gap, charge: w.charge * L.charge, speed: w.speed * L.speed,
+    dmg: Math.round(w.dmg * L.dmg), double: w.double * (L.gap > 1 ? 0.5 : 1)
+  };
+}
 
 // ---------- 좌표 ----------
 // 폰 기준축 [오른쪽, 위, 앞(TV 쪽)] ↔ 세계(+x 오른쪽, +y 위, -z 앞)
@@ -256,9 +341,10 @@ function onSwing(d, local) {
   if (P.swings.length > 12) P.swings.shift();
   P.swingFx = Math.min(1, P.swingFx + speed / 900);
   // 이미 튕겨 나간 광탄 중 아직 격추 여부를 정하지 않은 것을 올려 줍니다.
-  if (speed >= SWING_KILL) {
+  const L = dl(P);
+  if (speed >= L.swingKill) {
     for (const b of P.bolts) {
-      if (b.state === 'out' && b.kill == null && b.candidate && now - lag >= b.contactReal - SWING_PRE_MS && now - lag <= b.contactReal + SWING_POST_MS) {
+      if (b.state === 'out' && b.kill == null && b.candidate && now - lag >= b.contactReal - L.preMs && now - lag <= b.contactReal + L.postMs) {
         b.kill = true;
         b.homing = b.candidate;
         b.speed = 19;
@@ -267,7 +353,8 @@ function onSwing(d, local) {
   }
 }
 function strongSwingNear(P, real) {
-  return P.swings.some((s) => s.speed >= SWING_KILL && s.real >= real - SWING_PRE_MS && s.real <= real + SWING_POST_MS);
+  const L = dl(P);
+  return P.swings.some((s) => s.speed >= L.swingKill && s.real >= real - L.preMs && s.real <= real + L.postMs);
 }
 function onCalibrate(d) {
   const slot = Number(d && d.slot);
@@ -389,7 +476,7 @@ function updateDrones(P, dtG, now) {
   }
 }
 function startCharge(P, dr) {
-  const w = waveInfo();
+  const w = waveInfo(P);
   dr.charge = 1;
   dr.chargeT = 0;
   dr.chargeDur = w.charge * (0.85 + Math.random() * 0.3);
@@ -408,7 +495,7 @@ function fireBolt(P, dr) {
   const dir = V().subVectors(target, start);
   const pathLen = dir.length();
   dir.divideScalar(pathLen);
-  const w = waveInfo();
+  const w = waveInfo(P);
   const bolt = {
     m: b, P, state: 'in', p: start.clone(), start, target, dir, pathLen, traveled: 0, speed: w.speed * (0.92 + Math.random() * 0.16),
     len: 0.46, color: new THREE.Color(ENEMY), age: 0, drone: dr, cued: false,
@@ -428,7 +515,7 @@ function scheduleShots(P) {
   if (P.down || P.away || game.stage !== 'live' && !P.demo) return;
   const gt = P.clock.gt;
   if (gt < P.nextShot) return;
-  const w = waveInfo();
+  const w = waveInfo(P);
   const ready = P.drones.filter((x) => x.alive && x.state === 'fly' && x.charge === 0);
   if (!ready.length) {
     P.nextShot = gt + 0.3;
@@ -445,7 +532,7 @@ function scheduleShots(P) {
   P.nextShot = gt + w.gap * (0.8 + Math.random() * 0.4) + w.charge;
 }
 function topUpDrones(P) {
-  const want = P.demo ? 3 : waveInfo().drones;
+  const want = P.demo ? 3 : waveInfo(P).drones;
   const alive = P.drones.filter((x) => x.alive).length + P.respawn.length;
   for (let k = alive; k < want; k++) spawnDrone(P, k * 0.5);
 }
@@ -518,17 +605,17 @@ function updateBolts(P, dtG, dtR, now) {
           _bb.lerpVectors(P.prevEmitter, P.emitter, f);
           _bt.lerpVectors(P.prevTip, P.tip, f);
           const dist = segSeg(_a, _b, _bb, _bt, _c1, _c2);
-          if (dist < HIT_R) {
+          if (dist < dl(P).hitR) {
             deflect(P, b, _c1, _c2, segT, dtR, now);
             break;
           }
         }
         b.p.copy(_b);
         b.traveled += step;
-        if (b.traveled >= b.pathLen) hurt(P, b, now);
+        if (b.traveled >= b.pathLen && !guardCatch(P, b, dtR, now)) hurt(P, b, now);
       }
       // 첫 경고: 몸에 닿기 직전(슬로우가 걸리는 때) 폰을 울립니다.
-      if (b.state === 'in' && !b.cued && (b.pathLen - b.traveled) / b.speed < SLOW_LEAD) {
+      if (b.state === 'in' && !b.cued && (b.pathLen - b.traveled) / b.speed < dl(P).slowLead) {
         b.cued = true;
         if (!P.bot && now - P.lastCue > 220) {
           P.lastCue = now;
@@ -598,6 +685,35 @@ function updateBolts(P, dtG, dtR, now) {
   }
 }
 
+// 쉬움·보통: 몸에 닿기 직전, 최근(guardMs) 칼이 광탄 길목 가까이(guardR) 지나갔으면 막은 것으로 봐줍니다.
+// 큰 방향만 맞으면 막히게 하는 보정입니다(정확한 칼 위치는 조금만 봄).
+const _ga = V();
+const _gb = V();
+const _gc1 = V();
+const _gc2 = V();
+function guardCatch(P, b, dtR, now) {
+  const L = dl(P);
+  if (!L.guardR || P.down || P.demo || P.ign < 0.5) return false;
+  _gb.copy(b.target);
+  _ga.copy(b.target).addScaledVector(b.dir, -1.1);
+  let best = 9;
+  let bestT = 0;
+  for (const r of P.blades) {
+    if (!r.on || now - r.t > L.guardMs) continue;
+    const d = segSeg(_ga, _gb, r.e, r.tip, _c1, _c2);
+    if (d < best) {
+      best = d;
+      bestT = segT;
+      _gc1.copy(_c1);
+      _gc2.copy(_c2);
+    }
+  }
+  if (best > L.guardR) return false;
+  b.p.copy(_gc1);
+  deflect(P, b, _gc1, _gc2, bestT, dtR, now);
+  return true;
+}
+
 const _ax = V();
 const _vp = V();
 const _bv = V();
@@ -643,8 +759,9 @@ function deflect(P, b, cBolt, cBlade, tBlade, dtR, now) {
       best = dr;
     }
   }
-  b.candidate = best && bestAng < ASSIST_ANG ? best : null;
-  if (b.candidate && (bestAng < GOOD_ANG || strongSwingNear(P, now))) {
+  const L = dl(P);
+  b.candidate = best && bestAng < L.assistAng * RAD ? best : null;
+  if (b.candidate && (bestAng < L.goodAng * RAD || strongSwingNear(P, now))) {
     b.kill = true;
     b.homing = b.candidate;
     b.speed = 19;
@@ -663,7 +780,7 @@ function deflect(P, b, cBolt, cBlade, tBlade, dtR, now) {
   P.shake = Math.max(P.shake, 0.35);
   const lines = ['막기!', '튕겨냈어요!', '좋아요!', '막기!'];
   hudCall(P, P.streak >= 3 ? `${P.streak} 연속!` : lines[P.deflects % lines.length], `+${DEFLECT_PTS}`, P.streak >= 5 ? 'streak' : 'good', 800);
-  if (!P.bot) send('hit', { kind: 'deflect' }, P.slot);
+  if (!P.bot) sendHit(P.slot, { kind: 'deflect' });
   pushState();
 }
 
@@ -672,14 +789,14 @@ function hurt(P, b, now) {
   const hitP = b.target;
   view.sparks.emit(_a.copy(hitP).add(_dv.set(0, 0, -0.25)), P.demo ? 10 : 26, { color: ENEMY, color2: '#ffffff', speed: 2.6, life: 0.45, size: 0.03, hot: 3 });
   if (P.demo) return;
-  const w = waveInfo();
+  const w = waveInfo(P);
   P.hp = Math.max(0, P.hp - w.dmg);
   P.hurts += 1;
   P.streak = 0;
   P.shake = 1;
   sfx.hurt();
   hudHurt(P);
-  if (!P.bot) send('hit', { kind: 'hurt' }, P.slot);
+  if (!P.bot) sendHit(P.slot, { kind: 'hurt' });
   if (P.hp <= 0 && !P.down) knockDown(P, now);
   else hudCall(P, '맞았어요', `체력 ${Math.ceil(P.hp)}`, 'bad', 700);
   pushState();
@@ -697,15 +814,19 @@ function knockDown(P, now) {
     if (dr.alive) dr.d.setCharge(0);
   }
   const i = viewIndex(P);
-  if (i >= 0) hud.banner(i, '쓰러졌어요', `${P.score.toLocaleString('ko-KR')}점`, `막기 ${P.deflects} · 격추 ${P.kills}`, 'bad');
+  if (isDuel()) {
+    P.result = 'ko';
+    if (i >= 0) hud.banner(i, '패배', `${P.score.toLocaleString('ko-KR')}점`, `막기 ${P.parries} · 베기 ${P.strikes}`, 'bad');
+  } else if (i >= 0) hud.banner(i, '쓰러졌어요', `${P.score.toLocaleString('ko-KR')}점`, `막기 ${P.deflects} · 격추 ${P.kills}`, 'bad');
   pushState(true);
   if (allOut(now)) endRound(now);
 }
-// 판이 끝났는지: 모두 쓰러졌거나, 쓰러진 사람이 있고 나머지는 폰이 오래 끊겨 있음.
+// 판이 끝났는지: 모두 쓰러졌거나(검투는 모두 승패가 났거나), 남은 사람은 폰이 오래 끊겨 있음.
 // 아무도 쓰러지지 않고 모두 끊긴 경우는 tick 의 allGoneSince(대기실로 돌아감)가 맡습니다.
 function allOut(now) {
-  return game.players.some((x) => x.down) &&
-    game.players.every((x) => x.down || (x.away && x.awaySince && now - x.awaySince > AWAY_OUT_MS));
+  const gone = (x) => x.away && x.awaySince && now - x.awaySince > AWAY_OUT_MS;
+  if (isDuel()) return game.players.some((x) => x.result) && game.players.every((x) => x.result || gone(x));
+  return game.players.some((x) => x.down) && game.players.every((x) => x.down || gone(x));
 }
 
 function killDrone(P, dr, b) {
@@ -728,7 +849,7 @@ function killDrone(P, dr, b) {
   P.score += KILL_BONUS;
   sfx.kill();
   hudToast(P, '격추!', `+${DEFLECT_PTS + KILL_BONUS}점 · ${P.kills}대째`, 'kill');
-  if (!P.bot) send('hit', { kind: 'kill' }, P.slot);
+  if (!P.bot) sendHit(P.slot, { kind: 'kill' });
   pushState();
 }
 
@@ -765,6 +886,12 @@ function updateSaber(P, dtR, now) {
     P.prevTip.copy(P.tip);
     P.prevInit = true;
   }
+  const rec = P.blades[P.bladeHead];
+  P.bladeHead = (P.bladeHead + 1) % P.blades.length;
+  rec.t = now;
+  rec.e.copy(P.emitter);
+  rec.tip.copy(P.tip);
+  rec.on = P.ign > 0.5;
   // 깜빡임
   P.flickT += dtR;
   const t = P.flickT;
@@ -856,6 +983,61 @@ function botThink(P, dtR, now) {
   onPose({ P, s: toBasis(P.botS), fc: toBasis(_fc) }, true);
 }
 
+// 검투 봇·키보드: 원하는 칼 방향(세계)으로 사람처럼 각속도 한계(초당 12라디안)를 두고 돌립니다. 휘두를 때는 칼을 쓸어 넘깁니다.
+const _q2 = new THREE.Quaternion();
+function setBotDir(P, want, dtR) {
+  _want.copy(want);
+  if (P.botSweep > 0) {
+    _q1.setFromAxisAngle(P.botSweepAxis, P.botSweep * 0.75 * Math.sin(P.botSweep * Math.PI));
+    _want.applyQuaternion(_q1);
+    P.botSweep = Math.max(0, P.botSweep - dtR * 4);
+  }
+  const ang = P.botS.angleTo(_want);
+  if (ang > 1e-4) {
+    _q1.setFromUnitVectors(P.botS, _want);
+    _q2.identity().slerp(_q1, Math.min(1, (12 * dtR) / ang));
+    P.botS.applyQuaternion(_q2).normalize();
+  }
+  _fc.set(0, 0.15, 1);
+  onPose({ P, s: toBasis(P.botS), fc: toBasis(_fc) }, true);
+}
+function botSwing(P, speed) {
+  P.botSweep = 1;
+  P.botSweepAxis.set(Math.random() < 0.5 ? -0.35 : 0.35, 0.25, -1).normalize();
+  onSwing({ P, speed, ago: 0, rtt: 0 }, true);
+}
+
+// 로봇 검투(duel.js)에 넘기는 도구들
+const duel = createDuel({
+  view, sfx,
+  // 봇 자리(폰 없음)에는 보내지 않습니다.
+  send: (event, data, slot) => {
+    const P = playerBySlot(slot);
+    if (!P || P.bot) return;
+    if (event === 'hit') sendHit(slot, data);
+    else send(event, data, slot);
+  },
+  level: (P) => levelOf(P),
+  live: (P) => P.demo || (game.phase === 'playing' && game.stage === 'live'),
+  elapsed: () => (game.stage === 'live' ? (performance.now() - game.liveAt) / 1000 : 0),
+  timeLeft: () => secondsLeft(),
+  poseLag: (P) => (P.pose && P.pose.local ? 0 : 55 + displayRtt() / 2),
+  hudCall, hudToast, hudNote, hudHurt,
+  hudFx: (P, kind, data) => {
+    const i = viewIndex(P);
+    if (i >= 0) hud.fx(i, kind, data);
+  },
+  knockDown, pushState,
+  setBotDir, botSwing,
+  onWin: (P, bonus) => {
+    const i = viewIndex(P);
+    const t = Math.round(P.winAt);
+    if (i >= 0) hud.banner(i, '승리!', `${P.score.toLocaleString('ko-KR')}점`, `${t}초 만에 쓰러뜨림 · 보너스 +${bonus}`, 'good');
+    sfx.win();
+    if (allOut(performance.now())) endRound(performance.now());
+  }
+});
+
 // ---------- 마우스·키보드(시험용): 칸을 클릭(또는 Space)하면 그 칸의 칼을 마우스로 직접 조종 ----------
 // 그냥 마우스가 지나가는 것만으로는 봇을 빼앗지 않습니다. 4초 동안 조작이 없으면 봇은 다시 자동으로 막습니다.
 const mouse = { x: 0, y: 0, at: 0, cell: -1 };
@@ -891,6 +1073,12 @@ function cellPlayer(i) {
   const v = lastViews[i];
   return v && v.kind === 'player' ? game.players.find((p) => p.key === v.key) : null;
 }
+const KEY_DIR = {
+  ArrowLeft: new THREE.Vector3(-0.72, 0.68, -0.15).normalize(),
+  ArrowRight: new THREE.Vector3(0.72, 0.68, -0.15).normalize(),
+  ArrowUp: new THREE.Vector3(-0.96, 0.2, -0.2).normalize(),
+  ArrowDown: new THREE.Vector3(0.06, 0.92, -0.38).normalize()
+};
 const _ray = V();
 function manualThink(P, i, dtR, now) {
   const v = lastViews[i];
@@ -921,9 +1109,25 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     e.preventDefault();
     if (e.repeat) return;
-    takeOver(P);
-    P.manualSweep = 1;
+    const now = performance.now();
+    if (P.keyUntil > now) {
+      // 방향키로 막는 중이면 그 자세에서 휘두릅니다(검투의 베기·쳐내기 시험).
+      P.botSweep = 1;
+      P.botSweepAxis.set(Math.random() < 0.5 ? -0.35 : 0.35, 0.25, -1).normalize();
+      P.keyUntil = Math.max(P.keyUntil, now + 500);
+    } else {
+      takeOver(P);
+      P.manualSweep = 1;
+    }
     onSwing({ P, speed: 900, ago: 0, rtt: 0 }, true);
+  } else if (KEY_DIR[e.code]) {
+    // 방향키: 칼을 그 쪽으로 세워 막기(← → 옆으로 기울이기, ↑ 눕혀서 위 막기, ↓ 가운데 세우기). 1.2초 동안 유지합니다.
+    e.preventDefault();
+    if (P.pose && !P.pose.local && performance.now() - P.pose.at < 1000) return;
+    if (!P.keyDir || P.keyUntil < performance.now()) hudNote(P, '방향키로 막는 중 · Space 휘두르기', 1600);
+    P.keyDir = KEY_DIR[e.code];
+    P.keyUntil = performance.now() + 1200;
+    P.manual = false;
   } else if (e.code === 'KeyA') {
     // 자동 막기(봇)로 돌리기
     P.manual = false;
@@ -945,16 +1149,24 @@ function clearField(P) {
 function startDemo() {
   if (game.demo) return;
   const D = newPlayer(null, 1, true);
-  D.az = 0.62;
+  D.mode = settings.get('mode');
   D.ign = 0;
   D.ignTarget = 1;
   game.demo = D;
-  topUpDrones(D);
+  if (D.mode === 'duel') {
+    // 대기실 시연: 로봇 검객이 자동 칼과 겨룹니다(막고, 비틀거리면 베고, 쓰러지면 새 로봇이 걸어 들어옴).
+    D.level = 'normal';
+    duel.setup(D, { walk: false });
+  } else {
+    D.az = 0.62;
+    topUpDrones(D);
+  }
   syncSabers();
 }
 function stopDemo() {
   if (!game.demo) return;
   clearField(game.demo);
+  duel.clear(game.demo);
   game.demo = null;
   syncSabers();
 }
@@ -964,12 +1176,31 @@ function syncSabers() {
   if (game.demo) list.push({ key: 'demo', color: DEMO_COLOR });
   view.setSabers(list);
   view.setStations(playing
-    ? game.players.map((P) => ({ i: P.station, color: P.color, label: P.name, sub: P.bot ? 'BOT' : '' }))
-    : game.demo ? [{ i: game.demo.station, color: DEMO_COLOR, label: 'DEMO', sub: 'AUTO' }] : []);
+    ? game.players.map((P) => ({ i: P.station, color: P.color, label: P.name, sub: P.bot ? 'BOT' : isDuel() ? 'DUEL' : '' }))
+    : game.demo ? [{ i: game.demo.station, color: DEMO_COLOR, label: 'DEMO', sub: game.demo.mode === 'duel' ? 'DUEL' : 'AUTO' }] : []);
+}
+
+// 대기실 글: 고른 모드에 맞춰 설명과 결과 화면 제목을 바꿉니다.
+function applyModeCopy() {
+  const m = MODES[settings.get('mode')] || MODES.duel;
+  const lede = $('lede');
+  if (lede && lede.textContent !== m.lede) lede.textContent = m.lede;
+  document.body.dataset.mode = settings.get('mode');
+}
+// 설정(모드·난이도)이 바뀜: 대기실이면 시연을 그 모드로 바꾸고, 폰에 새 값을 보냅니다.
+function onSettingsChanged() {
+  applyModeCopy();
+  if (game.phase !== 'playing' && game.demo && game.demo.mode !== settings.get('mode')) {
+    stopDemo();
+    startDemo();
+  }
+  renderLobby();
+  pushState(true);
 }
 
 function startGame() {
   if (game.phase === 'playing') return;
+  if (!settings.requireAnswered()) return;
   const list = lobbyPlayers().filter((p) => p.connected).slice(0, 4);
   if (!list.length) {
     lobbyMessage('폰을 먼저 연결해 주세요. QR을 찍고 시작하기를 누르면 자리가 생겨요.');
@@ -977,12 +1208,19 @@ function startGame() {
   }
   audio();
   stopDemo();
-  for (const P of game.players) clearField(P);
+  for (const P of game.players) {
+    clearField(P);
+    duel.clear(P);
+  }
+  game.mode = settings.get('mode');
+  settings.lock(true);
+  board.hide(true);
   const order = STATION_ORDER[list.length];
   game.players = list.map((p, k) => newPlayer(p, order[k]));
   for (const P of game.players) {
     P.calibrated = game.ready.has(P.slot);
     P.autoplay = P.bot;
+    P.level = settings.difficulty();
   }
   game.phase = 'playing';
   game.stage = 'intro';
@@ -990,10 +1228,16 @@ function startGame() {
   game.introAt = performance.now();
   game.lastCount = 0;
   game.results = [];
+  lastSec = -1;
   hud.clear();
   const views = layoutViews();
-  // 칸 모양에 맞춰 드론이 날아다닐 좌우 폭을 정합니다(화면 안에 머물도록).
   for (const P of game.players) {
+    if (isDuel()) {
+      // 로봇이 격납구 쪽에서 걸어 들어와 칼을 켜고 인사한 뒤, '시작!' 과 함께 겨눕니다.
+      duel.setup(P);
+      continue;
+    }
+    // 칸 모양에 맞춰 드론이 날아다닐 좌우 폭을 정합니다(화면 안에 머물도록).
     const v = views.find((x) => x.key === P.key);
     const hf = v ? hFov(v) : 90;
     P.az = clamp((hf / 2 - 9) * (Math.PI / 180), 0.32, 0.72);
@@ -1004,7 +1248,8 @@ function startGame() {
   $('lobby').classList.add('hidden');
   $('over').classList.add('hidden');
   $('join').classList.remove('hidden');
-  sfx.wave();
+  if (isDuel()) sfx.duelStart();
+  else sfx.wave();
   pushState(true);
 }
 
@@ -1019,33 +1264,55 @@ function goLive(now) {
   sfx.go();
   sfx.ignite();
   showCount('시작!', true);
+  if (isDuel()) for (const P of game.players) hudCall(P, (DUEL_TEXT[P.level] || DUEL_TEXT.normal), '예고된 쪽을 막고, 비틀거리면 베요', 'duelcall', 1800);
   pushState(true);
 }
+const DUEL_TEXT = { easy: '검투 · 쉬움', normal: '검투 시작', hard: '검투 · 어려움' };
 
 function endRound(now) {
   if (game.phase !== 'playing' || game.stage === 'end') return;
   game.stage = 'end';
   game.endAt = now;
   for (const P of game.players) {
+    const i = viewIndex(P);
+    if (isDuel()) {
+      const had = P.result;
+      duel.timeUp(P);
+      if (!had && i >= 0) {
+        const left = P.duel ? Math.ceil(P.duel.hp) : 0;
+        if (P.result === 'tw') hud.banner(i, '판정승', `${P.score.toLocaleString('ko-KR')}점`, `시간 끝 · 로봇 체력 ${left} 남음`, 'good');
+        else hud.banner(i, '판정패', `${P.score.toLocaleString('ko-KR')}점`, `시간 끝 · 로봇 체력 ${left} 남음`, 'bad');
+      }
+      continue;
+    }
     for (const b of P.bolts) if (b.state === 'in') b.state = 'dead';
     for (const dr of P.drones) {
       dr.charge = 0;
       if (dr.alive) dr.d.setCharge(0);
     }
-    if (!P.down) {
-      const i = viewIndex(P);
-      if (i >= 0) hud.banner(i, '훈련 끝!', `${P.score.toLocaleString('ko-KR')}점`, `막기 ${P.deflects} · 격추 ${P.kills}`, 'good');
-    }
+    if (!P.down && i >= 0) hud.banner(i, '훈련 끝!', `${P.score.toLocaleString('ko-KR')}점`, `막기 ${P.deflects} · 격추 ${P.kills}`, 'good');
   }
   sfx.retract();
   showCount('끝!', false);
   pushState(true);
 }
 
+// 검투 결과 순서: 쓰러뜨림(빠른 순) → 판정승 → 판정패 → 쓰러짐, 같으면 점수
+const RESULT_RANK = { win: 0, tw: 1, tl: 2, ko: 3 };
+const RESULT_TEXT = { win: '승리', tw: '판정승', tl: '판정패', ko: '패배' };
 function showResults() {
   game.phase = 'over';
-  const rows = [...game.players].sort((a, b) => b.score - a.score || b.kills - a.kills || b.hp - a.hp);
-  game.results = rows.map((P, k) => ({ slot: P.slot, rank: k + 1, score: P.score, deflects: P.deflects, kills: P.kills, hp: P.hp, down: P.down }));
+  const duelMode = isDuel();
+  const rows = [...game.players].sort((a, b) => duelMode
+    ? (RESULT_RANK[a.result] ?? 4) - (RESULT_RANK[b.result] ?? 4) || (a.result === 'win' ? a.winAt - b.winAt : 0) || b.score - a.score
+    : b.score - a.score || b.kills - a.kills || b.hp - a.hp);
+  game.results = rows.map((P, k) => ({
+    slot: P.slot, rank: k + 1, score: P.score, deflects: P.deflects, kills: P.kills, hp: P.hp, down: P.down,
+    result: P.result, parries: P.parries, strikes: P.strikes, robotHp: P.duel ? Math.ceil((P.duel.hp / P.duel.max) * 100) : null
+  }));
+  const m = MODES[game.mode] || MODES.duel;
+  $('overMeta').textContent = `${m.eyebrow} · ${DIFF_LABEL[settings.difficulty()] || ''}`;
+  $('overTitle').textContent = m.title;
   const box = $('podium');
   box.innerHTML = '';
   rows.forEach((P, k) => {
@@ -1053,44 +1320,71 @@ function showResults() {
     e.className = 'r';
     e.style.setProperty('--c', P.color);
     e.style.animationDelay = `${0.15 + k * 0.12}s`;
-    e.innerHTML = `<span class="rank">${k + 1}</span><span class="who">${P.name}${P.bot ? '<small>BOT</small>' : ''}</span>` +
-      `<span class="num"><b>${P.deflects}</b><span>막기</span></span>` +
-      `<span class="num"><b>${P.kills}</b><span>격추</span></span>` +
-      `<span class="num"><b>${P.down ? 'KO' : Math.ceil(P.hp)}</b><span>${P.down ? '쓰러짐' : '남은 체력'}</span></span>` +
-      `<span class="num big"><b>${P.score.toLocaleString('ko-KR')}</b><span>점수</span></span>`;
+    const who = `<span class="rank">${k + 1}</span><span class="who">${P.name}${P.bot ? '<small>BOT</small>' : ''}</span>`;
+    if (duelMode) {
+      const r = P.result || 'tl';
+      const rh = P.duel ? Math.ceil(P.duel.hp) : 0;
+      e.innerHTML = who +
+        `<span class="res ${r}">${RESULT_TEXT[r]}${r === 'win' ? `<small>${Math.round(P.winAt)}초</small>` : ''}</span>` +
+        `<span class="num"><b>${P.parries}</b><span>막기</span></span>` +
+        `<span class="num"><b>${P.strikes}</b><span>베기</span></span>` +
+        `<span class="num"><b>${r === 'win' ? Math.ceil(P.hp) : r === 'ko' ? 'KO' : rh}</b><span>${r === 'win' ? '남은 체력' : r === 'ko' ? '쓰러짐' : '로봇 체력'}</span></span>` +
+        `<span class="num big"><b>${P.score.toLocaleString('ko-KR')}</b><span>점수</span></span>`;
+    } else {
+      e.innerHTML = who +
+        `<span class="num"><b>${P.deflects}</b><span>막기</span></span>` +
+        `<span class="num"><b>${P.kills}</b><span>격추</span></span>` +
+        `<span class="num"><b>${P.down ? 'KO' : Math.ceil(P.hp)}</b><span>${P.down ? '쓰러짐' : '남은 체력'}</span></span>` +
+        `<span class="num big"><b>${P.score.toLocaleString('ko-KR')}</b><span>점수</span></span>`;
+    }
     box.appendChild(e);
     if (!P.bot) {
+      const text = duelMode
+        ? `${RESULT_TEXT[P.result] || '끝'} · ${P.score.toLocaleString('ko-KR')}점`
+        : `${k + 1}위 · ${P.score.toLocaleString('ko-KR')}점`;
       send('result', {
-        text: `${k + 1}위 · ${P.score.toLocaleString('ko-KR')}점`, rank: k + 1, of: rows.length, score: P.score,
-        deflects: P.deflects, kills: P.kills, down: P.down
+        text, rank: k + 1, of: rows.length, score: P.score, mode: game.mode, result: P.result || null,
+        deflects: P.deflects, kills: P.kills, parries: P.parries, strikes: P.strikes, down: P.down,
+        winAt: P.result === 'win' ? Math.round(P.winAt) : null
       }, P.slot);
     }
   });
   for (const P of game.players) {
     P.ignTarget = 0;
     clearField(P);
+    duel.clear(P);
   }
   syncSabers();
   hud.clear();
+  settings.lock(false);
+  board.hide(false);
   $('over').classList.remove('hidden');
   $('join').classList.add('hidden');
   $('count').classList.remove('on');
-  sfx.win();
+  if (duelMode && rows.some((P) => P.result === 'win' || P.result === 'tw')) sfx.win();
+  else if (duelMode) sfx.lose();
+  else sfx.win();
   sfx.clap(40);
   startDemo();
   pushState(true);
 }
 
 function backToLobby(why) {
-  for (const P of game.players) clearField(P);
+  for (const P of game.players) {
+    clearField(P);
+    duel.clear(P);
+  }
   game.players = [];
   game.phase = 'lobby';
   game.stage = 'intro';
   hud.clear();
+  settings.lock(false);
+  board.hide(false);
   $('over').classList.add('hidden');
   $('join').classList.add('hidden');
   $('count').classList.remove('on');
   $('lobby').classList.remove('hidden');
+  if (game.demo && game.demo.mode !== settings.get('mode')) stopDemo();
   startDemo();
   syncSabers();
   renderLobby();
@@ -1112,27 +1406,40 @@ function statePlayers() {
   for (const P of game.players) {
     if (P.slot == null) continue;
     const r = game.results.find((x) => x.slot === P.slot);
-    out[P.slot] = {
+    const o = {
       hp: Math.ceil(P.hp), score: P.score, deflects: P.deflects, kills: P.kills, down: P.down, streak: P.streak,
       rank: r ? r.rank : null
     };
+    if (game.mode === 'duel') {
+      const D = P.duel;
+      o.parries = P.parries;
+      o.strikes = P.strikes;
+      o.result = P.result || null;
+      o.robot = D ? { name: D.name, hp: Math.ceil((D.hp / D.max) * 100), open: D.state === 'stagger' } : r ? { name: '', hp: r.robotHp ?? 0 } : null;
+    }
+    out[P.slot] = o;
   }
   return out;
 }
+const roundS = () => (game.mode === 'duel' ? DUEL_S : ROUND_S);
 function secondsLeft() {
   if (game.phase !== 'playing') return 0;
-  if (game.stage === 'intro') return ROUND_S;
+  if (game.stage === 'intro') return roundS();
   if (game.stage === 'end') return 0;
-  return Math.max(0, Math.ceil(ROUND_S - (performance.now() - game.liveAt) / 1000));
+  return Math.max(0, Math.ceil(roundS() - (performance.now() - game.liveAt) / 1000));
 }
 function pushState(force) {
   const now = performance.now();
   const go = () => {
     pushTimer = null;
     lastPush = performance.now();
+    const playing = game.phase === 'playing';
     send('game_state', {
-      phase: game.phase, stage: game.phase === 'playing' ? game.stage : null, t: secondsLeft(), round: ROUND_S,
-      wave: game.wave, players: statePlayers()
+      phase: game.phase, stage: playing ? game.stage : null, t: secondsLeft(), round: roundS(),
+      wave: game.wave, mode: playing || game.phase === 'over' ? game.mode : settings.get('mode'), level: settings.difficulty(),
+      players: statePlayers(),
+      // 경기 중에는 자주 보내므로 설정 항목 모양(fields)은 빼고 보냅니다(폰이 마지막 모양을 기억함).
+      settings: settings.forState({ lite: playing && !force })
     });
   };
   if (force || now - lastPush > 150) {
@@ -1146,24 +1453,27 @@ function pushState(force) {
 // ================================================================
 // 대기실 화면, HUD 도우미
 // ================================================================
+// 자리 칸: 누가 준비했는지(서버의 모두 준비 현황), 누가 아직 연습(튜토리얼) 중인지
 function renderLobby() {
   const box = $('slots');
   if (!box) return;
-  box.innerHTML = '';
   const list = lobbyPlayers();
+  const st = readyState;
+  const practicing = new Set(board.practicing ? board.practicing() : []);
+  let html = '';
   for (let s = 1; s <= 4; s++) {
     const p = list.find((x) => x.slot === s);
-    const e = document.createElement('div');
-    const ready = p && (p.bot || game.ready.has(s));
-    e.className = 'slot' + (p ? ' on' : '') + (p && !p.connected ? ' away' : '') + (ready ? ' ready' : '');
-    if (p) {
-      e.style.setProperty('--c', p.color);
-      e.innerHTML = `<b>${p.name}</b><small>${p.bot ? 'BOT' : game.ready.has(s) ? '칼 맞춤 완료' : '칼 맞추는 중'}</small>`;
-    } else {
-      e.textContent = `${s}P 비어 있음`;
+    if (!p) {
+      html += `<div class="slot">${s}P 비어 있음</div>`;
+      continue;
     }
-    box.appendChild(e);
+    const ready = p.bot || Boolean(st && Array.isArray(st.ready) && st.ready.includes(s));
+    const prac = !p.bot && !ready && practicing.has(s);
+    const sub = p.bot ? 'BOT' : ready ? '준비 완료 ✓' : prac ? '연습 중' : '준비 전';
+    const cls = 'slot on' + (!p.connected ? ' away' : '') + (ready ? ' ready' : '') + (prac ? ' prac' : '');
+    html += `<div class="${cls}" style="--c:${p.color}"><b>${p.name}</b><small>${sub}</small></div>`;
   }
+  if (box.innerHTML !== html) box.innerHTML = html;
 }
 let msgTimer = null;
 function lobbyMessage(t) {
@@ -1184,6 +1494,19 @@ function showCount(text, go) {
   countTimer = setTimeout(() => e.classList.remove('on'), go ? 900 : 1600);
 }
 const viewIndex = (P) => lastViews.findIndex((v) => v.kind === 'player' && v.key === P.key);
+// 검투 HUD 에 넘길 값(duel.hudState + 예고 글자)
+function duelHud(P) {
+  const st = duel.hudState(P);
+  if (!st) return null;
+  const lv = DUEL_LEVEL[P.level] || DUEL_LEVEL.normal;
+  const t = st.warn ? KIND_TEXT[st.warn] : null;
+  const D = P.duel;
+  return {
+    ...st, id: D.attackId, main: t ? t.main : '', sub: t ? t.sub : '', level: DIFF_LABEL[P.level] || '',
+    hitNow: st.state === 'strike' || st.state === 'contact', open: st.state === 'stagger', maxHits: lv.maxHits,
+    warn: game.stage === 'end' || P.down ? null : st.warn
+  };
+}
 function hudCall(P, main, sub, cls, ms) {
   const i = viewIndex(P);
   if (i >= 0) hud.callout(i, main, sub, cls, ms);
@@ -1213,7 +1536,7 @@ function layoutViews() {
   const hw = Math.floor(W / 2);
   const hh = Math.floor(H / 2);
   const cells = n === 1 ? [[0, 0, W, H]] : n === 2 ? [[0, 0, hw, H], [hw, 0, W - hw, H]] : [[0, 0, hw, hh], [hw, 0, W - hw, hh], [0, hh, hw, H - hh], [hw, hh, W - hw, H - hh]];
-  const out = game.players.map((P, i) => ({ kind: 'player', key: P.key, slot: P.slot, color: P.color, name: P.name, x: cells[i][0], y: cells[i][1], w: cells[i][2], h: cells[i][3] }));
+  const out = game.players.map((P, i) => ({ kind: 'player', key: P.key, slot: P.slot, color: P.color, name: P.name, duel: Boolean(P.duel), x: cells[i][0], y: cells[i][1], w: cells[i][2], h: cells[i][3] }));
   if (n === 3) out.push({ kind: 'overview', x: cells[3][0], y: cells[3][1], w: cells[3][2], h: cells[3][3] });
   return out;
 }
@@ -1273,8 +1596,12 @@ function overviewCam(now, v) {
     const ahead = 8.9;
     const tanH = Math.tan((fov * Math.PI) / 360) * (v.w / Math.max(1, v.h));
     // 칼자루가 카메라 정면에서 오른쪽으로 벌어진 각(phi)과, 화면에서 원하는 각(want)의 차이만큼 왼쪽으로 돌립니다.
-    const phi = Math.atan((sx + GRIP_OFF[0] - px) / (pz - GRIP_OFF[2]));
-    const want = Math.atan(lobbyAimNx(now) * tanH);
+    // 검투 시연은 로봇이 빈 곳 가운데쯤, 칼자루는 그 오른쪽에 오도록 로봇을 겨눕니다.
+    const duelDemo = Boolean(D && D.duel);
+    const phi = duelDemo
+      ? Math.atan((sx - px) / (pz - ROBOT_Z))
+      : Math.atan((sx + GRIP_OFF[0] - px) / (pz - GRIP_OFF[2]));
+    const want = Math.atan((duelDemo ? Math.max(0.3, lobbyAimNx(now) - 0.11) : lobbyAimNx(now)) * tanH);
     const yaw = want - phi;
     return { pos: [px, 1.75 + Math.sin(t * 0.13) * 0.12, pz], look: [px - Math.tan(yaw) * ahead, 1.85, pz - ahead], fov };
   }
@@ -1314,12 +1641,13 @@ function slowTarget(P, now) {
   if (P.down || P.demo) return 1;
   let ttb = 9;
   for (const b of P.bolts) if (b.state === 'in') ttb = Math.min(ttb, (b.pathLen - b.traveled) / b.speed);
-  if (ttb < SLOW_LEAD && (P.slowOn || now >= P.slowReady)) {
+  const L = dl(P);
+  if (ttb < L.slowLead && (P.slowOn || now >= P.slowReady)) {
     if (!P.slowOn) {
       P.slowOn = true;
       sfx.slow();
     }
-    return SLOW;
+    return L.slow;
   }
   if (P.slowOn) {
     P.slowOn = false;
@@ -1329,19 +1657,30 @@ function slowTarget(P, now) {
 }
 function updatePlayer(P, now, dtR, active) {
   const c = P.clock;
-  const target = active ? slowTarget(P, now) : 1;
+  const duelOn = Boolean(P.duel);
+  // 슬로우: 드론은 광탄이 몸에 닿기 직전, 검투는 로봇이 휙 벨 때와 칼끼리 부딪힌 순간(잠깐 멈춤)
+  const target = duelOn ? (active || P.demo ? duel.slowTarget(P, now) : 1) : active ? slowTarget(P, now) : 1;
   const tau = target < c.scale ? 0.04 : 0.09;
   c.scale += (target - c.scale) * (1 - Math.exp(-dtR / tau));
   if (Math.abs(c.scale - target) < 0.003) c.scale = target;
   const dtG = dtR * c.scale;
   c.gt += dtG;
-  // 입력: 마우스 > 봇(자동) > 폰
+  // 입력: 폰 > 방향키 > 마우스 > 봇(자동)
   const i = viewIndex(P);
+  const phoneLive = P.pose && !P.pose.local && now - P.pose.at < 1000;
   // 4초 넘게 마우스·키 조작이 없으면 봇은 다시 자동으로 막습니다.
   if (P.manual && now - (P.manualAt || 0) > 4000) P.manual = false;
-  if (P.manual && i >= 0 && game.phase === 'playing' && mouse.cell === i) manualThink(P, i, dtR, now);
-  else if (P.demo || ((P.bot || P.autoplay) && !P.manual)) botThink(P, dtR, now);
+  if (!phoneLive && P.keyUntil > now && P.keyDir) setBotDir(P, P.keyDir, dtR);
+  else if (P.manual && i >= 0 && game.phase === 'playing' && mouse.cell === i) manualThink(P, i, dtR, now);
+  else if (P.demo || ((P.bot || P.autoplay) && !P.manual)) {
+    if (duelOn) duel.botThink(P, dtR, now);
+    else botThink(P, dtR, now);
+  }
   updateSaber(P, dtR, now);
+  if (duelOn) {
+    duel.update(P, dtG, dtR, now, active || P.demo);
+    return;
+  }
   if (P.respawn.length && (active || P.demo)) {
     for (let k = P.respawn.length - 1; k >= 0; k--) {
       if (c.gt >= P.respawn[k]) {
@@ -1376,21 +1715,21 @@ function tick() {
       if (el >= INTRO_S) goLive(now);
     } else if (game.stage === 'live') {
       const el = (now - game.liveAt) / 1000;
-      const wave = clamp(1 + Math.floor(el / WAVE_S), 1, WAVES.length);
+      const wave = isDuel() ? 1 : clamp(1 + Math.floor(el / WAVE_S), 1, WAVES.length);
       if (wave !== game.wave) {
         game.wave = wave;
         sfx.wave();
         for (const P of game.players) {
           if (P.down) continue;
-          hudCall(P, `WAVE ${wave}`, '드론이 더 빨라져요', 'wave', 1600);
+          hudCall(P, `WAVE ${wave}`, '드론이 더 빨라져요', 'wavecall', 1600);
           const i = viewIndex(P);
           if (i >= 0) hud.wave(i);
           topUpDrones(P);
         }
         pushState(true);
       }
-      if (el >= ROUND_S) endRound(now);
-      const sec = Math.ceil(ROUND_S - el);
+      if (el >= roundS()) endRound(now);
+      const sec = Math.ceil(roundS() - el);
       if (sec !== lastSec) {
         lastSec = sec;
         pushState();
@@ -1448,33 +1787,56 @@ function tick() {
     const timeText = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
     cams.forEach((v, i) => {
       if (v.kind === 'overview') {
-        hud.overview(i, game.players.map((P) => ({ name: P.name, color: P.color, score: P.score, hp: P.hp, down: P.down })));
+        hud.overview(i, game.players.map((P) => ({
+          name: P.name, color: P.color, score: P.score, hp: P.hp, down: P.down,
+          rhp: P.duel ? Math.round((Math.max(0, P.duel.hp) / P.duel.max) * 100) : null
+        })));
         return;
       }
       const P = game.players.find((x) => x.key === v.key);
-      hud.player(i, { score: P.score, hp: P.hp, streak: P.streak, wave: game.wave, time: timeText, urgent: game.stage === 'live' && left <= 10, away: P.away, down: P.down });
+      hud.player(i, {
+        score: P.score, hp: P.hp, streak: P.streak, wave: game.wave, time: timeText, urgent: game.stage === 'live' && left <= 10, away: P.away, down: P.down,
+        tag: P.duel ? `DUEL · ${DIFF_LABEL[P.level] || ''}` : null
+      });
       const slowAmt = clamp((1 - P.clock.scale) / (1 - SLOW), 0, 1);
       hud.slow(i, slowAmt);
-      hud.arrows(i, P.down || game.stage !== 'live' ? [] : edgeArrows(P, i, v));
+      hud.arrows(i, P.down || game.stage !== 'live' || P.duel ? [] : edgeArrows(P, i, v));
+      hud.duel(i, P.duel ? duelHud(P) : null);
       // 아직 폰 자세가 안 들어오는 사람에게 안내
       if (!P.bot && !P.autoplay && !P.manual && game.stage !== 'end' && !P.down) {
         const fresh = P.pose && now - P.pose.at < 1500;
-        hud.hint(i, P.away ? '연결이 끊겼어요. 폰을 다시 켜 주세요' : fresh ? '' : '폰에서 「준비」를 누르면 칼이 폰을 따라 움직여요');
+        hud.hint(i, P.away ? '연결이 끊겼어요. 폰을 다시 켜 주세요' : fresh || P.keyUntil > now ? '' : '폰을 칼자루처럼 쥐면 칼이 폰을 따라 움직여요');
       } else hud.hint(i, '');
     });
   }
   requestAnimationFrame(tick);
 }
 
+booted = true;
+applyModeCopy();
 startDemo();
 renderLobby();
 const roundEl = $('ruleRound');
 if (roundEl) roundEl.textContent = String(ROUND_S);
 requestAnimationFrame(tick);
-if (AUTOSTART && BOTS > 0) setTimeout(() => startGame(), 1500);
+// ?autostart 는 봇만 있고 폰이 없을 때만(폰이 있으면 모두 준비로만 시작)
+if (AUTOSTART && BOTS > 0) setTimeout(() => { if (!serverPlayers.length) startGame(); }, 1500);
 
 // 디버그: 콘솔에서 상태 보기·조작
+//   __saber.duel.force(__saber.game.players[0], 'left')  지금 바로 왼쪽 공격
+//   __saber.press(0, 'ArrowLeft')  0번 칸 선수가 방향키로 막기
 window.__saber = {
-  game, view, hud, startGame, endRound: () => endRound(performance.now()), showResults, backToLobby, onPose, onSwing,
-  lobbyPlayers, displayRtt, constants: { ROUND_S, HIT_R, SLOW, SLOW_LEAD, SWING_KILL, WAVES }
+  game, view, hud, duel, settings, board, startGame, endRound: () => endRound(performance.now()), showResults, backToLobby, onPose, onSwing,
+  lobbyPlayers, displayRtt, constants: { ROUND_S, DUEL_S, HIT_R, SLOW, SLOW_LEAD, SWING_KILL, WAVES, DRONE_LEVEL, DUEL_LEVEL },
+  press(i, code) {
+    const P = cellPlayer(i) || game.players[i];
+    if (!P) return false;
+    if (code === 'Space') onSwing({ P, speed: 900, ago: 0, rtt: 0 }, true);
+    else if (KEY_DIR[code]) {
+      P.keyDir = KEY_DIR[code];
+      P.keyUntil = performance.now() + 1200;
+      P.manual = false;
+    }
+    return true;
+  }
 };

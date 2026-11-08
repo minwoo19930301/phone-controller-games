@@ -21,8 +21,13 @@
     <div class="lobby-copy">
       <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 · 화면 분할</div>
       <h1 class="wordmark">KART<br>RACE</h1>
-      <p class="lede">폰을 가로로 들고 핸들처럼 기울여 달리세요.</p>
+      <p class="lede">폰을 가로로 들고 핸들처럼 기울여 달리세요. <span class="lede-sub">화면 회전 잠금은 그대로 둬도 돼요.</span></p>
       <div class="slots" id="slots"></div>
+      <div class="set-wrap">
+        <div id="setBox"></div>
+      </div>
+      <div class="tut-box" id="tutBox"></div>
+      <div class="hint keys"><span>폰에서 모두 <b>준비</b>를 누르면 출발해요</span> <span class="dot"></span> <span>폰 없이 봇으로 시험할 땐</span> <kbd>Enter</kbd></div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
@@ -38,8 +43,10 @@
   <div class="over">
     <div class="eyebrow">FINAL</div>
     <h1 class="wordmark sm">레이스 결과</h1>
+    <div class="over-meta" id="overMeta"></div>
     <div class="podium" id="podium"></div>
-    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b></div>
+    <div class="over-set" id="overSet"></div>
+    <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 다음 판이 출발해요</span></div>
   </div>
 </section>
 

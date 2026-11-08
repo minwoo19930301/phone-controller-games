@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#05050c">
+<title>리듬 스텝 컨트롤러</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <span class="me" id="me">…</span>
+  <span class="room" id="room"></span>
+  <span class="hdr-mode hidden" id="hdrMode"></span>
+</header>
+<div class="banner hidden" id="banner"></div>
+<main>
+  <!-- 처음 -->
+  <section class="view center on" id="vStart">
+    <div class="logo">RHYTHM <span>STEP</span></div>
+    <div class="intro-art" aria-hidden="true">
+      <div class="ia-pad"><i>↑</i><i>←</i><i>→</i><i>↓</i></div>
+      <div class="ia-or">또는</div>
+      <svg class="ia-phone" viewBox="0 0 80 100"><rect x="26" y="22" width="28" height="52" rx="6"/><path d="M40 4v12M34 10l6-6 6 6M40 96V84M34 90l6 6 6-6M4 48h14M10 42l-6 6 6 6M76 48H62M70 42l6 6-6 6"/></svg>
+    </div>
+    <h1>폰이 스텝 패드가 돼요</h1>
+    <p>화면을 발판처럼 누르는 <b>패드</b>,
+폰을 들고 화살표 쪽으로 휙 움직이는 <b>모션</b>.
+둘 중 하나를 골라 노트에 맞춰요.</p>
+    <p class="note hidden" id="httpNote">https 주소가 아니라서 모션(동작 센서)이 꺼질 수 있어요.
+패드는 그대로 돼요.</p>
+    <button class="primary" id="btnStart">시작하기</button>
+  </section>
+
+  <!-- 메시지 -->
+  <section class="view center" id="vMsg"><div class="spin" id="msgSpin"></div><h1 id="msgT"></h1><p id="msgB"></p><button class="ghost hidden" id="btnMsg"></button></section>
+
+  <!-- 대기실 겸 노래 고르기 -->
+  <section class="view" id="vLobby">
+    <div class="lobby-scroll">
+     <div class="lb-col lb-left">
+      <div class="song" id="songCard">
+        <button type="button" class="song-arrow prev" id="songPrev" aria-label="앞 곡">‹</button>
+        <div class="song-cover"><div class="song-disc"></div><img id="songCover" alt=""></div>
+        <div class="song-info">
+          <div class="song-k" id="songK">노래 고르기 · 1/27</div>
+          <b id="songTitle">…</b>
+          <span id="songSub"></span>
+          <div class="song-meta" id="songMeta"></div>
+        </div>
+        <button type="button" class="song-arrow next" id="songNext" aria-label="다음 곡">›</button>
+        <div class="song-picked hidden" id="songPicked"></div>
+      </div>
+      <div class="song-hint" id="songHint"><span>‹ 밀어서 CD 넘기기 ›</span><b>탭하면 이 곡</b></div>
+
+      <div class="sec-h">입력 방식 <small>나만</small></div>
+      <div class="modes" role="radiogroup" aria-label="입력 방식">
+        <button type="button" class="mode" data-mode="pad" role="radio">
+          <span class="mode-art pad"><i></i><i></i><i></i><i></i><em>↑</em><em>←</em><em>→</em><em>↓</em></span>
+          <b>패드</b><small>화면이 발판</small>
+        </button>
+        <button type="button" class="mode" data-mode="motion" role="radio">
+          <span class="mode-art mo"><svg viewBox="0 0 40 40"><rect x="14" y="9" width="12" height="22" rx="3"/><path d="M20 1v4M17 4l3-3 3 3M20 39v-4M17 36l3 3 3-3M2 20h6M5 17l-3 3 3 3M38 20h-6M35 17l3 3-3 3"/></svg></span>
+          <b>모션</b><small>폰 들고 휙</small>
+        </button>
+      </div>
+      <div class="lanesrow" id="lanesRow">
+        <div class="seg" id="lanesSeg">
+          <button type="button" data-l="4"><b>4키</b><span>DDR ← ↓ ↑ →</span></button>
+          <button type="button" data-l="5"><b>5키</b><span>펌프 ↙ ↖ ● ↗ ↘</span></button>
+        </div>
+      </div>
+      <div class="motion-box hidden" id="motionBox">
+        <div class="mb-live"><span class="mb-dot" id="mbDot"></span><b id="mbText">폰을 세워 들고 위·아래·좌·우로 휙</b>
+          <span class="mb-dirs" id="mbDirs"><i data-d="left">←</i><i data-d="down">↓</i><i data-d="up">↑</i><i data-d="right">→</i></span></div>
+        <div class="mb-sens"><span>감도</span><div class="seg small" id="sens"><button type="button" data-s="0.75">예민하게</button><button type="button" data-s="1">보통</button><button type="button" data-s="1.3">둔하게</button></div></div>
+        <div class="mb-btns">
+          <button type="button" class="ghost small hidden" id="btnMotionPerm">동작 센서 켜기</button>
+          <button type="button" class="ghost small" id="btnRecal">자세 다시 맞추기</button>
+        </div>
+      </div>
+     </div>
+     <div class="lb-col lb-right">
+
+      <div class="sec-h diff-h">난이도 <small>나만</small></div>
+      <div class="diffs" id="diffs">
+        <button type="button" class="diff" data-d="easy"><b>쉬움</b><span class="st"></span><span class="nc"></span></button>
+        <button type="button" class="diff" data-d="normal"><b>보통</b><span class="st"></span><span class="nc"></span></button>
+        <button type="button" class="diff" data-d="hard"><b>어려움</b><span class="st"></span><span class="nc"></span></button>
+      </div>
+
+      <div class="readyrow">
+        <button class="primary go" id="btnGo"><span id="goT">준비</span><small id="goS">모두 준비하면 시작해요</small></button>
+        <div class="waitfor" id="waitFor"></div>
+      </div>
+      <div id="tutLinks" class="tutlinks"></div>
+     </div>
+    </div>
+  </section>
+
+  <!-- 경기 중 -->
+  <section class="view" id="vPlay">
+    <div class="hud">
+      <div class="hud-score"><b id="hScore">0</b><span>점</span></div>
+      <div class="hud-combo"><b id="hCombo">0</b><span>콤보</span></div>
+      <div class="hud-life"><i id="hLife"></i></div>
+    </div>
+    <div class="hud-j" id="hJudge"></div>
+    <div class="pads" id="pads"></div>
+    <div class="motion hidden" id="motionView">
+      <div class="cross" id="cross">
+        <button type="button" class="cx up" data-dir="up">↑</button>
+        <button type="button" class="cx left" data-dir="left">←</button>
+        <div class="cx mid" id="moMid"><i class="mo-ring" id="moRing"></i><svg viewBox="0 0 40 40"><rect x="12" y="5" width="16" height="30" rx="4"/><path d="M17 9h6"/></svg></div>
+        <button type="button" class="cx right" data-dir="right">→</button>
+        <button type="button" class="cx down" data-dir="down">↓</button>
+      </div>
+      <p class="mo-tip" id="moTip">폰을 세워 들고 화살표 쪽으로 휙 · 돌아올 땐 천천히</p>
+    </div>
+    <div class="cd" id="cd"></div>
+  </section>
+
+  <!-- 관전 -->
+  <section class="view center" id="vSpec">
+    <img class="spec-cover hidden" id="specCover" alt="">
+    <div class="spec-eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="big" id="specT">관전 중</div>
+    <p id="specB">지금 곡이 끝나면 같이 할 수 있어요.</p>
+  </section>
+
+  <!-- 결과 -->
+  <section class="view center" id="vOver">
+    <div class="ov-song" id="ovSong"></div>
+    <div class="ov-rank" id="ovRank"></div>
+    <div class="ov-grade" id="ovGrade">S</div>
+    <div class="ov-tags" id="ovTags"></div>
+    <div class="ov-score" id="ovScore">0</div>
+    <div class="ov-line" id="ovLine"></div>
+    <div class="ov-counts" id="ovCounts"></div>
+    <button class="primary" id="btnNext">다음 곡 고르기</button>
+    <p class="ov-auto" id="ovAuto"></p>
+  </section>
+</main>
+
+<!-- 모션 자세 맞추기 -->
+<div class="cal hidden" id="cal">
+  <div class="cal-card">
+    <div class="cal-eyebrow">모션 · 자세 맞추기</div>
+    <div class="cal-art">
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <circle class="cal-track" cx="60" cy="60" r="52"/>
+        <circle class="cal-prog" id="calProg" cx="60" cy="60" r="52"/>
+        <g transform="translate(60 58)"><rect x="-15" y="-27" width="30" height="54" rx="6" class="cal-ph"/><rect x="-11" y="-21" width="22" height="40" rx="3" class="cal-scr"/></g>
+        <rect x="47" y="70" width="26" height="21" rx="8" class="cal-fist"/><path d="M50 77h20M50 83h20" class="cal-fistl"/>
+      </svg>
+    </div>
+    <h2 id="calT">폰을 세워 들어요</h2>
+    <p id="calB">화면이 나를 보게 세워 들고 잠깐 가만히 있어요.</p>
+    <div class="cal-btns">
+      <button type="button" class="ghost small hidden" id="calFallback">센서 없이 버튼으로 하기</button>
+      <button type="button" class="ghost small" id="calCancel">나중에</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<div class="debug" id="debug"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script type="module" src="controller.js"></script>
+</body>
+</html>

@@ -1,6 +1,13 @@
 // 에어하키 컨트롤러. 폰 화면이 큰 화면 속 내 쪽 반 코트(2:2 면 내 레인)가 됩니다.
 // 누른 자리를 그 영역 안의 0..1 위치로 바꿔 move { x, y, t } 로 40Hz 까지 보냅니다(밀리면 버려도 되는 이벤트).
 // x: 큰 화면 기준 왼쪽 0 → 오른쪽 1, y: 큰 화면 기준 위 0 → 아래 1. 동작 센서는 쓰지 않습니다.
+// 처음 하는 폰은 시작하기 뒤 연습 판(practice.js)에서 말렛 움직이기·치기·슛·막기를 직접 해 봅니다(localStorage pcg-tut-airhockey).
+// 대기 화면: 난이도 알약(큰 화면과 같이 바뀜) · 누가 준비했는지 · 큰 준비 버튼 · 튜토리얼 다시 하기.
+import { haptics } from '/common/haptics.js';
+import { createPhoneSettings } from '/common/phone-settings.js';
+import { createTutorial } from '/common/tutorial.js';
+import { createPractice } from './practice.js';
+
 (() => {
   const $ = (id) => document.getElementById(id);
   const params = new URLSearchParams(location.search);
@@ -47,6 +54,7 @@
   }
   function message(t, b) {
     mode = 'msg';
+    document.body.classList.remove('roster-on');
     $('msgT').textContent = t;
     $('msgB').textContent = b || '';
     show('vMsg');
@@ -54,9 +62,8 @@
   function keepAwake() {
     if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
   }
-  function buzz(p) {
-    if (navigator.vibrate) navigator.vibrate(p);
-  }
+  // 내 색(자리를 받기 전에는 1P 빨강)
+  const myColor = () => (me && me.color) || getComputedStyle(document.documentElement).getPropertyValue('--c').trim() || '#ff5a5f';
 
   // ---------- 소리 ----------
   let actx = null;
@@ -483,7 +490,8 @@
       el.classList.add('bump');
     }
     const mp = sc.some((s) => s === (state.target || 7) - 1);
-    $('scGoal').textContent = mp ? '매치 포인트' : `${state.target || 7}점 선승`;
+    const LV = { easy: '쉬움', normal: '보통', hard: '어려움' };
+    $('scGoal').textContent = mp ? '매치 포인트' : `${state.target || 7}점 선승${LV[state.difficulty] ? ` · ${LV[state.difficulty]}` : ''}`;
   }
   function sideText(p) {
     if (!p) return '';
@@ -498,11 +506,55 @@
       ? `<span class="chip">골<b>${st.goals}</b></span><span class="chip">타격<b>${st.hits}</b></span><span class="chip">최고<b>${st.top || 0}km/h</b></span>`
       : '';
   }
+  // ---------- 준비(모두 준비) ----------
+  // 서버가 들어온 사람 모두의 준비를 모아 시작합니다. 준비 취소 이벤트는 서버에 없어서, 누른 뒤에는 '준비 완료 ✓' 로 기다립니다.
+  let players = []; // 서버 players
+  let readySt = null; // 서버 ready_state { ready, players, away, need }
+  let readyPressed = false;
+  let noteTimer = null;
+  function goNote(t, ms = 2400) {
+    const el = $('goNote');
+    el.textContent = t || '';
+    clearTimeout(noteTimer);
+    if (t) noteTimer = setTimeout(() => { el.textContent = ''; }, ms);
+  }
+  function paintReady() {
+    const btn = $('btnGo');
+    const over = state.phase === 'over';
+    btn.classList.toggle('done', readyPressed);
+    const st = readySt;
+    const n = st ? st.ready.length : 0;
+    const need = st ? st.need : 0;
+    if (readyPressed) {
+      $('goT').textContent = '준비 완료 ✓';
+      $('goS').textContent = need > 1 ? `다른 사람 기다리는 중 · ${n}/${need}` : '곧 시작해요';
+    } else {
+      $('goT').textContent = over ? '다시 하기' : '준비';
+      $('goS').textContent = need > 1 ? `모두 준비하면 시작 · 지금 ${n}/${need}` : '누르면 바로 시작해요';
+    }
+    // 누가 준비했는지(폰에도 보여 줍니다). 이 줄이 보이면 ready.js 의 아래 띠는 겹치니 숨깁니다.
+    const ro = $('roster');
+    const list = (st && st.players) || players.map((x) => x.slot);
+    const show = mode === 'wait' && state.phase !== 'playing' && list.length > 0;
+    ro.classList.toggle('hidden', !show);
+    document.body.classList.toggle('roster-on', show);
+    if (!show) return;
+    const away = (st && st.away) || [];
+    const COL = { 1: '#ff5a5f', 2: '#3ab4ff', 3: '#ffc93c', 4: '#5ee07a' };
+    ro.innerHTML = `<span>준비 ${n}/${need || list.length}</span>` + list.map((s) => {
+      const on = st && st.ready.includes(s);
+      const cls = 'rp' + (on ? ' on' : '') + (me && s === me.slot ? ' you' : '') + (away.includes(s) ? ' away' : '');
+      return `<span class="${cls}" style="--pc:${COL[s] || '#fff'}"><b>${s}P</b>${on ? '✓' : away.includes(s) ? '끊김' : '대기'}</span>`;
+    }).join('');
+  }
+
   function render() {
     if (!me) return;
     const p = mine();
     const phase = state.phase;
     if (phase === 'playing' && p) {
+      // 연습 중에 경기가 시작되면(이미 준비를 눌러 둔 채 다시 하기를 열었을 때) 연습을 닫고 바로 경기로
+      if (tut.isRunning()) tut.cancel();
       if (mode !== 'play') {
         mode = 'play';
         finger.x = null;
@@ -512,6 +564,7 @@
         layout();
         $('tools').classList.toggle('hidden', isTouch && !DEBUG);
         $('tip').textContent = tipText(p);
+        document.body.classList.remove('roster-on');
       }
       renderScore();
       const st = state.sub === 'countdown' ? '준비… 곧 시작해요' : state.sub === 'final' ? '경기 끝!' : '';
@@ -525,6 +578,7 @@
     finger.down = false;
     mode = 'wait';
     $('btnGo').style.display = '';
+    $('tutLink').style.display = '';
     const ws = $('waitSide');
     if (phase === 'over') {
       const tn = teamNames();
@@ -533,7 +587,6 @@
       $('waitT').className = 'big' + (won ? ' win' : '');
       const sc = state.score || [0, 0];
       $('waitB').textContent = tn ? `${sc[tn.ti]} : ${sc[1 - tn.ti]} · 큰 화면에서 결과를 확인하세요.` : '큰 화면에서 결과를 확인하세요.';
-      $('btnGo').textContent = '다시 하기';
       ws.classList.add('hidden');
       renderStats();
     } else if (phase === 'playing') {
@@ -546,8 +599,7 @@
     } else {
       $('waitT').textContent = '대기실';
       $('waitT').className = 'big';
-      $('waitB').textContent = '모두 들어오면 게임 시작을 눌러요.\n혼자면 CPU, 둘이면 1:1, 셋·넷이면 2:2 예요.';
-      $('btnGo').textContent = '게임 시작';
+      $('waitB').textContent = '모두 준비를 누르면 시작해요.\n혼자면 CPU, 둘이면 1:1, 셋·넷이면 2:2 예요.';
       if (p) {
         ws.classList.remove('hidden');
         document.documentElement.style.setProperty('--t', p.teamColor || me.color);
@@ -558,7 +610,53 @@
       $('myStats').innerHTML = '';
     }
     show('vWait');
+    paintReady();
   }
+
+  // ---------- 난이도(큰 화면이 주인) ----------
+  const ps = createPhoneSettings({ socket });
+  ps.attach(socket);
+  ps.mount($('setBox'));
+  ps.bindReady($('btnGo'));
+  // 진동: 큰 화면이 보내는 공통 haptic 도 받습니다(내 자리 것만).
+  haptics.listen(socket, { slot: () => (me ? me.slot : null) });
+
+  // ---------- 튜토리얼: 연습 판에서 직접 해 보기 ----------
+  let practice = null; // 지금 단계의 연습 판(시험용 자동 손가락에 씀)
+  const goalW = () => (state.rink && state.rink.goal) || 0.38;
+  const stage = (kind) => (el, api) => {
+    practice = createPractice(el, {
+      kind,
+      color: myColor,
+      goal: goalW(),
+      onEvent: (name, data) => {
+        api.signal(name, data);
+        if (practice) practice.celebrate();
+      },
+      onFail: (msg) => api.fail(msg)
+    });
+    if (autoTut) practice.setAuto(true);
+    const mine = practice;
+    return () => {
+      mine.destroy();
+      if (practice === mine) practice = null;
+    };
+  };
+  let autoTut = false;
+  const tut = createTutorial({
+    key: 'airhockey',
+    socket,
+    title: '에어하키 · 처음이라 연습해 봐요',
+    steps: [
+      { title: '엄지로 말렛 움직이기', body: '화면을 누른 채 끌어서 빛나는 원 3개를 지나가요.', waitFor: 'drag', hint: '원 3개 지나가기', okText: '잘 따라와요!', render: stage('drag') },
+      { title: '퍽 치기', body: '말렛으로 퍽을 툭 쳐요. 칠 때마다 폰이 떨려요.', waitFor: 'hit', count: 2, hint: '퍽 두 번 치기', okText: '딱 좋아요!', render: stage('hit') },
+      { title: '세게 밀어 슛', body: '퍽 아래에서 위쪽(상대 쪽)으로 휙 밀어 쳐요.', waitFor: 'goal', hint: '위로 세게 밀기', okText: '멋진 슛!', render: stage('shoot') },
+      { title: '내 골문 막기', body: '내려오는 퍽 앞에 말렛을 두고 막아요.', waitFor: 'block', hint: '퍽 막기', okText: '철벽 수비!', render: stage('block') }
+    ],
+    finish: { title: '연습 끝!', body: '경기 중에는 큰 화면을 보면서\n폰 화면을 똑같이 밀면 돼요.\n이제 준비를 눌러요.', button: '좋아요' },
+    onDone: () => render()
+  });
+  tut.link($('tutLink'));
 
   // ---------- 소켓 ----------
   socket.on('connect', () => socket.emit('join', { role: 'controller', room: ROOM, token }));
@@ -573,6 +671,17 @@
     $('me').textContent = p.name;
     if (mode === 'msg' || mode === 'start') mode = 'wait';
     render();
+  });
+  socket.on('players', (d) => {
+    players = (d && d.players) || [];
+    if (mode === 'wait') paintReady();
+  });
+  // 모두 준비 상태: 서버 값을 따라 버튼 모양과 준비 현황을 맞춥니다.
+  socket.on('ready_state', (st) => {
+    if (!st) return;
+    readySt = { ready: st.ready || [], players: st.players || [], away: st.away || [], need: st.need || 0 };
+    readyPressed = Boolean(me && readySt.ready.includes(me.slot));
+    if (mode === 'wait') paintReady();
   });
   socket.on('no_room', () => {
     // 서버가 막 다시 떴으면 큰 화면이 같은 코드로 방을 다시 만들 때까지 잠깐 기다립니다.
@@ -596,7 +705,10 @@
   });
   socket.on('game_state', (s) => {
     const prevScore = (state.score || [0, 0]).slice();
+    const prevPhase = state.phase;
     state = s || { phase: 'lobby' };
+    // 경기가 시작되거나 대기실로 돌아오면 다음 판은 다시 준비를 눌러야 합니다.
+    if (state.phase !== prevPhase && (state.phase === 'playing' || state.phase === 'lobby')) readyPressed = false;
     if (mode === 'msg' && !me) return;
     render();
     // 점수 바뀐 쪽 강조
@@ -605,9 +717,11 @@
       renderScore(state.score[tn.ti] !== prevScore[tn.ti] ? 'me' : 'op');
     }
   });
+  // 내 말렛이 퍽을 쳤어요(큰 화면 판정): 진동(아이폰은 번쩍+틱) + 딸깍 소리 + 패드 고리
   socket.on('hit', (d) => {
     const q = Math.max(0, Math.min(1, Number(d && d.strength) || 0.3));
-    buzz(Math.round(12 + q * 38));
+    if (d && d.strong) haptics.play('strong', q, { silent: true });
+    else haptics.hit(q, { silent: true });
     click(q);
     flashT = 1;
     if (!anim) anim = requestAnimationFrame(animate);
@@ -624,10 +738,10 @@
     clearTimeout(overTimer);
     overTimer = setTimeout(() => el.classList.remove('on'), 1500);
     if (ours) {
-      buzz([60, 40, 60, 40, 160]);
+      haptics.play('success', 1, { pattern: [60, 40, 60, 40, 160], silent: true });
       [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.18, 0.12, 'triangle', i * 0.08));
     } else {
-      buzz([300]);
+      haptics.play('fail', 1, { pattern: [300], silent: true });
       tone(330, 0.5, 0.14, 'sawtooth', 0, 0.5);
     }
     $('pad').classList.remove('flash');
@@ -640,17 +754,32 @@
     // 화면 꺼짐 방지는 탭 안에서 await 전에 바로 불러야 iPhone 에서 통합니다. 동작 센서 권한은 필요 없습니다.
     keepAwake();
     audio();
+    haptics.unlock();
     if (!ROOM) {
       message('방 코드가 없어요', '큰 화면의 QR을 찍어 주세요.');
       return;
     }
     message('들어가는 중…', '큰 화면과 연결하고 있어요.');
     socket.connect();
+    // 처음 하는 폰이면 바로 연습 판을 띄웁니다(그동안 자리 잡기는 뒤에서 이어지고, 큰 화면엔 '연습 중'이 뜹니다).
+    if (tut.firstTime()) tut.run();
   });
   $('btnGo').addEventListener('click', () => {
     keepAwake();
     audio();
-    send('start_game', {});
+    haptics.unlock();
+    if (readyPressed) {
+      goNote('모두 준비하면 바로 시작해요');
+      return;
+    }
+    if (!send('start_game', {})) {
+      goNote('연결 중이에요. 잠시 뒤 다시 눌러 주세요');
+      return;
+    }
+    // 서버 ready_state 가 오기 전에도 바로 눌린 모양으로(다음 ready_state 가 맞춰 줌)
+    readyPressed = true;
+    haptics.tick();
+    paintReady();
   });
   function paintFlip() {
     $('btnFlip').classList.toggle('on', flip);
@@ -686,5 +815,10 @@
       lastCount = sentCount;
     }, 500);
   }
-  window.__ahPad = { state: () => state, me: () => me, setFinger, region };
+  window.__ahPad = {
+    state: () => state, me: () => me, setFinger, region, tut, ps,
+    /** 시험: 튜토리얼 연습 판을 자동 손가락으로 풀기(헤드리스 확인용) */
+    tutAuto(on = true) { autoTut = Boolean(on); if (practice) practice.setAuto(autoTut); },
+    practice: () => (practice ? practice.state : null)
+  };
 })();

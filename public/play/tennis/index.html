@@ -26,6 +26,8 @@
   main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
   .view.on { display: flex; }
+  /* 대기실은 슬로우 질문·난이도가 들어가 길어질 수 있어 넘치면 스크롤합니다 */
+  .view.scroll { overflow-y: auto; justify-content: safe center; padding: 6px 0 10px; touch-action: pan-y; -webkit-overflow-scrolling: touch; }
   .center { align-items: center; justify-content: center; text-align: center; gap: 14px; }
   h1 { margin: 0; font-size: 30px; line-height: 1.25; letter-spacing: -.02em; }
   p { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.55; white-space: pre-line; }
@@ -43,7 +45,41 @@
   .legend div { padding: 10px 4px 9px; border-radius: 14px; background: rgba(255,255,255,.05); border: 1px solid var(--line); }
   .legend b { display: block; font-size: 15px; }
   .legend span { font-size: 12px; color: var(--dim); }
-  .practice { min-height: 22px; font-size: 15px; color: var(--fg); }
+  .practice { font-size: 15px; color: var(--fg); }
+  .practice:empty { display: none; }
+  .setbox { width: 100%; }
+  .setbox:empty { display: none; }
+  /* 준비 버튼: 누르면 '준비 완료 ✓' 로 바뀌고 다른 사람을 기다립니다 */
+  .primary.done { background: rgba(255,255,255,.08); color: var(--fg); box-shadow: inset 0 0 0 2.5px var(--c); display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .primary.done i { width: 26px; height: 26px; border-radius: 50%; background: var(--c); display: grid; place-items: center; }
+  .primary.done i svg { width: 16px; height: 16px; fill: none; stroke: #0b0f17; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
+  .who-wait { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; min-height: 0; font-size: 13.5px; font-weight: 700; color: var(--dim); }
+  .who-wait:empty { display: none; }
+  .who-wait b { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 14px; padding: 2px 9px; border-radius: 999px; color: var(--pc); box-shadow: inset 0 0 0 1.5px var(--pc); }
+  .who-wait b.on { background: var(--pc); color: #0b0f17; box-shadow: none; }
+  .who-wait b.away { opacity: .45; }
+  #tutLink:empty { display: none; }
+  /* 튜토리얼 안의 연습 단계(타이밍 링·버튼) */
+  .tut-ring { position: relative; width: min(64vw, 240px, 30vh); aspect-ratio: 1; margin: 0 auto; }
+  .tut-ring svg { width: 100%; height: 100%; overflow: visible; }
+  .tut-ring .halo { fill: none; stroke: rgba(255,255,255,.12); stroke-width: 10; }
+  .tut-ring .ring { fill: none; stroke: var(--c); stroke-width: 5; filter: drop-shadow(0 0 6px var(--c)); }
+  .tut-ring .ring.close { stroke: #fff; stroke-width: 7; }
+  .tut-ring .tag { position: absolute; left: 50%; bottom: -6px; transform: translateX(-50%); padding: 3px 12px; border-radius: 999px; font-size: 15px; font-weight: 900;
+    background: rgba(255,255,255,.08); color: var(--dim); white-space: nowrap; transition: background .12s, color .12s; }
+  .tut-ring .tag.now { background: var(--c); color: #0b0f17; }
+  .tut-ring .mark { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 5px 16px; border-radius: 999px; background: rgba(8,12,22,.88);
+    box-shadow: 0 0 0 2px currentColor, 0 8px 24px rgba(0,0,0,.5); font-size: 24px; font-weight: 900; letter-spacing: .01em; white-space: nowrap; opacity: 0; pointer-events: none; }
+  .tut-ring .mark.on { animation: tutmark 1s ease-out; }
+  .tut-ring .mark.good { color: #7ef0a0; }
+  .tut-ring .mark.bad { color: #ffcf8a; }
+  @keyframes tutmark { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); } 18% { opacity: 1; transform: translate(-50%, -50%) scale(1.12); } 30% { transform: translate(-50%, -50%) scale(1); }
+    75% { opacity: 1; transform: translate(-50%, -95%); } 100% { opacity: 0; transform: translate(-50%, -125%); } }
+  .tut-pads { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+  .tut-pads button { flex: 1; max-width: 170px; padding: 13px 0; border-radius: 14px; background: rgba(255,255,255,.08); color: var(--fg);
+    border: 1.5px solid var(--line); font-size: 16px; font-weight: 800; }
+  .tut-pads button:active { transform: scale(.97); background: var(--c); color: #0b0f17; }
+  .tut-pads-note { margin-top: 6px; font-size: 12px; color: var(--dim); text-align: center; }
   .count { font-family: Anton, Impact, sans-serif; font-size: 96px; line-height: 1; color: var(--c); }
 
   /* 점수판 */
@@ -87,9 +123,6 @@
   .hands button.on { color: var(--fg); border-color: var(--fg); background: rgba(255,255,255,.08); }
   .pads-hint { margin-top: 8px; font-size: 12px; text-align: center; }
 
-  #flash { position: fixed; inset: 0; pointer-events: none; background: var(--c); opacity: 0; }
-  #flash.go { animation: flash .45s ease-out; }
-  @keyframes flash { from { opacity: .75; } to { opacity: 0; } }
   .debug { position: fixed; left: 8px; right: 8px; bottom: calc(env(safe-area-inset-bottom) + 4px); font: 11px ui-monospace, monospace;
     color: rgba(255,255,255,.4); white-space: pre-wrap; pointer-events: none; }
 </style>
@@ -125,13 +158,16 @@
   <section class="view center" id="vMsg"><h1 id="msgT"></h1><p id="msgB"></p></section>
 
   <!-- 대기실 · 경기 끝 · 관전 -->
-  <section class="view center" id="vWait">
+  <section class="view center scroll" id="vWait">
     <div class="big" id="waitT">대기실</div>
     <p id="waitB"></p>
     <div class="chips" id="waitChips"></div>
     <div class="practice" id="practice"></div>
-    <button class="primary" id="btnGo" style="margin-top:8px">게임 시작</button>
+    <div class="setbox" id="setBox"></div>
+    <button class="primary" id="btnGo" style="margin-top:4px">준비</button>
+    <div class="who-wait" id="whoWait"></div>
     <button class="ghost" id="btnCalLobby">라켓 자세 맞추기</button>
+    <div id="tutLink"></div>
   </section>
 
   <!-- 자세 맞추기 -->
@@ -150,13 +186,13 @@
     <div class="count hidden" id="calN">3</div>
     <h1 id="calT">라켓처럼 쥡니다</h1>
     <p id="calB">폰 아래쪽을 라켓 손잡이처럼 쥐고,
-화면이 TV를 보게 한 뒤 준비를 누릅니다.</p>
+화면이 TV를 보게 한 뒤 아래 버튼을 누릅니다.</p>
     <div class="legend" id="calLegend">
       <div><b>쓸어 올리기</b><span>탑스핀</span></div>
       <div><b>깎아 내리기</b><span>슬라이스</span></div>
       <div><b>화면 등지기</b><span>백핸드</span></div>
     </div>
-    <button class="primary" id="btnReady" style="margin-top:6px">준비</button>
+    <button class="primary" id="btnReady" style="margin-top:6px">이 자세로 맞추기</button>
     <button class="ghost hidden" id="btnCalCancel">돌아가기</button>
   </section>
 
@@ -189,10 +225,9 @@
     </div>
   </section>
 </main>
-<div id="flash"></div>
 <div class="debug" id="debug"></div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
-<script src="controller.js"></script>
+<script type="module" src="controller.js"></script>
 </body>
 </html>

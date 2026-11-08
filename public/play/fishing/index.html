@@ -88,8 +88,75 @@
   .toggle { margin-top: 2px; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 800; background: rgba(255,255,255,.06); border: 1.5px solid var(--line); color: var(--dim); }
   .toggle.on { color: #0b0f17; background: var(--accent); border-color: var(--accent); }
 
+  /* 살짝 던지기(센서 모드) */
+  .nearRow { display: flex; justify-content: center; }
+  .nearBtn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px 11px 14px; border-radius: 999px; font-size: 16px; font-weight: 800;
+    background: rgba(255,255,255,.07); border: 1.5px solid color-mix(in srgb, var(--c) 60%, transparent); color: var(--fg); }
+  .nearBtn svg { width: 20px; height: 20px; fill: none; stroke: var(--c); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .nearBtn small { font-size: 12px; font-weight: 700; color: var(--dim); margin-left: 2px; }
+  .nearBtn:active { transform: scale(.97); background: color-mix(in srgb, var(--c) 22%, transparent); }
+  .nearBtn:disabled { opacity: .4; }
+
+  /* 머리 설정 버튼 · 알림 · 설정 시트 */
+  header .set { display: inline-flex; align-items: center; gap: 6px; padding: 7px 11px 7px 9px; }
+  header .set svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  header .set[data-diff="easy"] { border-color: rgba(94,224,122,.6); }
+  header .set[data-diff="hard"] { border-color: rgba(255,122,89,.6); }
+  /* 난이도 바뀜 알림: 상태 카드 윗줄을 덮는 띠(잠깐) */
+  #note { position: fixed; left: 16px; right: 16px; top: calc(env(safe-area-inset-top) + 60px); z-index: 30; display: flex; align-items: center; gap: 10px;
+    min-height: 50px; padding: 10px 14px; border-radius: 16px; background: #1d2230; border: 1px solid rgba(255,255,255,.14);
+    box-shadow: 0 14px 34px rgba(0,0,0,.45); color: #fff; font-size: 15px; font-weight: 800; letter-spacing: -.01em; line-height: 1.3;
+    opacity: 0; pointer-events: none; transform: translateY(-10px); transition: opacity .2s, transform .3s cubic-bezier(.2,1.4,.4,1); }
+  #note::before { content: ""; flex: none; width: 10px; height: 10px; border-radius: 50%; background: #3ab4ff; box-shadow: 0 0 0 4px rgba(58,180,255,.22); }
+  #note[data-diff="easy"]::before { background: #5ee07a; box-shadow: 0 0 0 4px rgba(94,224,122,.22); }
+  #note[data-diff="hard"]::before { background: #ff7a59; box-shadow: 0 0 0 4px rgba(255,122,89,.22); }
+  #note.on { opacity: 1; transform: none; }
+  .calSet { width: 100%; margin-top: 10px; }
+  .sheet { position: fixed; inset: 0; z-index: 40; display: flex; align-items: flex-end; background: rgba(5,7,12,0); transition: background .22s; }
+  .sheet.on { background: rgba(5,7,12,.55); }
+  .sheet-card { width: 100%; padding: 16px 16px calc(env(safe-area-inset-bottom) + 18px); border-radius: 24px 24px 0 0; background: #1b1f2a;
+    border-top: 1px solid var(--line); box-shadow: 0 -20px 50px rgba(0,0,0,.45); transform: translateY(100%); transition: transform .26s cubic-bezier(.2,1,.3,1);
+    display: flex; flex-direction: column; gap: 12px; }
+  .sheet.on .sheet-card { transform: none; }
+  .sheet-h { display: flex; align-items: center; justify-content: space-between; }
+  .sheet-h b { font-size: 20px; font-weight: 900; }
+  .sheet-k { font-size: 13px; color: var(--dim); }
+  .sheet-links { display: flex; justify-content: center; }
+
+  /* 연습(튜토리얼) 단계 안 화면 */
+  .tview, .treel { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; }
+  .tbob { width: min(66vw, 24vh, 250px); height: auto; overflow: visible; margin: 2px 0 4px; }
+  .tbob .tbobG { transition: transform .12s; }
+  .tbob.nib .tbobG { animation: nib .5s; }
+  .tbob.under .tbobG { transform: translateY(46px); transition: transform .09s; }
+  .tbob .tring { opacity: 0; transform-box: fill-box; transform-origin: center; }
+  .tbob.nib .tring { animation: tring .8s ease-out; }
+  .tbob.nib .tring.t2 { animation-delay: .14s; }
+  .tbob.under .tring { animation: tring .7s ease-out infinite; }
+  .tbob.under .tring.t2 { animation-delay: .35s; }
+  .tbob .tglow { opacity: .5; transition: opacity .2s; }
+  .tbob.under .tglow { opacity: 1; animation: hot .25s infinite alternate; }
+  @keyframes tring { from { opacity: .9; transform: scale(.45); } to { opacity: 0; transform: scale(1.7); } }
+  .tcue { min-height: 22px; font-size: 15px; font-weight: 800; color: #e7ecf4; text-align: center; }
+  .tcue.hot { color: #ff8a80; font-size: 19px; animation: hot .25s infinite alternate; }
+  .tcue.good { color: var(--good); }
+  .tbtns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 4px; }
+  .tbtn { min-width: 128px; padding: 14px 18px; border-radius: 16px; background: rgba(255,255,255,.08); border: 1.5px solid rgba(255,255,255,.18);
+    font-size: 17px; font-weight: 800; color: #fff; }
+  .tbtn small { font-size: 12px; font-weight: 700; opacity: .75; margin-left: 4px; }
+  .tbtn.main { background: var(--c); border-color: var(--c); color: #0b0f17; }
+  .tbtn.hook { background: #ff5a4f; border-color: #ff5a4f; }
+  .tbtn:disabled { opacity: .4; }
+  .tbtn:active { transform: scale(.97); }
+  .treel .tension { width: min(100%, 360px); }
+  .treel .tension.dim { opacity: .45; }
+  .treel .dialWrap .dial { width: min(64vw, 30vh, 250px); }
+
   /* 시험용(센서 없음) */
-  .pads { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .pads { flex: none; display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 8px; }
+  .pads > button { grid-column: span 3; }
+  .pads > button.third { grid-column: span 2; }
+  .pads button.near { border-color: color-mix(in srgb, var(--c) 60%, transparent); }
   .pads button { padding: 15px 0; border-radius: 16px; background: rgba(255,255,255,.08); border: 1.5px solid var(--line); font-size: 18px; font-weight: 800; }
   .pads button small { font-size: 11px; font-weight: 700; color: var(--dim); margin-left: 4px; }
   .pads button.main { background: var(--c); color: #0b0f17; border-color: var(--c); }
@@ -114,6 +181,9 @@
   .card.bad { border-color: var(--bad); }
   .card.bad .n { color: #ffb0b0; }
   .card.bad .w { display: none; }
+  .card.hold { border-color: var(--accent); }
+  .card.hold .n { color: var(--accent); }
+  .card.hold .w { display: none; }
 
   #flash { position: fixed; inset: 0; pointer-events: none; background: var(--c); opacity: 0; }
   #flash.go { animation: flash .45s ease-out; }
@@ -131,8 +201,10 @@
   <span class="me" id="me">…</span>
   <span class="room" id="room"></span>
   <button class="small hidden" id="btnRecal">다시 맞추기</button>
+  <button class="small set hidden" id="btnSet" aria-label="설정"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1M18.7 18.7l-2.1-2.1M7.4 7.4L5.3 5.3"/></svg><span id="setLbl">보통</span></button>
 </header>
 <div class="banner hidden" id="banner"></div>
+<div id="note" role="status" aria-live="polite"></div>
 <main>
   <!-- 처음 -->
   <section class="view center on" id="vStart">
@@ -173,6 +245,7 @@
 화면은 하늘을 보게 든 뒤 준비를 눌러요.</p>
     <button class="primary" id="btnReady" style="margin-top:6px">준비</button>
     <button class="ghost hidden" id="btnCalCancel">돌아가기</button>
+    <div class="calSet" id="calSet"></div>
   </section>
 
   <!-- 경기 중 -->
@@ -194,6 +267,9 @@
         <text x="-96" y="16" text-anchor="start">내 쪽</text>
       </svg>
       <div class="castHint" id="castHint"></div>
+      <div class="nearRow hidden" id="nearRow">
+        <button class="nearBtn" id="btnNearM"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17c3-6 9-8 14-6"/><path d="M15 8l3 3-3 3"/><circle cx="19" cy="19" r="2"/></svg>살짝 던지기<small>바로 앞에 톡</small></button>
+      </div>
       <!-- 찌 -->
       <svg class="bob hidden" id="bob" viewBox="-110 -80 220 140">
         <defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b6e7a"/><stop offset="1" stop-color="#14262c"/></linearGradient></defs>
@@ -233,19 +309,29 @@
     <div class="pads hidden" id="pads">
       <div class="sl"><span>방향</span><input type="range" id="aim" min="-35" max="35" step="1" value="0"><b id="aimV">정면</b></div>
       <div class="sl"><span>힘</span><input type="range" id="pow" min="5" max="100" step="1" value="45"><b id="powV">45%</b></div>
+      <button class="near" id="btnNear">살짝 던지기 <small>바로 앞</small></button>
       <button class="main" id="btnCast">던지기</button>
-      <button class="hook" id="btnHook">챔질</button>
-      <button id="btnReel">감기 <small>누르고 있기</small></button>
-      <button id="btnTwitch">툭</button>
-      <div class="pads-hint" id="padsHint">동작 센서 없이 버튼으로 해요 · 키보드 C 던지기 · Space 챔질 · R 감기 · T 툭</div>
+      <button class="hook third" id="btnHook">챔질</button>
+      <button class="third" id="btnReel">감기 <small>누르기</small></button>
+      <button class="third" id="btnTwitch">툭</button>
+      <div class="pads-hint" id="padsHint">동작 센서 없이 버튼으로 해요 · 키보드 C 던지기 · N 살짝 · Space 챔질 · R 감기 · T 툭</div>
     </div>
   </section>
 </main>
 <div class="card" id="card"><div class="k" id="cardK">CATCH</div><div class="n" id="cardN"></div><div class="w" id="cardW"></div><div class="s" id="cardS"></div></div>
+<!-- 설정 시트: 난이도(큰 화면 모두에게 적용)·튜토리얼 다시 하기 -->
+<div class="sheet hidden" id="sheet" role="dialog" aria-label="설정">
+  <div class="sheet-card">
+    <div class="sheet-h"><b>설정</b><button class="small" id="btnSheetClose">닫기</button></div>
+    <div id="sheetSet"></div>
+    <p class="sheet-k">난이도는 같은 호수의 모두에게 같이 적용돼요. 낚시하는 중에도 언제든 바꿀 수 있어요.</p>
+    <div class="sheet-links" id="sheetLinks"></div>
+  </div>
+</div>
 <div id="flash"></div>
 <div class="debug" id="debug"></div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
-<script src="controller.js"></script>
+<script type="module" src="controller.js"></script>
 </body>
 </html>

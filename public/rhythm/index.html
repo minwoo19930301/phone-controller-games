@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#04040a">
+<title>리듬 스텝</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<canvas id="lanes" class="hidden"></canvas>
+<div class="vig"></div>
+
+<!-- 경기 중: 곡 띠, 참가 QR -->
+<div id="songbar" class="songbar hidden">
+  <img id="sbCover" alt="">
+  <div class="sb-txt"><b id="sbTitle"></b><span id="sbSub"></span></div>
+  <div class="sb-prog"><i id="sbProg"></i></div>
+  <span class="sb-time" id="sbTime">0:00</span>
+</div>
+<div id="join" class="join hidden">
+  <img id="qrMini" alt="">
+  <div><span>참가</span><b id="codeMini">----</b></div>
+</div>
+<div id="count" class="count"></div>
+<div id="banner" class="banner"><b></b><span></span></div>
+<div id="hold" class="hold hidden"><b>🔊 소리를 켜 주세요</b><span>큰 화면을 한 번 클릭하거나 아무 키나 누르면 시작해요</span></div>
+
+<!-- 대기실 겸 노래 고르기 -->
+<section id="select" class="screen">
+  <div class="sel">
+    <div class="sel-left">
+      <div class="eyebrow">1~4인 · 패드 / 모션</div>
+      <h1 class="wordmark">RHYTHM<br><span>STEP</span></h1>
+      <p class="lede">폰 화면의 화살표를 누르거나<br>폰을 들고 화살표 쪽으로 휙!</p>
+      <div class="tutbox" id="tutBox"></div>
+    </div>
+    <div class="sel-mid">
+      <div class="picker" id="picker"></div>
+      <div class="picked hidden" id="picked"></div>
+    </div>
+    <div class="sel-right">
+      <div class="qr-card">
+        <img id="qr" alt="참가 QR">
+        <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
+        <div class="qr-url" id="url"></div>
+        <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 동작 센서가 꺼져 있어요. 모션 모드는 https 주소에서 열어 주세요.</div>
+      </div>
+      <ol class="howto">
+        <li><b>QR</b>을 찍고 <b>패드</b>나 <b>모션</b>을 골라요</li>
+        <li>폰 화면을 좌우로 밀어 <b>CD</b>를 넘기고, 탭하면 그 곡</li>
+        <li>각자 난이도를 고르고 모두 <b>준비</b>하면 시작</li>
+      </ol>
+    </div>
+  </div>
+  <div class="roster" id="roster"></div>
+  <div class="foot" id="foot"></div>
+</section>
+
+<!-- 결과 -->
+<section id="over" class="screen hidden">
+  <div class="over">
+    <div class="eyebrow" id="ovEyebrow">RESULT</div>
+    <h1 class="ov-title" id="ovTitle"></h1>
+    <div class="ranks" id="ranks"></div>
+    <div class="ov-hint" id="ovHint"></div>
+  </div>
+</section>
+
+<section id="replaced" class="screen hidden">
+  <div class="over"><h1 class="ov-title">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+</section>
+
+<div class="toast" id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>

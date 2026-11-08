@@ -36,11 +36,13 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .sb .team b { font-family: var(--display); font-weight: 400; font-size: 56px; line-height: 1; min-width: 1.1ch; text-align: center;
   text-shadow: 0 0 22px color-mix(in srgb, var(--c) 55%, transparent); }
 .sb .team b.on { animation: bump 0.8s cubic-bezier(.2, 1.6, .4, 1); color: var(--gold); }
-.sb .mid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 0 18px;
+.sb .mid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 0 18px;
   border-left: 1px solid var(--line); border-right: 1px solid var(--line); min-width: 120px; }
 .sb .mode { font-family: var(--display); font-size: 22px; letter-spacing: 0.08em; }
 .sb .first { font-size: 12px; font-weight: 800; letter-spacing: 0.08em; color: var(--dim); white-space: nowrap; }
 .sb .first.mp { color: var(--gold); animation: blink 0.6s infinite alternate; }
+.sb .lv { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 800; letter-spacing: 0.04em; color: var(--lv, #8fd8ff); white-space: nowrap; }
+.sb .lv i { width: 6px; height: 6px; border-radius: 50%; background: var(--lv, #8fd8ff); box-shadow: 0 0 8px var(--lv, #8fd8ff); }
 @keyframes bump { 0% { transform: scale(1.7); } 100% { transform: none; } }
 @keyframes blink { to { opacity: 0.45; } }
 
@@ -112,6 +114,10 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .screen { position: fixed; inset: 0; display: grid; place-items: center; padding: 40px;
   background: linear-gradient(90deg, rgba(5, 3, 14, 0.94) 0%, rgba(5, 3, 14, 0.7) 54%, rgba(5, 3, 14, 0.3) 100%); }
 .lobby { display: flex; align-items: center; gap: 64px; width: min(1220px, 100%); }
+/* 위쪽 74px 는 '준비 n/m' 띠(ready.js) 자리. 난이도·연습 칸이 늘어도 720p 화면에 들어가게 제목을 화면 높이에 맞춥니다. */
+#lobby { padding-top: 74px; padding-bottom: 24px; }
+#lobby .wordmark { font-size: clamp(54px, min(8.5vw, 11.5vh), 124px); }
+#lobby .lede { margin: 14px 0 18px; }
 .lobby-copy { flex: 1; min-width: 0; }
 .eyebrow { font-size: 14px; font-weight: 800; letter-spacing: 0.24em; color: var(--accent-2); margin-bottom: 14px; }
 .wordmark { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(60px, 8.5vw, 124px); line-height: 0.92;
@@ -133,9 +139,20 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
   color: var(--fg); animation: pop 0.4s cubic-bezier(.2, 1.6, .4, 1); }
 .slot.bot small { color: var(--dim); }
 .slot.away { opacity: 0.45; }
+.slot.ready { box-shadow: 0 0 0 1px var(--c), 0 0 26px color-mix(in srgb, var(--c) 45%, transparent); }
+.slot.ready small { color: #9dffb5; }
+.slot.prac small { color: var(--gold); animation: blink 0.7s infinite alternate; }
 .slot.away small { color: var(--dim); }
 @keyframes pop { from { transform: scale(0.9); } to { transform: none; } }
-.pairs { min-height: 22px; margin-bottom: 18px; font-size: 15px; font-weight: 800; color: #cfc8e8; }
+.set-box { margin: 0 0 14px; max-width: 760px; }
+.set-box .pcgs-panel { --pcgs-accent: var(--accent-2); background: var(--glass-2); border-color: var(--line); }
+.tut-box { margin: 0 0 14px; max-width: 900px; }
+.tut-box:has(.pcgb[hidden]) { display: none; }
+.over-set { display: flex; justify-content: center; margin: 0 0 14px; }
+.over-set .pcgs-panel { --pcgs-accent: var(--accent-2); background: var(--glass-2); border-color: var(--line); }
+.hint b { color: var(--fg); }
+.kb-test { display: inline-flex; align-items: center; gap: 8px; }
+.pairs { min-height: 22px; margin-bottom: 14px; font-size: 15px; font-weight: 800; color: #cfc8e8; }
 .pairs i { font-style: normal; color: var(--dim); margin: 0 6px; font-weight: 600; }
 .hint { color: var(--dim); font-size: 15px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .qr-card { flex: none; width: 340px; padding: 24px; border-radius: 26px; background: #f7f5ee; color: #0b1220;
@@ -151,6 +168,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .msg.on { opacity: 1; transform: translate(-50%, 0); }
 
 /* ---------- 결과 ---------- */
+#over { padding-top: 74px; padding-bottom: 24px; }
 .screen#over { background: radial-gradient(ellipse at center, rgba(5, 3, 14, 0.82) 0%, rgba(5, 3, 14, 0.62) 70%, rgba(5, 3, 14, 0.4) 100%); }
 .over { width: min(900px, 100%); text-align: center; }
 .over-title { margin: 0; font-family: var(--sans); font-weight: 900; font-size: 60px; letter-spacing: -0.04em; color: var(--c);

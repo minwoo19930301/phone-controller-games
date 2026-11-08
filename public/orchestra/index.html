@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#060407">
+<title>폰 오케스트라</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
+</script>
+</head>
+<body data-phase="lobby">
+<canvas id="cv"></canvas>
+<div class="vig"></div>
+
+<!-- 대기실·연습·곡 고르기·결과에서 오른쪽 위 작은 참가 QR -->
+<div id="join" class="join hidden">
+  <img id="qrMini" alt="">
+  <div><span>참가</span><b id="codeMini">----</b></div>
+</div>
+
+<!-- 1. 대기실 -->
+<section id="lobby" class="screen">
+  <div class="lob">
+    <div class="lob-left">
+      <div class="eyebrow">PHONE ORCHESTRA · 1~4인</div>
+      <h1 class="wordmark">오케스트라<span>각자 폰이 악기가 돼요</span></h1>
+      <p class="lede">폰마다 악기를 하나씩 골라요. 소리는 각자 폰에서 나고,<br>맡지 않은 파트는 큰 화면이 조용히 반주해요.</p>
+      <div class="setbox" id="settingsBox"></div>
+      <div class="insts" id="insts"></div>
+    </div>
+    <div class="lob-right">
+      <div class="qr-card">
+        <img id="qr" alt="참가 QR">
+        <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
+        <div class="qr-url" id="url"></div>
+        <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰의 동작 센서·마이크가 꺼질 수 있어요. https 주소에서 열어 주세요.</div>
+      </div>
+      <ol class="howto">
+        <li><b>QR</b>을 찍고 폰에서 <b>악기</b>를 골라요</li>
+        <li>처음 고른 악기는 폰에서 <b>연습</b>부터 해요</li>
+        <li>폰을 밀어 <b>CD</b>를 넘겨 곡을 고르고, 모두 <b>준비</b>하면 연주</li>
+      </ol>
+    </div>
+  </div>
+  <div class="lob-bottom">
+    <div class="slots" id="slots"></div>
+    <div class="tutboard" id="tutBoard"></div>
+  </div>
+</section>
+
+<!-- 2. 연습(처음 악기는 튜토리얼, 다른 사람은 자유 연습) -->
+<section id="practice" class="screen hidden">
+  <div class="sec-head">
+    <div>
+      <div class="eyebrow">STEP 1 · 연습</div>
+      <h2>각자 폰으로 연습해요</h2>
+      <p>처음 고른 악기는 폰에 튜토리얼이 떠요. 악기는 지금 바꿀 수 있어요(연주 중엔 못 바꿔요). 다 되면 폰에서 <b>준비</b>.</p>
+    </div>
+  </div>
+  <div class="tiles" id="tiles" data-n="1"></div>
+</section>
+
+<!-- 3. 곡 고르기(CD 넘기기) -->
+<section id="select" class="screen hidden">
+  <div class="sel-msg" id="selMsg"></div>
+  <div class="picker-host" id="pickerHost"></div>
+  <div class="sel-players" id="selPlayers"></div>
+</section>
+
+<!-- 4. 연주 -->
+<section id="perform" class="screen hidden">
+  <div class="ptop">
+    <img id="pCover" alt="">
+    <div class="pt-txt"><b id="pSong"></b><span id="pComposer"></span></div>
+    <div class="pt-prog"><i id="pProg"></i><span id="pTime">0:00</span></div>
+    <div class="pt-stats">
+      <div><span>빠르기</span><b id="pTempo">–</b></div>
+      <div><span>셈여림</span><b id="pDyn">mf</b></div>
+      <div class="pt-ens"><span>합주</span><b id="pEns">–</b><em><i id="pEnsBar"></i></em></div>
+    </div>
+  </div>
+  <div class="pcenter" id="pCenter"></div>
+  <div class="panels" id="panels" data-n="1"></div>
+  <div class="rec-dot" id="recDot"><i></i>녹화 중</div>
+</section>
+
+<!-- 5. 결과 + 6. 다운로드 -->
+<section id="over" class="screen hidden">
+  <div class="ov">
+    <div class="ov-head">
+      <img id="oCover" alt="">
+      <div class="ov-title">
+        <div class="eyebrow">CURTAIN CALL</div>
+        <h2 id="oSong"></h2>
+        <span id="oComposer"></span>
+      </div>
+      <div class="ov-grade"><b id="oGrade">–</b><span id="oWord"></span></div>
+    </div>
+    <div class="ov-cards" id="oCards"></div>
+    <div class="ov-foot">
+      <div class="ov-dl" id="oDl">
+        <a class="dlbtn off" id="oDlBtn" download><b>아까 한 거 다운받기</b><span>연주 영상 · 소리 포함</span></a>
+        <p id="oDlSub"></p>
+      </div>
+      <div class="ov-next"><b id="oReady"></b><span>폰에서 모두 준비하면 다음 곡을 골라요</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="replaced" class="screen dim hidden">
+  <div class="ov"><h2>다른 화면에서 열었어요</h2><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+</section>
+
+<div class="keys" id="keys"></div>
+<div class="toast" id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>

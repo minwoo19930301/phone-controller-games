@@ -211,5 +211,42 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
   .call.game .call-main { font-size: 92px; }
 }
 
-.slow-btn { font: inherit; font-size: 14px; color: #0b1420; background: #d8ff3e; border: 0; border-radius: 999px; padding: 4px 12px; cursor: pointer; }
-.slow-btn.off { background: transparent; color: var(--dim); box-shadow: inset 0 0 0 1px currentColor; }
+/* ---------- 난이도·슬로우·연습 현황 (공통 모듈) ---------- */
+/* 대기실: 위 가운데 '준비 n/m' 띠(ready.js)와 겹치지 않게 위를 비우고, 설정·연습 칸이 들어갈 만큼 제목을 줄입니다 */
+#lobby { padding-top: 78px; padding-bottom: 28px; }
+#lobby .wordmark { font-size: clamp(64px, 7.6vw, 112px); }
+#lobby .lede { margin: 12px 0 18px; }
+#lobby .slots { margin-bottom: 10px; }
+#lobby .slot { height: 64px; }
+#lobby .pairs { margin-bottom: 14px; }
+.tutboard .pcgb-tiles { gap: 8px; }
+.tutboard .pcgb-tile { flex: 1 1 230px; padding: 8px 12px 8px 8px; border-radius: 14px; gap: 10px; }
+.tutboard .pcgb-badge { width: 40px; height: 40px; border-radius: 11px; font-size: 19px; }
+.tutboard .pcgb-line b { font-size: 15px; }
+.tutboard .pcgb-t { font-size: 13px; }
+.setbox { --pcgs-accent: var(--accent); max-width: 640px; }
+.setbox .pcgs-panel { background: rgba(6, 14, 30, 0.7); }
+.go-hint { min-height: 22px; margin: 12px 0 0; font-size: 15px; font-weight: 700; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+.go-hint b { color: var(--fg); }
+.tutboard { max-width: 760px; margin-top: 10px; }
+.tutboard:empty { display: none; }
+.tutboard:has(> .pcgb[hidden]) { margin: 0; }
+.slot.prac { border-style: dashed; }
+.slot.prac small { color: var(--gold); animation: blink 0.7s infinite alternate; }
+.slot.ready small { font-weight: 900; }
+/* 누가 아직 준비 전인지 큰 화면에서도 한눈에: 칸 아래 글을 키우고, 준비한 칸은 색을 채운 알약으로 */
+#lobby .slot small { font-size: 13px; letter-spacing: 0.02em; margin-top: 5px; }
+#lobby .slot.on.ready small { padding: 1px 9px; border-radius: 999px; background: var(--c); color: #0b1420; }
+#lobby .slot.on:not(.ready):not(.prac) small { color: var(--fg); opacity: 0.75; }
+.over-set { margin: 0 auto 18px; max-width: 560px; }
+.bug-diff { padding: 2px 9px; border-radius: 999px; font-size: 12px; letter-spacing: 0.02em; background: rgba(255, 255, 255, 0.1); color: var(--fg); }
+.bug-diff:empty { display: none; }
+.bug-diff[data-lv="easy"] { background: #5ee07a; color: #062012; }
+.bug-diff[data-lv="normal"] { background: #8fd8ff; color: #06202e; }
+.bug-diff[data-lv="hard"] { background: #ff7a59; color: #2a0b02; }
+/* 결과 화면: 다시 하기를 기다리는 동안 튜토리얼을 다시 하는 사람이 있으면 가운데에 칸을 띄웁니다 */
+.over-tut { margin: 16px auto 0; }
+.over-tut .pcgb.inline { align-items: center; }
+.over-tut .pcgb.inline .pcgb-head { align-self: center; }
+.over-tut .pcgb.inline .pcgb-tiles { justify-content: center; }
+.over-tut .pcgb.inline .pcgb-tile { flex: 0 1 300px; text-align: left; }

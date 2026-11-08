@@ -365,12 +365,38 @@ export function inBox(x, z, recv, box) {
 }
 
 /**
+ * 난이도별 타구 보정. hard 는 보정 없음(예전 그대로).
+ * normal·easy 는 '쳤는지'와 '포핸드/백핸드'라는 굵은 동작을 크게 보고, 세밀한 조준·타이밍·세기는 살짝만 반영해
+ * 공을 코트 안 안전한 곳으로 보냅니다. 포핸드는 내 왼쪽 대각선(크로스), 백핸드는 내 오른쪽 대각선으로 갑니다.
+ *   aim: 조준이 떨어지는 곳을 옮기는 비율(사이드라인까지 폭의 ±몇 %)  time: 타이밍이 좌우를 옮기는 비율(hard = 1)
+ *   hand: 포핸드/백핸드 대각선 기본 거리(m)  margin: 사이드라인 안쪽 여유(m)  depth: [기본, 세기 몫, 흔들림]  deep: [최소, 베이스라인 안쪽 여유]
+ *   risk(q): 네트·아웃이 날 확률  clear: 네트 위 여유 더하기(m)  speed: 공 속도 배율
+ *   serveAim: 서브 조준 반영 비율  serveRisk(q): 서브 폴트 확률  serveDeep: [최소, 서비스 라인 안쪽 여유]
+ */
+export const ASSIST = {
+  hard: null,
+  normal: {
+    aim: 0.25, time: 0.3, hand: 1.2, margin: 0.75, depth: [7.7, 2.1, 0.3], deep: [5.6, 0.9],
+    risk: (q) => (q < 0.2 ? ((0.2 - q) / 0.2) * 0.14 : 0), clear: 0.08, speed: 0.95,
+    serveAim: 0.55, serveRisk: (q) => (q < 0.2 ? ((0.2 - q) / 0.2) * 0.16 : 0), serveDeep: [4.4, 0.45]
+  },
+  easy: {
+    aim: 0.1, time: 0, hand: 1.2, margin: 1.05, depth: [8.1, 1.5, 0.2], deep: [6.2, 1.3],
+    risk: () => 0, clear: 0.16, speed: 0.88,
+    serveAim: 0.25, serveRisk: () => 0, serveDeep: [4.6, 0.7]
+  }
+};
+export const assistFor = (level) => ASSIST[level] || null;
+
+/**
  * 보정된 타구 계획. 선수 위치는 기계가 맞추고 사람은 타이밍·세기·스핀·조준만 정합니다.
  * o: { end, p(타점), q(0~1), err(경기 초, −빠름 +늦음), window, power, aim(도, + 오른쪽), spin('none'|'top'|'slice'),
- *      spinAmt, hand('fore'|'back'), serve, box, second, doubles, rng }
+ *      spinAmt, hand('fore'|'back'), serve, box, second, doubles, rng, assist('easy'|'normal'|'hard' 또는 ASSIST 값) }
  * 돌려주는 값: { v, w, target, outcome('in'|'net'|'long'|'wide'), kind, speed(m/s) }
  */
 export function aimShot(o) {
+  const A = typeof o.assist === 'string' ? assistFor(o.assist) : o.assist || null;
+  if (A) return assistedShot(o, A);
   const rng = o.rng || Math.random;
   const F = fwdOf(o.end);
   const Rx = rightOf(o.end);
@@ -449,6 +475,76 @@ export function aimShot(o) {
   const w = spinVector(spin, amt, dir);
   const minClear = spin === 'top' ? 0.5 + 0.3 * amt : spin === 'slice' ? 0.2 : 0.3;
   const sol = solveShot(p, [tx, tz], w, dist / speed, { minClear, maxClear: o.over ? 6 : spin === 'top' ? 1.6 : 1.1 });
+  let v = sol ? sol.v : [dir[0] * speed, 3, dir[1] * speed];
+  if (outcome === 'net') v = sinkToNet(p, v, w, o.end);
+  return { v, w, target: [tx, tz], outcome, kind: spin, speed: Math.hypot(v[0], v[1], v[2]) };
+}
+
+// 보정 타구(쉬움·보통). 너무 세게 휘둘러도 홈런이 나지 않고(o.over 무시), 공은 코트 안 안전한 곳으로 갑니다.
+function assistedShot(o, A) {
+  const rng = o.rng || Math.random;
+  const F = fwdOf(o.end);
+  const Rx = rightOf(o.end);
+  const p = o.p;
+  const spin = o.spin === 'top' || o.spin === 'slice' ? o.spin : 'none';
+  const amt = clamp(o.spinAmt ?? 0.6, 0, 1);
+  const q = clamp(o.q ?? 0.7, 0, 1);
+  const pw = clamp(o.power ?? 0.6, 0, 1);
+  const tt = clamp((o.err || 0) / (o.window || 0.14), -1, 1);
+  const aimN = clamp((o.aim || 0) / 25, -1, 1);
+  let outcome = 'in';
+  if (o.serve) {
+    const recv = 1 - o.end;
+    const Rr = rightOf(recv);
+    const sideSign = o.box === 'deuce' ? 1 : -1;
+    const aimLat = clamp((o.aim || 0) / 28, -1, 1) * 1.5 * Rx * A.serveAim;
+    let lat = sideSign * 2.05 + aimLat * Rr + (rng() - 0.5) * 0.5 * A.serveAim;
+    lat = sideSign > 0 ? clamp(lat, 0.7, COURT.halfWS - 0.75) : clamp(lat, -(COURT.halfWS - 0.75), -0.7);
+    const depth = clamp(5.0 + pw * 0.7 + (rng() - 0.5) * 0.25, A.serveDeep[0], COURT.svc - A.serveDeep[1]);
+    let risk = A.serveRisk(q);
+    if (o.second) risk *= 0.45;
+    if (rng() < risk) outcome = rng() < 0.55 ? 'net' : 'long';
+    const tx = lat * Rr;
+    const tz = F * (outcome === 'long' ? COURT.svc + 0.3 + rng() * 0.6 : depth);
+    const dx = tx - p[0];
+    const dz = tz - p[2];
+    const dist = Math.hypot(dx, dz) || 1;
+    const dir = [dx / dist, dz / dist];
+    const kind = spin === 'top' || o.second ? 'kick' : spin === 'slice' ? 'sslice' : 'flat';
+    let speed = kind === 'flat' ? 32 + 15 * pw : kind === 'kick' ? 25 + 9 * pw : 28 + 11 * pw;
+    if (o.second) speed *= 0.88;
+    speed *= (0.9 + 0.1 * q) * A.speed;
+    const w = spinVector(kind, amt, dir);
+    const sol = solveShot(p, [tx, tz], w, dist / speed, { minClear: (kind === 'kick' ? 0.35 : 0.12) + A.clear, maxClear: kind === 'flat' ? 0.9 : 1.6 });
+    let v = sol ? sol.v : [dir[0] * speed, -1, dir[1] * speed];
+    if (outcome === 'net') v = sinkToNet(p, v, w, o.end);
+    return { v, w, target: [tx, tz], outcome, kind: kind === 'flat' ? 'none' : kind, speed: Math.hypot(v[0], v[1], v[2]) };
+  }
+  // 스트로크: 좌우는 손(포핸드 → 내 왼쪽 대각선, 백핸드 → 내 오른쪽 대각선)이 정하고, 조준·타이밍은 살짝만 옮깁니다.
+  const hw = (o.doubles ? COURT.halfWD : COURT.halfWS) - A.margin;
+  const crossDir = o.hand === 'back' ? 1 : -1;
+  let lat = crossDir * A.hand + aimN * A.aim * (hw + A.margin) - tt * crossDir * 1.7 * A.time + (rng() - 0.5) * 0.5;
+  lat += clamp(-p[0] * Rx * 0.12, -0.5, 0.5);
+  lat = clamp(lat, -hw, hw);
+  let depth = A.depth[0] + pw * A.depth[1] + (rng() - 0.5) * 2 * A.depth[2];
+  if (spin === 'top') depth += 0.2;
+  if (spin === 'slice') depth -= 0.6;
+  depth = clamp(depth, A.deep[0], COURT.halfL - A.deep[1]);
+  if (rng() < A.risk(q)) {
+    outcome = rng() < 0.5 ? 'net' : 'long';
+    if (outcome === 'long') depth = COURT.halfL + 0.4 + rng() * 1.2;
+  }
+  const tx = Rx * lat;
+  const tz = F * depth;
+  const dx = tx - p[0];
+  const dz = tz - p[2];
+  const dist = Math.hypot(dx, dz) || 1;
+  const dir = [dx / dist, dz / dist];
+  let speed = spin === 'top' ? 24 + 10 * pw : spin === 'slice' ? 17 + 7 * pw : 24 + 12 * pw;
+  speed *= (0.88 + 0.12 * q) * A.speed;
+  const w = spinVector(spin, amt, dir);
+  const minClear = (spin === 'top' ? 0.5 + 0.3 * amt : spin === 'slice' ? 0.25 : 0.32) + A.clear;
+  const sol = solveShot(p, [tx, tz], w, dist / speed, { minClear, maxClear: spin === 'top' ? 1.8 : 1.3 });
   let v = sol ? sol.v : [dir[0] * speed, 3, dir[1] * speed];
   if (outcome === 'net') v = sinkToNet(p, v, w, o.end);
   return { v, w, target: [tx, tz], outcome, kind: spin, speed: Math.hypot(v[0], v[1], v[2]) };

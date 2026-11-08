@@ -18,7 +18,7 @@
 <div id="hurt" class="hurt"></div>
 
 <div id="topbar" class="topbar hidden">
-  <div class="stagetag"><span id="stageName">1 · 폐허가 된 거리</span><b id="waveName">WAVE 1/9</b></div>
+  <div class="stagetag"><span><em id="stageName">1 · 폐허가 된 거리</em><i class="diff" id="diffTag" data-d="normal">보통</i></span><b id="waveName">WAVE 1/9</b></div>
   <div class="foe"><span>남은 좀비</span><b id="foeLeft">0</b></div>
 </div>
 
@@ -40,7 +40,16 @@
       <h1 class="wordmark">ZOMBIE<br>GUN</h1>
       <p class="lede">폰을 화면에 겨누고 방아쇠를 눌러 좀비를 잡아요.</p>
       <div class="slots" id="slots"></div>
-      <div class="hint"><kbd>Enter</kbd> 시작</div>
+      <div class="setbox" id="setBox"></div>
+      <div class="tutbox" id="tutBox"></div>
+      <div class="hint"><span>폰에서 모두 <b>준비</b>를 누르면 시작해요</span><span class="dot"></span><kbd>D</kbd><span>난이도 바꾸기</span></div>
+    </div>
+    <!-- 가운데 빈 곳 = 연습 사격장. 연습 좀비가 이 범위 안에 서도록 game.js 가 위치를 잽니다. -->
+    <div class="range" id="range" aria-hidden="true">
+      <div class="range-tag">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5"/></svg>
+        <span><b>연습 사격장</b><small>폰을 겨누고 쏴 보세요</small></span>
+      </div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
@@ -54,10 +63,14 @@
 
 <section id="over" class="screen over-screen hidden">
   <div class="over">
-    <div class="eyebrow" id="overEyebrow">MISSION COMPLETE</div>
+    <div class="eyebrow"><span id="overEyebrow">MISSION COMPLETE</span><i class="diff" id="diffOver" data-d="normal">보통</i></div>
     <h1 class="wordmark sm" id="overTitle">작전 결과</h1>
     <div class="podium" id="podium"></div>
-    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b></div>
+    <div class="over-foot">
+      <div class="setbox" id="setBoxOver"></div>
+      <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 새 판</span><span class="dot"></span><kbd>D</kbd><span>난이도</span></div>
+    </div>
+    <div class="tutbox" id="tutBoxOver"></div>
   </div>
 </section>
 

@@ -38,9 +38,10 @@ export function createHud(root) {
     const toast = el('div', 'toast', '<b></b><span></span>');
     const banner = el('div', 'banner', '<b></b><span></span>');
     const note = el('div', 'note');
-    c.append(fx, svg, badge, slow, call, toast, banner, note);
+    const handtag = el('div', 'handtag');
+    c.append(fx, svg, handtag, badge, slow, call, toast, banner, note);
     return {
-      el: c, kind: 'player', fx, svg, halo, outer, inner, badge, slow, call, toast, banner, note,
+      el: c, kind: 'player', fx, svg, halo, outer, inner, handtag, badge, slow, call, toast, banner, note,
       me: badge.querySelector('.me'), op: badge.querySelector('.op'), opn: badge.querySelector('.opn'),
       tbl: badge.querySelector('.tbl'), srv: badge.querySelector('.srv'), timers: {}, last: {}
     };
@@ -165,7 +166,10 @@ export function createHud(root) {
       const c = cell(i);
       if (!c || c.kind !== 'player') return;
       if (!r) {
-        if (c.last.ring) c.svg.classList.remove('on');
+        if (c.last.ring) {
+          c.svg.classList.remove('on');
+          c.handtag.classList.remove('on');
+        }
         c.last.ring = false;
         return;
       }
@@ -181,6 +185,19 @@ export function createHud(root) {
       set(c.outer, r.R);
       set(c.halo, r.R);
       set(c.inner, r.ball + 2);
+      // 칠 손 글씨: 링 바로 아래(칸 아래쪽에 닿으면 링 위). side −1 = 왼쪽(백핸드) 화살표, +1 = 오른쪽
+      if (r.label) {
+        const html = r.side < 0 ? `<i>←</i>${esc(r.label)}` : r.side > 0 ? `${esc(r.label)}<i>→</i>` : esc(r.label);
+        if (c.last.hand !== html) {
+          c.last.hand = html;
+          c.handtag.innerHTML = html;
+        }
+        const h = c.el.clientHeight;
+        const below = r.y + r.R + 10;
+        const y = below + 40 < h ? below : Math.max(4, r.y - r.R - 44);
+        c.handtag.style.transform = `translate(${r.x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, 0)`;
+        c.handtag.classList.add('on');
+      } else c.handtag.classList.remove('on');
     },
     overview(i, rows) {
       const c = cell(i);

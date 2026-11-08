@@ -69,8 +69,10 @@ export function createScene(cv) {
   scene.add(cabinet.group);
   const field = makePlayfield();
   scene.add(field.mesh);
-  const rails = makeRails();
+  let rails = makeRails(GOAL);
   scene.add(rails.group);
+  let goalW = GOAL;
+  const teamCol = ['#ff5a5f', '#3ab4ff'];
   const consoles = [makeScoreConsole(-1), makeScoreConsole(1)];
   for (const c of consoles) scene.add(c.group);
   const puck = makePuck();
@@ -163,7 +165,20 @@ export function createScene(cv) {
     endPulse[team] = 1;
     shake = 0.8;
   }
+  // 골문 폭(난이도)이 바뀌면 레일·골문 홈과 캐비닛 윗판 구멍을 그 폭으로 다시 만듭니다. 대기실에서만 바뀝니다.
+  function setGoal(w) {
+    if (!Number.isFinite(w) || Math.abs(w - goalW) < 1e-4) return;
+    goalW = w;
+    scene.remove(rails.group);
+    rails.dispose();
+    rails = makeRails(w);
+    rails.setColors(teamCol[0], teamCol[1]);
+    scene.add(rails.group);
+    cabinet.setGoal(w);
+  }
   function setTeams(cA, cB, nA, nB) {
+    teamCol[0] = cA;
+    teamCol[1] = cB;
     field.setColors(cA, cB);
     rails.setColors(cA, cB);
     cabinet.setColors(cA, cB, nA, nB);
@@ -335,5 +350,5 @@ export function createScene(cv) {
     return { x: hit.x, z: hit.z };
   }
 
-  return { frame, setMallets, poseMallet, setPuck, hitFx, wallFx, goalFx, setTeams, setScore, project, pickTable, renderer, scene, camera: cam, bloom, GOAL };
+  return { frame, setMallets, poseMallet, setPuck, hitFx, wallFx, goalFx, setTeams, setScore, setGoal, project, pickTable, renderer, scene, camera: cam, bloom, get goal() { return goalW; } };
 }

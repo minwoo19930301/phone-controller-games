@@ -52,7 +52,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
   border-radius: 14px; background: var(--glass); border: 1px solid var(--line); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
 .minimap.big { position: static; width: 100%; height: 56%; }
 
-.boost, .wrong { position: absolute; left: 50%; top: 22cqh; transform: translate(-50%, 10px) scale(0.9); opacity: 0; transition: opacity 0.12s, transform 0.25s;
+.boost, .wrong { position: absolute; left: 50%; top: 31cqh; transform: translate(-50%, 10px) scale(0.9); opacity: 0; transition: opacity 0.12s, transform 0.25s;
   font-family: var(--display); letter-spacing: 0.06em; font-size: clamp(22px, 9cqh, 80px); white-space: nowrap; }
 .boost { color: #ffb347; text-shadow: 0 0 24px #ff7a00, 0 4px 16px rgba(0, 0, 0, 0.6); }
 .wrong { color: #ff6b6b; text-shadow: 0 0 20px #ff1f1f, 0 4px 16px rgba(0, 0, 0, 0.6); font-family: var(--sans); font-weight: 900; }
@@ -68,7 +68,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .center span { font-weight: 800; font-size: clamp(14px, 5cqh, 44px); color: var(--fg); text-shadow: 0 4px 18px rgba(0, 0, 0, 0.7); }
 @keyframes pop { from { transform: scale(1.7); opacity: 0; } to { transform: none; opacity: 1; } }
 
-.toast { position: absolute; left: 50%; top: 31cqh; transform: translate(-50%, 10px); opacity: 0; padding: 0.3em 1em; border-radius: 999px;
+.toast { position: absolute; left: 50%; top: 42cqh; transform: translate(-50%, 10px); opacity: 0; padding: 0.3em 1em; border-radius: 999px;
   background: var(--glass); border: 1px solid var(--line); font-weight: 900; font-size: clamp(13px, 4cqh, 34px); white-space: nowrap; transition: opacity 0.2s, transform 0.3s; }
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
 
@@ -78,6 +78,48 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .fin-r { font-family: var(--sans); font-weight: 900; font-size: clamp(36px, 22cqh, 220px); line-height: 1; color: var(--c); letter-spacing: -0.04em; text-shadow: 0 8px 40px rgba(0, 0, 0, 0.6); }
 .fin-t { font-family: var(--display); font-size: clamp(18px, 8cqh, 80px); letter-spacing: 0.06em; }
 .fin-s { font-weight: 700; font-size: clamp(11px, 3.2cqh, 26px); color: var(--dim); margin-top: 0.8em; }
+
+/* 아이템 칸(위 가운데, 시간 아래) */
+.islot { position: absolute; left: 50%; top: calc(3.6cqh + clamp(14px, 5cqh, 44px) + 1.4cqh); transform: translateX(-50%); display: none; flex-direction: column; align-items: center; gap: 0.35em; }
+.islot.on { display: flex; }
+.ib { position: relative; width: clamp(52px, 15cqh, 132px); aspect-ratio: 1; border-radius: 22%; display: grid; place-items: center;
+  background: radial-gradient(circle at 50% 35%, rgba(255, 255, 255, 0.16), rgba(10, 14, 28, 0.78) 70%); border: 2px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45), inset 0 0 0 3px rgba(10, 14, 28, 0.6); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); overflow: hidden; }
+.ib::before { content: ""; position: absolute; inset: 5%; border-radius: 18%; border: 2px dashed rgba(255, 255, 255, 0.16); }
+.ib .ico { width: 74%; height: 74%; display: grid; place-items: center; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.45)); }
+.ib .ico svg { width: 100%; height: 100%; display: block; }
+.ib.roll { border-color: #fff; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25), 0 0 34px rgba(255, 230, 120, 0.55); }
+.ib.roll .ico { animation: reel 0.09s linear infinite; }
+@keyframes reel { 0% { transform: translateY(-18%); opacity: 0.55; } 50% { opacity: 1; } 100% { transform: translateY(18%); opacity: 0.55; } }
+.ib.have { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(255, 210, 58, 0.35), 0 0 30px rgba(255, 210, 58, 0.5), 0 6px 24px rgba(0, 0, 0, 0.45); }
+.ib.land { animation: land 0.5s cubic-bezier(.2, 1.7, .4, 1); }
+@keyframes land { from { transform: scale(1.35); } to { transform: none; } }
+.iname { font-weight: 900; font-size: clamp(11px, 3.4cqh, 28px); letter-spacing: -0.02em; padding: 0.1em 0.7em; border-radius: 999px; background: rgba(10, 14, 28, 0.66); color: #fff; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6); }
+.iname:empty { display: none; }
+
+/* 추격 부스트(아래 가운데) */
+.chase { position: absolute; right: 2cqw; bottom: calc(4cqh + clamp(34px, 16cqh, 150px)); transform: translateY(12px); opacity: 0; transition: opacity 0.3s, transform 0.35s;
+  display: flex; align-items: center; gap: 0.4em; padding: 0.25em 0.9em 0.25em 0.45em; border-radius: 999px; white-space: nowrap;
+  background: linear-gradient(90deg, rgba(84, 62, 255, 0.85), rgba(40, 120, 255, 0.7)); border: 1.5px solid rgba(200, 220, 255, 0.6);
+  box-shadow: 0 0 26px rgba(110, 90, 255, 0.6), 0 6px 20px rgba(0, 0, 0, 0.35); font-weight: 900; font-size: clamp(12px, 4cqh, 34px); color: #fff; }
+.chase.on { opacity: 1; transform: none; }
+.chase i { width: 1.6em; height: 1.6em; display: block; animation: flick 0.35s ease-in-out infinite alternate; }
+.chase i svg { width: 100%; height: 100%; display: block; }
+.chase b { font-family: var(--display); font-weight: 400; letter-spacing: 0.04em; color: #d8f0ff; }
+@keyframes flick { from { transform: scale(0.9) rotate(-4deg); } to { transform: scale(1.08) rotate(4deg); } }
+
+/* 맞았을 때 빨간 번쩍임, 번개 흰 번쩍임, 무적 무지개 테두리 */
+.hitfx, .boltfx, .starfx { position: absolute; inset: 0; pointer-events: none; opacity: 0; }
+.hitfx { background: radial-gradient(ellipse at center, transparent 35%, rgba(255, 40, 60, 0.75) 100%); }
+.hitfx.go { animation: hitfx 0.9s ease-out; }
+@keyframes hitfx { 0% { opacity: 1; } 100% { opacity: 0; } }
+.boltfx { background: radial-gradient(ellipse at 50% 20%, rgba(255, 255, 255, 0.95), rgba(190, 170, 255, 0.55) 60%, rgba(90, 60, 220, 0.35)); }
+.boltfx.go { animation: boltfx 0.75s ease-out; }
+@keyframes boltfx { 0% { opacity: 0.95; } 12% { opacity: 0.2; } 22% { opacity: 0.8; } 100% { opacity: 0; } }
+.starfx { border: 1.2cqh solid transparent; border-image: linear-gradient(90deg, #ff5a5f, #ffb347, #ffe14a, #5ee07a, #3ab4ff, #c77dff, #ff5a5f) 1;
+  box-shadow: inset 0 0 9cqh rgba(255, 220, 90, 0.6); background: radial-gradient(ellipse at center, transparent 55%, rgba(255, 210, 90, 0.22)); transition: opacity 0.3s; }
+.starfx.on { opacity: 1; animation: starfx 0.5s linear infinite; }
+@keyframes starfx { 50% { filter: hue-rotate(180deg) brightness(1.2); } 100% { filter: hue-rotate(360deg); } }
 
 /* 순위판 칸 */
 .vp.board { background: radial-gradient(120% 100% at 50% 0%, #1b2445, #090c18); padding: 3cqh 3cqw; display: flex; flex-direction: column; gap: 1.5cqh; }
@@ -90,7 +132,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .bd-r.fin span { color: #7dff9a; }
 
 /* ---------- 대기실 ---------- */
-.screen { position: fixed; inset: 0; display: grid; place-items: center; padding: 40px;
+.screen { position: fixed; inset: 0; display: grid; place-items: safe center; overflow: auto; padding: 78px 40px 34px; /* 위쪽은 모두 준비 띠 자리 */
   background: linear-gradient(90deg, rgba(8, 9, 20, 0.9) 0%, rgba(8, 9, 20, 0.62) 54%, rgba(8, 9, 20, 0.15) 100%); }
 .lobby { display: flex; align-items: center; gap: 64px; width: min(1220px, 100%); }
 .lobby-copy { flex: 1; min-width: 0; }
@@ -142,6 +184,33 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .podium .num span { display: block; color: var(--dim); font-size: 13px; font-weight: 700; }
 @keyframes rise { from { opacity: 0; transform: translateY(16px); } }
 .over .hint { justify-content: center; }
+
+/* 대기실 설정·연습 현황 */
+.lede-sub { color: var(--accent); font-weight: 700; white-space: nowrap; }
+.set-wrap { position: relative; margin: 6px 0 12px; }
+.set-wrap .pcgs-panel { --pcgs-accent: var(--accent); }
+.tut-box { margin-bottom: 12px; }
+.tut-box:empty { display: none; }
+.hint.keys { font-size: 14px; }
+.over-meta { margin-top: 10px; font-size: 16px; font-weight: 800; color: var(--accent); letter-spacing: 0.02em; }
+.over-set { display: flex; justify-content: center; margin: 0 0 16px; }
+.over-set .pcgs-panel { --pcgs-accent: var(--accent); }
+
+@media (max-height: 820px) {
+  .wordmark { font-size: clamp(54px, 7vw, 100px); }
+  .lede { margin: 14px 0 18px; font-size: 17px; }
+  .slots { margin-bottom: 8px; }
+  .slot { height: 62px; }
+  .podium { margin: 14px 0 12px; gap: 8px; }
+  .podium .r { padding: 8px 20px; }
+  .podium .r:first-child { padding: 11px 20px; }
+  .podium .rank { font-size: 34px; }
+  .podium .r:first-child .rank { font-size: 44px; }
+  .podium .who { font-size: 27px; }
+  .podium .num b { font-size: 27px; }
+  .over .wordmark.sm { font-size: 50px; }
+  .over-set { margin-bottom: 10px; }
+}
 
 @media (max-width: 1000px) {
   .lobby { flex-direction: column; gap: 26px; }

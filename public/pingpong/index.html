@@ -21,7 +21,7 @@
   <div class="lobby">
     <div class="lobby-copy">
       <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 · 화면 분할</div>
-      <h1 class="wordmark">TABLE<br>TENNIS</h1>
+      <h1 class="wordmark">TABLE <br>TENNIS</h1>
       <p class="lede">폰을 탁구채처럼 휘두르세요.</p>
       <ol class="steps">
         <li>
@@ -42,9 +42,10 @@
         <div class="back"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="M4 4C14 4 22 10 34 20"/><path d="M34 20l-7-1M34 20l-1-7"/></svg><div><b>커트</b><span>위에서 아래로 깎아 내리기</span></div></div>
         <div class="side"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="M8 12a12 8 0 1 0 24 0"/><path d="M32 12l-5-4M32 12l2-6"/></svg><div><b>사이드</b><span>치는 순간 손목 비틀기</span></div></div>
       </div>
+      <div class="setbox" id="setBox"></div>
       <div class="slots" id="slots"></div>
       <div class="pairs" id="pairs"></div>
-      <div class="hint"><kbd>Enter</kbd> 게임 시작 <span class="dot"></span> 7점 선승 · 2점 차 <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
+      <div class="hint"><span>폰에서 모두 <b>준비</b>를 누르면 시작</span> <span class="dot"></span> 7점 선승 · 2점 차 <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
@@ -58,12 +59,16 @@
 
 <section id="over" class="screen hidden">
   <div class="over">
-    <div class="eyebrow">FINAL</div>
+    <div class="eyebrow" id="overMeta">FINAL</div>
     <h1 class="wordmark sm">탁구 결과</h1>
     <div class="podium" id="podium"></div>
-    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b></div>
+    <div class="setbox over-set" id="setBoxOver"></div>
+    <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 한 판 더</span> <span class="dot"></span> 난이도는 여기서 바꿀 수 있어요</div>
   </div>
 </section>
+
+<!-- 연습(튜토리얼) 현황: 대기실·결과 화면 아래에 붙는 칸들(공통 tutorial-board) -->
+<div class="tutdock" id="tutDock"></div>
 
 <section id="replaced" class="screen hidden">
   <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>

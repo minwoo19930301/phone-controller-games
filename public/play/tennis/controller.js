@@ -3,6 +3,11 @@
 // 좌표는 '준비' 때 정한 기준축으로 보냅니다: r = 내 오른쪽, u = 위, f = 화면이 TV 를 보던 방향.
 // 스윙 판별: 회전 속도(rotationRate) 최고값 = 세기, 세계 좌표 가속의 위아래 성분 = 탑스핀(위)/슬라이스(아래),
 // 맞는 순간 화면이 TV 쪽이면 포핸드, 반대면 백핸드.
+// 공통 모듈: 난이도·슬로우 질문(phone-settings), 처음 하는 사람 연습(tutorial), 진동·번쩍임(haptics).
+import { haptics } from '/common/haptics.js';
+import { createPhoneSettings } from '/common/phone-settings.js';
+import { createTutorial } from '/common/tutorial.js';
+
 (() => {
   const $ = (id) => document.getElementById(id);
   const RD = Math.PI / 180;
@@ -55,6 +60,12 @@
     return true;
   }
   const isTouch = navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
+  // 큰 화면이 보내는 진동(공에 맞았을 때 확인), 난이도·슬로우 알약과 질문 카드(준비는 슬로우를 정할 때까지 막힘)
+  haptics.listen(socket, { slot: () => me && me.slot });
+  const ps = createPhoneSettings();
+  ps.attach(socket);
+  ps.mount($('setBox'));
+  ps.bindReady($('btnGo'), { hint: '슬로우 모드를 먼저 골라 주세요 · 누가 골라도 모두에게 적용돼요' });
   let me = null;
   let state = { phase: 'lobby' };
   let roster = [];
@@ -67,6 +78,8 @@
   let noRoomTries = 0;
   let cueHand = 'fore'; // 큰 화면이 알려 준 다음 타구 손(버튼 모드에서 씀)
   let forceBack = false;
+  let readySt = null; // 서버의 모두 준비 현황 { ready, players, away, need }
+  let tutAfterCal = false; // 자세를 맞춘 다음 바로 연습(튜토리얼)으로
 
   function show(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('on', v.id === id);
@@ -302,18 +315,24 @@
       aim: round(aim, 1)
     };
     debug(`swing ${JSON.stringify(data)}\nrot ${rotPeak.toFixed(0)} acc ${accPeak.toFixed(1)} vUp ${vUp.toFixed(2)} vH ${vH.toFixed(2)} vR ${vR.toFixed(2)} sign ${accSign} n ${all.length}`);
-    deliverSwing(data);
+    // 가장 빨리 돈 순간 = 공을 맞히는 순간(연습의 타이밍 판정에 씀)
+    deliverSwing(data, peak.t);
   }
 
-  // 센서 스윙과 버튼 스윙이 같은 길로 나갑니다.
-  function deliverSwing(data) {
-    const live = state.phase === 'playing' && myInfo();
-    if (live) send('swing', data);
+  // 센서 스윙과 버튼 스윙이 같은 길로 나갑니다. hitAt = 공을 맞히는 순간(performance.now 기준)
+  function deliverSwing(data, hitAt) {
     lastSwing = { data, at: performance.now() };
     swish(data.power);
-    if (navigator.vibrate) {
-      try { navigator.vibrate(12); } catch (e) {}
+    // 연습 중이면 연습이 받습니다(큰 화면으로 보내지 않음).
+    if (tut.isRunning()) {
+      tut.signal('swing', { ...data, hitAt: hitAt ?? performance.now() });
+      return;
     }
+    const live = state.phase === 'playing' && myInfo();
+    if (live) send('swing', data);
+    // 스윙을 잡자마자 가볍게 한 번(지연 없음). 공에 맞으면 큰 화면이 확인 진동을 한 번 더 보냅니다.
+    if (mode === 'play') haptics.hit(0.25 + 0.35 * data.power);
+    else haptics.tick({ noFlash: true });
     const label = swingLabel(data);
     if (mode === 'play') {
       // '지금!' 전(예고 중)에 잡힌 스윙은 테이크백일 수 있어 예고를 지우지 않습니다. 판정이 나면 result 가 지웁니다.
@@ -334,7 +353,7 @@
     const p = PRESETS[kind];
     if (!p) return;
     const hand = forceBack ? 'back' : cueHand === 'back' ? 'back' : 'fore';
-    deliverSwing({ power: p.power, ago: 0, rtt: Math.round(rtt()), spin: p.spin, spinAmt: p.spinAmt, hand, aim: 0 });
+    deliverSwing({ power: p.power, ago: 0, rtt: Math.round(rtt()), spin: p.spin, spinAmt: p.spinAmt, hand, aim: 0 }, performance.now());
   }
 
   // ---------- 서버까지 왕복 시간 ----------
@@ -405,16 +424,8 @@
   }
   const thud = () => tone(170, 0.2, 0.35, 'triangle');
   const swish = (power) => noise(0.16, 700 + 900 * power, 0.7, 0.15 + 0.3 * power);
-  function buzz(pattern) {
-    if (navigator.vibrate) {
-      try { navigator.vibrate(pattern); } catch (e) {}
-    }
-    // iPhone 은 진동이 없어 화면을 번쩍입니다.
-    const f = $('flash');
-    f.classList.remove('go');
-    void f.offsetWidth;
-    f.classList.add('go');
-  }
+  // 진동 무늬(진동이 없는 iPhone·PC 는 공통 모듈이 화면 번쩍임으로 바꿈). 소리는 이 페이지가 따로 냅니다.
+  const buzz = (pattern, o = {}) => haptics.buzz(pattern, { silent: true, ...o });
 
   // ---------- 자세 맞추기 ----------
   let countTimer = null;
@@ -426,7 +437,7 @@
     $('btnReady').classList.remove('hidden');
     $('btnCalCancel').classList.toggle('hidden', !(basis || state.phase !== 'playing' || !myInfo()));
     $('calT').textContent = basis ? '다시 맞춥니다' : '라켓처럼 쥡니다';
-    $('calB').textContent = '폰 아래쪽을 라켓 손잡이처럼 쥐고,\n화면이 TV를 보게 한 뒤 준비를 누릅니다.';
+    $('calB').textContent = '폰 아래쪽을 라켓 손잡이처럼 쥐고,\n화면이 TV를 보게 한 뒤 아래 버튼을 누릅니다.';
     show('vCal');
   }
   function startCountdown() {
@@ -444,14 +455,14 @@
     $('calT').textContent = '그대로 멈추십시오';
     $('calB').textContent = '라켓을 쥔 자세 그대로, 화면이 TV를 보게 둡니다.';
     tick();
-    if (navigator.vibrate) navigator.vibrate(15);
+    buzz([15], { noFlash: true });
     clearInterval(countTimer);
     countTimer = setInterval(() => {
       n -= 1;
       if (n > 0) {
         $('calN').textContent = n;
         tick();
-        if (navigator.vibrate) navigator.vibrate(15);
+        buzz([15], { noFlash: true });
         return;
       }
       clearInterval(countTimer);
@@ -479,6 +490,11 @@
     mode = 'idle';
     debug(`calibrate f=${basis.f.map((x) => x.toFixed(2))} top=${top.map((x) => x.toFixed(2))} face=${face.map((x) => x.toFixed(2))}`);
     render();
+    // 처음 하는 사람: 자세를 맞췄으니 바로 연습으로
+    if (tutAfterCal) {
+      tutAfterCal = false;
+      runTutorial();
+    }
   }
 
   // ---------- 화면 상태 ----------
@@ -518,7 +534,8 @@
     $('srvMe').classList.toggle('on', Boolean(info.teamServing));
     $('srvOpp').classList.toggle('on', info.teamServing === false);
     $('callL').textContent = info.call || (info.serving && info.serveNo === 2 ? '세컨드 서브' : '');
-    $('ruleL').textContent = `${state.toWin || 2}게임 선승`;
+    const lv = { easy: '쉬움', normal: '보통', hard: '어려움' }[ps.difficulty()] || '';
+    $('ruleL').textContent = `${state.toWin || 2}게임 선승${lv ? ` · ${lv}` : ''}`;
   }
 
   let cueOn = false;
@@ -547,6 +564,9 @@
     idleOrb();
     show('vPlay');
   }
+  const CHECK_SVG = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  const SLOT_COLOR = { 1: '#ff5a5f', 2: '#3ab4ff', 3: '#ffc93c', 4: '#5ee07a' };
+  const iAmReady = () => Boolean(me && readySt && Array.isArray(readySt.ready) && readySt.ready.includes(me.slot));
   function showWait(info) {
     mode = 'wait';
     const phase = state.phase;
@@ -557,23 +577,29 @@
     }
     if (fallback) chips.push(['조작', '버튼']);
     else if (gotOri) chips.push(['라켓 자세', basis ? '맞춤' : '아직', basis ? 'ok' : '']);
-    $('btnGo').style.display = '';
+    const btn = $('btnGo');
+    btn.style.display = '';
+    const ready = iAmReady();
+    // 준비 버튼: 누르면 '준비 완료 ✓'(다른 사람을 기다림). 서버가 모두 준비되면 큰 화면에 한 번만 시작을 넘깁니다.
+    const label = phase === 'over' ? '다시 하기' : '준비';
+    btn.classList.toggle('done', ready);
+    if (ready) btn.innerHTML = `<i>${CHECK_SVG}</i>${phase === 'over' ? '다시 하기 · 준비 완료' : '준비 완료'}`;
+    else btn.textContent = label;
     if (phase === 'over') {
       const g = info && Array.isArray(info.games) ? info.games : null;
       $('waitT').textContent = info && info.win ? '승리!' : info && info.win === false ? '패배' : '경기 끝';
-      $('waitB').textContent = g ? `게임 ${g[0]} : ${g[1]}\n큰 화면에서 결과를 확인합니다.` : '큰 화면에서 결과를 확인합니다.';
-      $('btnGo').textContent = '다시 하기';
+      $('waitB').textContent = g ? `게임 ${g[0]} : ${g[1]}\n모두 다시 하기를 누르면 다음 판이에요.` : '모두 다시 하기를 누르면 다음 판이에요.';
     } else if (phase === 'playing') {
       $('waitT').textContent = '관전 중';
       $('waitB').textContent = '지금 경기가 끝나면 함께할 수 있습니다.';
-      $('btnGo').style.display = 'none';
+      btn.style.display = 'none';
     } else {
       $('waitT').textContent = '대기실';
       $('waitB').textContent = basis || fallback || !gotOri
-        ? '모두 들어오면 게임 시작을 누릅니다.'
-        : '모두 들어오면 게임 시작을 누릅니다.\n먼저 라켓 자세를 맞춰 두면 바로 칠 수 있습니다.';
-      $('btnGo').textContent = '게임 시작';
+        ? '모두 준비를 누르면 시작해요.'
+        : '모두 준비를 누르면 시작해요.\n먼저 라켓 자세를 맞춰 두면 바로 칠 수 있어요.';
     }
+    paintWho(phase !== 'playing');
     setChips(chips, 'waitChips');
     const canCal = gotOri && !fallback;
     $('btnCalLobby').classList.toggle('hidden', !canCal);
@@ -582,6 +608,18 @@
     const recent = lastSwing && performance.now() - lastSwing.at < 4000;
     if (!recent) p.textContent = basis && gotMotion && phase !== 'playing' ? '휘둘러 보면 감지한 스윙이 여기 뜹니다.' : '';
     show('vWait');
+  }
+  // 누가 아직 준비 전인지(내 폰에도 보여 줌)
+  function paintWho(on) {
+    const box = $('whoWait');
+    const st = readySt;
+    if (!on || !st || !Array.isArray(st.players) || st.players.length < 1 || !me) { box.textContent = ''; return; }
+    const waiting = st.players.filter((sl) => !st.ready.includes(sl));
+    if (!waiting.length) { box.textContent = '모두 준비! 곧 시작해요'; return; }
+    if (st.players.length < 2) { box.textContent = ''; return; }
+    const away = st.away || [];
+    box.innerHTML = `<span>${iAmReady() ? '기다리는 중' : '준비 현황'}</span>` + st.players.map((sl) =>
+      `<b class="${st.ready.includes(sl) ? 'on' : ''}${away.includes(sl) ? ' away' : ''}" style="--pc:${SLOT_COLOR[sl] || '#fff'}">${sl}P${st.ready.includes(sl) ? ' ✓' : ''}</b>`).join('');
   }
   function render() {
     if (!me) return;
@@ -659,9 +697,15 @@
   socket.on('replaced', () => message('다른 탭에서 열었습니다', '마지막으로 연 화면에서 조작합니다.'));
   socket.on('room_closed', () => message('방이 닫혔습니다', '큰 화면의 새 QR을 찍어 주십시오.'));
 
+  socket.on('ready_state', (st) => {
+    readySt = st && typeof st === 'object' ? st : null;
+    if (mode === 'wait') render();
+  });
   socket.on('game_state', (s) => {
     const prev = state.phase;
     state = s && typeof s === 'object' ? s : { phase: 'lobby' };
+    // 내가 들어간 경기가 시작됐는데 연습 중이면(드묾) 연습을 닫습니다.
+    if (state.phase === 'playing' && myInfo() && tut.isRunning()) tut.cancel();
     if (state.phase === 'playing' && prev !== 'playing') {
       $('resT').textContent = '';
       $('resT').className = 't';
@@ -684,7 +728,7 @@
         orb.textContent = c.second ? '세컨드 서브' : '내 서브';
         $('status').textContent = '토스가 올라갑니다. 공이 내려오며 링이 닫힐 때 휘두릅니다.';
       }
-      if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
+      buzz([20, 50, 20], { noFlash: true });
       return;
     }
     cueOn = true;
@@ -698,9 +742,7 @@
       orb.textContent = c.kind === 'serve' ? '준비' : '공이 옵니다';
       $('status').textContent = c.kind === 'serve' ? '공이 내려옵니다. 지금! 이 뜨면 휘두릅니다.'
         : `${c.hand === 'back' ? '백핸드' : '포핸드'}로 준비합니다. 지금! 이 뜨면 휘두릅니다.`;
-      if (navigator.vibrate) {
-        try { navigator.vibrate(15); } catch (e) {}
-      }
+      buzz([15], { noFlash: true });
       return;
     }
     // stage 'now'(또는 stage 없는 예전 화면): 큰 화면이 타점 직전에 맞춰 보냅니다.
@@ -725,13 +767,195 @@
     if (lastSwing && performance.now() - lastSwing.at < 1500) chips.push(['감지', swingLabel(lastSwing.data)]);
     setChips(chips);
     if (r.good) {
-      // 잘 맞으면 '퐁' 하고 손에 묵직하게 울립니다.
-      buzz([35, 30, 80]);
+      // 잘 맞으면 '퐁'. 손에 오는 진동은 큰 화면이 haptic 으로 따로 보냅니다(맞힌 순간 확인).
       pong();
     } else {
       thud();
     }
   });
+
+  // ---------- 처음 하는 사람 연습(튜토리얼) ----------
+  // 이 폰에서 처음이면(localStorage 'pcg-tut-tennis') 시작하기 → 라켓 자세 맞추기 → 4단계 연습. 진행은 큰 화면 대기실에 칸으로 뜹니다.
+  // 판정은 경기와 같은 스윙 감지기(finishSwing)의 값으로 합니다. 센서가 없는 폰·PC 는 단계 안의 버튼으로 해 볼 수 있습니다.
+  const TUT_PAD_LABEL = { fore: '포핸드로 치기', back: '백핸드로 치기', top: '탑스핀', slice: '슬라이스', now: '지금 치기' };
+  function tutSwing(kind) {
+    audio();
+    const hand = kind === 'back' ? 'back' : 'fore';
+    const spin = kind === 'top' || kind === 'slice' ? kind : 'none';
+    deliverSwing({ power: 0.75, ago: 0, rtt: Math.round(rtt()), spin, spinAmt: spin === 'none' ? 0 : 0.8, hand, aim: 0 }, performance.now());
+  }
+  // 센서가 없을 때(또는 &debug) 단계 안에 버튼을 붙입니다.
+  function tutPads(stage, kinds) {
+    if (!fallback && !DEBUG) return null;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `<div class="tut-pads">${kinds.map((k) => `<button type="button" data-k="${k}">${TUT_PAD_LABEL[k]}</button>`).join('')}</div>` +
+      `<div class="tut-pads-note">${fallback ? '동작 센서가 없어 버튼으로 해 봐요' : '시험용 버튼'}</div>`;
+    wrap.addEventListener('pointerdown', (e) => {
+      const b = e.target.closest('button[data-k]');
+      if (!b) return;
+      e.preventDefault();
+      tutSwing(b.dataset.k);
+    });
+    stage.appendChild(wrap);
+    return () => wrap.remove();
+  }
+  // 타이밍 연습: 원이 공으로 닫히는 순간(큰 화면의 링과 같음) 휘두릅니다. 허용 폭은 난이도를 따릅니다.
+  const RING = { cycle: 1900, close: 1350, t0: 0 };
+  const tutTol = () => ps.pick({ easy: 300, normal: 220, hard: 150 });
+  function nearestClose(t) {
+    const k = Math.round((t - RING.t0 - RING.close) / RING.cycle);
+    return RING.t0 + RING.close + k * RING.cycle;
+  }
+  function timingStage(stage) {
+    const box = document.createElement('div');
+    box.innerHTML = `<div class="tut-ring"><svg viewBox="-100 -100 200 200" aria-hidden="true">` +
+      `<circle class="halo" r="78"/><circle class="ring" r="78"/>` +
+      `<g><circle r="17" fill="#d9f24a"/><path d="M-12 -11c7 4 9 13 5 22M12 -11c-7 4-9 13-5 22" fill="none" stroke="#f7ffd0" stroke-width="2.4" stroke-linecap="round"/></g>` +
+      `</svg><div class="mark"></div><div class="tag">기다려요</div></div>`;
+    stage.appendChild(box);
+    const pads = tutPads(stage, ['now']);
+    const ring = box.querySelector('.ring');
+    const tag = box.querySelector('.tag');
+    RING.t0 = performance.now();
+    let raf = 0;
+    let lastTick = -1;
+    const loop = () => {
+      const t = performance.now() - RING.t0;
+      const u = t % RING.cycle;
+      const k = Math.floor(t / RING.cycle);
+      // 열린 원(78) → 공 크기(21)로 일정하게 닫히고(큰 화면 링과 같음), 닫힌 뒤 잠깐 머물렀다 다시 열립니다.
+      const r = u <= RING.close ? 78 - 57 * (u / RING.close) : 21 + (57 * Math.max(0, u - RING.close - 260)) / (RING.cycle - RING.close - 260);
+      ring.setAttribute('r', Math.max(21, Math.min(78, r)).toFixed(1));
+      const now = Math.abs(u - RING.close) < 170;
+      ring.classList.toggle('close', now);
+      tag.classList.toggle('now', now);
+      tag.textContent = now ? '지금!' : u < RING.close ? '기다려요' : '한 번 더';
+      if (now && lastTick !== k) {
+        lastTick = k;
+        tick();
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    loop();
+    return () => {
+      cancelAnimationFrame(raf);
+      if (pads) pads();
+      box.remove();
+    };
+  }
+  function ringMark(text, good) {
+    const m = document.querySelector('.tut-ring .mark');
+    if (!m) return;
+    m.textContent = text;
+    m.className = `mark ${good ? 'good' : 'bad'}`;
+    void m.offsetWidth;
+    m.classList.add('on');
+  }
+  function timingCheck(d) {
+    const t = Number(d && d.hitAt) || performance.now();
+    const off = t - nearestClose(t);
+    if (Math.abs(off) <= tutTol()) {
+      ringMark(Math.abs(off) < tutTol() * 0.4 ? 'PERFECT' : 'GOOD', true);
+      return true;
+    }
+    ringMark(off < 0 ? '빨라요' : '늦어요', false);
+    return off < 0 ? '조금 빨라요 · 원이 공에 닿을 때 휘둘러요' : '조금 늦어요 · 원이 닫히는 순간이에요';
+  }
+  // 스핀: 쓸어 올리면 탑스핀, 깎아 내리면 슬라이스. 세 번 해도 안 되면 넘어갑니다(플랫으로도 경기는 잘 돼요).
+  let spinTries = 0;
+  function spinCheck(d) {
+    if (d.spin === 'top') return { ok: true, msg: '탑스핀! 높이 튀어 올라요' };
+    if (d.spin === 'slice') return { ok: true, msg: '슬라이스! 낮게 깔려요' };
+    spinTries += 1;
+    if (spinTries >= 3) return { ok: true, msg: '괜찮아요 · 플랫으로도 경기는 잘 돼요' };
+    return '이건 플랫이에요 · 아래에서 위로 크게 쓸어 올려 봐요';
+  }
+  // 스핀 그림: 폰이 아래에서 위로(탑스핀, 주황) 쓸려 올라가고, 위에서 아래로(슬라이스, 파랑) 깎는 길을 점선으로
+  // 스핀 그림: 3.2초 한 바퀴. 앞 절반은 폰이 아래에서 위로(탑스핀, 주황) 쓸려 올라가고, 뒤 절반은 위에서 아래로(슬라이스, 파랑) 깎아 내립니다.
+  // 지금 폰이 지나는 길과 이름이 밝아지고, 두 길이 만나는 곳(타점)의 공이 그 방향으로 돕니다.
+  function spinArt() {
+    const phone = '<rect x="-12" y="-22" width="24" height="44" rx="5" class="pcgt-ph"/><rect x="-9" y="-17" width="18" height="32" rx="2.5" class="pcgt-scr"/>';
+    const TOP = 'M26 130 C 76 130, 118 98, 170 38';
+    const SL = 'M26 38 C 76 38, 118 70, 170 124';
+    const D = '3.2s';
+    // 반쪽마다 켜졌다 꺼지는 투명도(뒤 절반은 begin 을 반 바퀴 당김)
+    const blink = (lo, begin) => `<animate attributeName="opacity" dur="${D}" begin="${begin}" repeatCount="indefinite" calcMode="discrete" keyTimes="0;.5" values="1;${lo}"/>`;
+    const ride = (path, begin) => `<g opacity="0">${phone}` +
+      `<animateMotion dur="${D}" begin="${begin}" repeatCount="indefinite" rotate="auto" calcMode="spline" keyTimes="0;.42;1" keyPoints="0;1;1" keySplines=".5 0 .2 1;0 0 1 1" path="${path}"/>` +
+      `${blink(0, begin)}</g>`;
+    const lane = (path, head, color, label, ly, begin) => `<g opacity=".35">` +
+      `<path d="${path}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-dasharray="3 9"/>` +
+      `<path d="${head}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>` +
+      `<text x="146" y="${ly}" fill="${color}" font-size="14" font-weight="900" text-anchor="middle">${label}</text>${blink(0.35, begin)}</g>`;
+    // 공: 탑스핀 반쪽에는 앞으로(시계 방향), 슬라이스 반쪽에는 거꾸로 돕니다.
+    const ball = '<g transform="translate(127 83)"><g><circle r="10" fill="#d9f24a"/>' +
+      '<path d="M-7 -7c4 3 5 10 2 15M7 -7c-4 3-5 10-2 15" fill="none" stroke="#f7ffd0" stroke-width="1.8" stroke-linecap="round"/>' +
+      `<animateTransform attributeName="transform" type="rotate" dur="${D}" repeatCount="indefinite" calcMode="linear" keyTimes="0;.5;1" values="0;540;0"/></g></g>`;
+    return `<svg class="pcgt-svg" viewBox="0 0 200 160" aria-hidden="true">` +
+      lane(TOP, 'M161 33 l10 4 -3 11', '#ff9a4d', '탑스핀', 20, '0s') +
+      lane(SL, 'M160 128 l11 -2 -2 -11', '#8fd8ff', '슬라이스', 152, '-1.6s') +
+      ball + ride(TOP, '0s') + ride(SL, '-1.6s') + '</svg>';
+  }
+  const tut = createTutorial({
+    key: 'tennis',
+    socket,
+    title: '처음이라 라켓 연습부터 해요',
+    steps: [
+      {
+        title: '포핸드로 휘둘러 보기', body: '화면이 TV를 보게 쥔 채\n오른쪽 뒤에서 앞으로 크게 휘둘러요.',
+        svg: 'swing', svgOpts: { from: -70, to: 40 }, waitFor: 'swing', count: 2, hint: '두 번 휘둘러요',
+        check: (d) => d.hand === 'fore' || '그건 백핸드예요 · 화면이 TV 쪽을 보게 휘둘러요',
+        render: (stage) => tutPads(stage, ['fore'])
+      },
+      {
+        title: '백핸드로 휘둘러 보기', body: '손등이 TV 쪽을 보게 돌려 쥐고\n왼쪽 뒤에서 앞으로 휘둘러요.',
+        svg: 'swing', svgOpts: { dir: -1, from: -70, to: 40 }, waitFor: 'swing',
+        check: (d) => (d.hand === 'back' ? { ok: true, msg: '깔끔한 백핸드!' } : '그건 포핸드예요 · 손등 쪽으로 휘둘러요'),
+        render: (stage) => tutPads(stage, ['back'])
+      },
+      {
+        title: '링이 닫힐 때 치기', body: '큰 화면에서도 공 둘레 링이 닫히는 순간 휘둘러요.\n서브도 같아요: 토스가 내려오며 링이 닫힐 때.',
+        waitFor: 'swing', count: 2, hint: '링이 닫힐 때 두 번', okText: '타이밍 좋아요!',
+        check: timingCheck, render: timingStage
+      },
+      {
+        title: '스핀 걸어 보기 (선택)', body: '아래에서 위로 쓸어 올리면 탑스핀,\n위에서 아래로 깎으면 슬라이스예요.',
+        svg: spinArt, waitFor: 'swing', hint: '쓸어 올리거나 깎아 보기',
+        check: spinCheck, render: (stage) => { spinTries = 0; return tutPads(stage, ['top', 'slice']); }
+      }
+    ],
+    finish: { title: '연습 끝!', body: '이제 준비를 누르면 돼요.\n큰 화면에서 공이 느려지고 링이 닫힐 때 휘두르면 됩니다.', button: '대기실로' }
+  });
+  // 연습 시작: 센서가 있는데 아직 라켓 자세를 안 맞췄으면 자세부터(그래야 포핸드·백핸드를 가릴 수 있음)
+  function beginTutorial() {
+    if (tut.isRunning() || mode === 'cal' || mode === 'count') return;
+    if (state.phase === 'playing' && myInfo()) return;
+    if (!fallback && gotOri && !basis) {
+      tutAfterCal = true;
+      openCal();
+      return;
+    }
+    runTutorial();
+  }
+  async function runTutorial() {
+    haptics.unlock();
+    render();
+    await tut.run();
+    render();
+  }
+  // 동작 센서가 들어오는지(또는 버튼 모드로 정해졌는지) 알 때까지 기다립니다.
+  function sensorsKnown() {
+    return new Promise((resolve) => {
+      const t0 = performance.now();
+      const iv = setInterval(() => {
+        if ((gotOri && gotMotion && !DEBUG) || fallback || performance.now() - t0 > SENSOR_WAIT_MS + 400) {
+          clearInterval(iv);
+          resolve();
+        }
+      }, 60);
+    });
+  }
+  tut.link($('tutLink'), { before: () => { beginTutorial(); return false; } });
 
   // ---------- 버튼 ----------
   $('btnStart').addEventListener('click', async () => {
@@ -778,11 +1002,21 @@
       debug('동작 센서 값이 들어오지 않아 버튼으로 칩니다');
       sensorsChanged();
     }, SENSOR_WAIT_MS);
+    // 처음이면 라켓 자세 → 연습. 그동안 큰 화면 대기실에 '연습 중' 칸이 뜨고, 끝내면 준비를 누릅니다.
+    if (tut.firstTime()) {
+      await sensorsKnown();
+      if (mode !== 'msg' && !(state.phase === 'playing' && myInfo())) beginTutorial();
+    }
   });
+  // 준비(다시 하기): 한 번 누르면 '준비 완료 ✓'. 슬로우를 아직 안 정했으면 phone-settings 가 막고 질문 카드를 흔듭니다.
   $('btnGo').addEventListener('click', () => {
     audio();
     if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
-    send('start_game', {});
+    if (iAmReady()) {
+      $('whoWait').animate([{ transform: 'scale(1.06)' }, { transform: 'none' }], { duration: 260 });
+      return;
+    }
+    if (send('start_game', {})) haptics.tick();
   });
   $('btnCalLobby').addEventListener('click', () => {
     audio();
@@ -798,6 +1032,7 @@
     startCountdown();
   });
   $('btnCalCancel').addEventListener('click', () => {
+    tutAfterCal = false;
     clearInterval(countTimer);
     mode = 'idle';
     render();
@@ -817,6 +1052,15 @@
     });
   }
   document.addEventListener('keydown', (e) => {
+    // 연습 중(센서 없음·&debug): F 포핸드, B 백핸드, Space 지금, T 탑스핀, S 슬라이스
+    if (tut.isRunning() && (fallback || DEBUG) && !e.repeat) {
+      const k = { KeyF: 'fore', KeyB: 'back', Space: 'now', KeyT: 'top', KeyS: 'slice' }[e.code];
+      if (k) {
+        e.preventDefault();
+        tutSwing(k);
+      }
+      return;
+    }
     if (!fallback || mode !== 'play' || e.repeat) return;
     const k = e.code === 'Space' ? 'none' : e.code === 'KeyT' ? 'top' : e.code === 'KeyS' ? 'slice' : null;
     if (!k) return;
@@ -845,5 +1089,8 @@
       lastM = motCount;
     }, 500);
   }
-  window.__tennisPad = { get state() { return state; }, get mode() { return mode; }, presetSwing, get fallback() { return fallback; } };
+  window.__tennisPad = {
+    get state() { return state; }, get mode() { return mode; }, presetSwing, get fallback() { return fallback; },
+    tut, ps, haptics, tutSwing, beginTutorial, deliverSwing, get ready() { return iAmReady(); }, get readyState() { return readySt; }
+  };
 })();

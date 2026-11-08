@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0c0a12">
+<title>오케스트라 · 내 악기</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <span class="me" id="me">…</span>
+  <span class="room" id="room"></span>
+  <button type="button" class="inst-chip hidden" id="instChip"><i id="instChipIcon"></i><b id="instChipName"></b></button>
+</header>
+<div class="banner hidden" id="banner"></div>
+<main>
+  <!-- 처음 -->
+  <section class="view center on" id="vStart">
+    <div class="hero" id="heroIcons"></div>
+    <div class="eyebrow">PHONE ORCHESTRA</div>
+    <h1>폰이 악기가 돼요</h1>
+    <p>각자 악기를 하나 골라 다 같이 연주해요.<br>소리는 내 폰에서 나니까 소리를 켜 주세요.</p>
+    <button type="button" class="primary" id="btnStart">시작하기</button>
+    <p class="note hidden" id="httpNote">이 주소는 http라서 동작 센서·마이크가 꺼질 수 있어요. 버튼으로도 할 수 있어요.</p>
+  </section>
+
+  <!-- 알림 -->
+  <section class="view center" id="vMsg">
+    <h1 id="msgT">들어가는 중…</h1>
+    <p id="msgB"></p>
+    <button type="button" class="primary hidden" id="btnMsg"></button>
+  </section>
+
+  <!-- 악기 고르기 -->
+  <section class="view" id="vPick">
+    <div class="pick-head">
+      <div class="eyebrow">악기 고르기</div>
+      <h2>어떤 악기를 맡을까요?</h2>
+      <p>같은 악기도 괜찮지만, 여러 가지면 더 풍성해요.</p>
+    </div>
+    <div class="grid" id="instGrid"></div>
+    <button type="button" class="ghost hidden" id="btnPickBack">돌아가기</button>
+  </section>
+
+  <!-- 대기실 -->
+  <section class="view" id="vLobby">
+    <div class="mycard">
+      <div class="halo"><i id="lobIcon"></i></div>
+      <div class="mycard-txt">
+        <div class="role" id="lobRole"></div>
+        <h2 id="lobName"></h2>
+        <p id="lobHow"></p>
+      </div>
+    </div>
+    <div class="setbox" id="setBox"></div>
+    <div class="roster" id="roster"></div>
+    <div class="grow"></div>
+    <div class="links"><span id="tutLink"></span></div>
+  </section>
+
+  <!-- 곡 고르기 -->
+  <section class="view" id="vSelect">
+    <div class="eyebrow">곡 고르기 · 아무나 넘길 수 있어요</div>
+    <div class="songcard">
+      <img id="selCover" alt="">
+      <div class="songcard-txt">
+        <h2 id="selTitle">큰 화면을 보세요</h2>
+        <p id="selSub"></p>
+        <p class="meta" id="selMeta"></p>
+      </div>
+    </div>
+    <div class="swipe" id="swipe">
+      <div class="swipe-arrows"><span>‹</span><b>밀어서 넘기기</b><span>›</span></div>
+      <div class="swipe-driver" id="selDriver"></div>
+    </div>
+    <button type="button" class="secondary" id="btnPick">이 곡으로 할게요</button>
+    <div class="setbox" id="setBox2"></div>
+  </section>
+
+  <!-- 연습·연주 -->
+  <section class="view stage" id="vStage">
+    <div class="stage-top">
+      <canvas id="scoreCv"></canvas>
+      <div class="free-tag" id="freeTag"><b>자유 연습</b><span>마음껏 소리 내 보세요 · 큰 화면에도 보여요</span></div>
+      <div class="judge" id="judge"></div>
+      <div class="combo" id="combo"></div>
+      <div class="songbar" id="songbar"><i></i></div>
+    </div>
+    <div class="inst-area" id="instArea"></div>
+    <div class="count hidden" id="count"></div>
+  </section>
+
+  <!-- 결과 -->
+  <section class="view center" id="vOver">
+    <div class="eyebrow" id="ovSong"></div>
+    <div class="grade" id="ovGrade">–</div>
+    <div class="grade-word" id="ovWord"></div>
+    <div class="stats" id="ovStats"></div>
+    <div class="ens" id="ovEns"></div>
+    <a class="dl hidden" id="ovDl" href="#" download><b>아까 한 거 다운받기</b><span id="ovDlSub">10분 뒤 사라져요</span></a>
+    <div class="dl-wait hidden" id="ovDlWait">녹화 영상을 올리는 중…</div>
+  </section>
+</main>
+
+<!-- 아래 버튼 줄(대기실·곡 고르기·연습·결과) -->
+<div class="dock hidden" id="dock">
+  <p class="dock-status" id="dockStatus"></p>
+  <button type="button" class="primary" id="btnReady">준비</button>
+  <div class="dock-row">
+    <button type="button" class="ghost small" id="btnChange">악기 바꾸기</button>
+    <button type="button" class="ghost small hidden" id="btnTutorial">연습 다시 하기</button>
+  </div>
+</div>
+<div class="debug" id="debug"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script type="module" src="controller.js"></script>
+</body>
+</html>

@@ -1,4 +1,5 @@
-// 광선검 큰 화면 소리: 드론 발사, 충전, 칼에 튕기는 소리, 격추 폭발, 피격, 점화, 슬로우, 웨이브 경보, 카운트다운, 박수.
+// 광선검 큰 화면 소리: 드론 발사, 충전, 칼에 튕기는 소리, 격추 폭발, 피격, 점화, 슬로우, 웨이브 경보, 카운트다운, 박수,
+// 로봇 검투(예고 충전, 로봇 칼 휘두름, 칼끼리 부딪힘, 베기, 로봇 쓰러짐).
 // 칼날의 웅웅 소리는 각자 폰 스피커에서 납니다. 큰 화면은 훈련장 바탕 소음만 아주 작게 깔아 둡니다.
 import { modal, grit, organ, marimba, bell, chip, pluck, brass, phrase } from '/common/voice.js';
 let actx = null;
@@ -175,5 +176,57 @@ export const sfx = {
     if (!ready()) return;
     brass(actx, master, 220, 0.25, { gain: 0.05 });
     brass(actx, master, 330, 0.35, { gain: 0.04, when: 0.12 });
+  },
+
+  // ---------- 로봇 검투 ----------
+  // 로봇이 칼을 들어 올리며 힘을 모으는 소리(서보 윙 + 충전). 찌르기는 더 낮고 짧게.
+  windup(kind) {
+    const low = kind === 'thrust';
+    tone(low ? 150 : 210, 0.5, 0.05, 'sawtooth', low ? 2.2 : 2.6);
+    tone(low ? 300 : 420, 0.42, 0.025, 'square', 1.9);
+    noise(0.45, 400, 0.9, 0.08, 0.2, 'bandpass', 1800);
+  },
+  // 로봇 칼이 휙 지나가는 소리
+  robotSwing() {
+    noise(0.32, 260, 0.8, 0.42, 0.04, 'bandpass', 2400);
+    tone(95, 0.3, 0.14, 'sawtooth', 1.7);
+  },
+  // 칼과 칼이 부딪힘: 높은 금속 배음 + 지직거림 + 낮은 쿵
+  clash() {
+    noise(0.12, 5200, 0.7, 0.6, 0, 'highpass');
+    for (const [f, g] of [[1960, 0.08], [2770, 0.06], [3520, 0.05], [1180, 0.07], [620, 0.06]]) tone(f * (0.97 + Math.random() * 0.06), 0.42 + Math.random() * 0.2, g, 'sawtooth', 0.88);
+    noise(0.5, 2200, 2.2, 0.26, 0.004, 'bandpass', 500);
+    tone(82, 0.32, 0.3, 'sine', 0.45);
+    for (let i = 0; i < 7; i++) setTimeout(() => noise(0.035, 2400 + Math.random() * 3200, 1.5, 0.16), 30 + Math.random() * 320);
+  },
+  // 로봇 장갑을 베었을 때: 지글거림 + 쇠 울림. 연타일수록 높게
+  slash(n = 1) {
+    const k = Math.min(3, n);
+    noise(0.28, 3200, 0.8, 0.42, 0.003, 'bandpass', 900);
+    tone(520 + k * 120, 0.32, 0.08, 'triangle', 0.6);
+    tone(140, 0.2, 0.24, 'sine', 0.5);
+    noise(0.6, 1200, 0.5, 0.12, 0.05, 'lowpass', 300);
+  },
+  robotIgnite() {
+    noise(0.6, 220, 1.4, 0.32, 0.02, 'bandpass', 1900);
+    tone(52, 0.8, 0.2, 'sawtooth', 1.7);
+    tone(104, 0.7, 0.08, 'sawtooth', 1.6);
+  },
+  // 로봇이 쓰러짐: 전원이 꺼지며 내려가는 소리 + 폭발
+  robotDown() {
+    tone(420, 1.4, 0.14, 'sawtooth', 0.08);
+    tone(210, 1.2, 0.1, 'square', 0.12);
+    noise(1.2, 900, 0.5, 0.6, 0.004, 'lowpass', 90);
+    for (let i = 0; i < 10; i++) setTimeout(() => noise(0.05, 1800 + Math.random() * 3000, 1, 0.2), 120 + Math.random() * 900);
+  },
+  lose() {
+    if (!ready()) return;
+    for (const [s, w] of [[0, 0], [-2, 0.4], [-5, 0.8]]) brass(actx, master, 146.8 * Math.pow(2, s / 12), 0.55, { gain: 0.05, when: w });
+  },
+  // 검투 시작: 낮은 징 같은 울림
+  duelStart() {
+    tone(65, 1.6, 0.2, 'sine', 0.98);
+    tone(131, 1.3, 0.08, 'triangle', 0.99);
+    noise(0.9, 300, 0.6, 0.12, 0.01, 'lowpass', 120);
   }
 };

@@ -88,13 +88,93 @@
   .pads button:first-child { background: var(--c); color: #0b0f17; border-color: var(--c); }
   .pads-hint { margin-top: 8px; font-size: 12px; text-align: center; }
 
-  #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 5; }
-  #flash.go { animation: flash .45s ease-out; }
-  #flash.deflect { background: #fff; }
-  #flash.hurt { background: radial-gradient(circle, rgba(255,40,70,.2), rgba(255,20,60,.9)); }
-  #flash.kill { background: radial-gradient(circle, #fff3c4, #ff8a2a); }
-  #flash.cue { background: radial-gradient(circle, transparent 40%, rgba(255,61,223,.75)); }
-  @keyframes flash { from { opacity: .85; } to { opacity: 0; } }
+  /* 대기 화면: 위(제목) · 가운데(모드·난이도) · 아래(준비) */
+  .wait { gap: 12px; overflow-y: auto; touch-action: pan-y; padding: 6px 0 2px; scrollbar-width: none; }
+  .wait::-webkit-scrollbar { display: none; }
+  .wait-top { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; margin-top: auto; }
+  .wait-top .big { font-size: 36px; }
+  .setbox { width: 100%; }
+  .setbox:empty { display: none; }
+  .wait .practice { text-align: center; }
+  .wait .practice:empty { display: none; }
+  .wait-bottom { display: flex; flex-direction: column; align-items: stretch; gap: 10px; margin-top: auto; }
+  .readyrow { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; font-size: 13px; font-weight: 700; color: var(--dim); }
+  .readyrow .rp { display: inline-flex; align-items: center; gap: 3px; padding: 4px 10px; border-radius: 999px; font-family: Anton, Impact, sans-serif;
+    font-size: 15px; letter-spacing: .02em; color: var(--pc); box-shadow: inset 0 0 0 1.5px var(--pc); }
+  .readyrow .rp.on { background: var(--pc); color: #0b0f17; box-shadow: none; }
+  .readyrow .rp.off { opacity: .45; }
+  .readyrow .rp.mine { outline: 2px solid rgba(255,255,255,.5); outline-offset: 2px; }
+  .readyrow .rt { flex-basis: 100%; text-align: center; margin-top: 2px; }
+  .primary.go { position: relative; transition: background .2s, color .2s, box-shadow .2s; }
+  .primary.go.done { background: rgba(255,255,255,.06); color: var(--fg); box-shadow: inset 0 0 0 2px var(--c); }
+  .primary.go.done small { display: block; margin-top: 3px; font-size: 13px; font-weight: 700; color: var(--dim); }
+  .tutlink { display: flex; justify-content: center; min-height: 0; }
+  .tutlink:empty { display: none; }
+
+  /* 로봇 검투: 로봇 체력 줄 */
+  .robotrow { display: flex; align-items: center; gap: 10px; margin: 0 0 6px; padding: 9px 14px; border-radius: 16px;
+    background: rgba(30,4,28,.45); border: 1px solid rgba(255,61,223,.3); }
+  .robotrow .rn { font-family: Anton, Impact, sans-serif; font-size: 18px; letter-spacing: .1em; color: #ffc6f1; }
+  .robotrow .rbar { flex: 1; height: 12px; border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden; }
+  .robotrow .rbar i { display: block; height: 100%; width: 100%; border-radius: 99px; background: linear-gradient(90deg, #a2148d, #ff3ddf 60%, #ff9df0);
+    box-shadow: 0 0 12px #ff3ddf; transition: width .25s; }
+  .robotrow b { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 20px; min-width: 2.2em; text-align: right; }
+  .robotrow.open { border-color: #ffd23a; box-shadow: 0 0 22px rgba(255,210,58,.35); }
+
+  /* 공격 예고·빈틈(베기) 큰 표시 */
+  .dcue { position: absolute; left: 0; right: 0; top: 50%; z-index: 3; transform: translateY(-50%) scale(.9); display: flex; flex-direction: column;
+    align-items: center; gap: 6px; padding: 18px 14px 16px; border-radius: 24px; opacity: 0; pointer-events: none;
+    background: radial-gradient(120% 120% at 50% 40%, rgba(70,6,62,.94), rgba(16,4,22,.94)); border: 2px solid #ff3ddf;
+    box-shadow: 0 0 50px rgba(255,61,223,.55); transition: opacity .1s, transform .2s cubic-bezier(.2,1.5,.4,1); }
+  .dcue.on { opacity: 1; transform: translateY(-50%) scale(1); }
+  .dcue .ic { width: 96px; height: 70px; }
+  .dcue .ic svg { width: 100%; height: 100%; fill: none; stroke: #ff3ddf; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round;
+    filter: drop-shadow(0 0 10px #ff3ddf); animation: blink .28s infinite alternate; }
+  .dcue .ic svg .dot { fill: #ff3ddf; }
+  .dcue b { font-size: 38px; font-weight: 900; letter-spacing: -.03em; line-height: 1.1; }
+  .dcue span { font-size: 16px; font-weight: 700; color: #ffc6f1; }
+  .dcue .cb { font-size: 13px; font-weight: 900; padding: 3px 10px; border-radius: 999px; background: #ffd23a; color: #1a1200; }
+  .dcue .cb:empty { display: none; }
+  .dcue .bar { width: 80%; height: 6px; margin-top: 4px; border-radius: 99px; background: rgba(255,255,255,.12); overflow: hidden; }
+  .dcue .bar i { display: block; height: 100%; width: 100%; background: #ff3ddf; transform-origin: left center; }
+  .dcue.go .bar i { animation: drain var(--ms, 1s) linear forwards; }
+  @keyframes drain { to { transform: scaleX(0); } }
+  .dcue.open { background: radial-gradient(120% 120% at 50% 40%, rgba(90,60,6,.94), rgba(26,16,2,.94)); border-color: #ffd23a; box-shadow: 0 0 50px rgba(255,210,58,.55); }
+  .dcue.open b { font-size: 46px; background: linear-gradient(180deg, #fffbe0, #ffd23a 55%, #ff9d1a); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .dcue.open span { color: #fff3c4; }
+  .dcue.open .bar i { background: #ffd23a; }
+  .dcue.open .ic svg { stroke: #ffd23a; filter: drop-shadow(0 0 10px #ffd23a); }
+  /* 버튼 모드는 무대가 좁아 예고 카드를 작게 */
+  body.fb .dcue { padding: 10px 12px; gap: 3px; border-radius: 18px; }
+  body.fb .dcue .ic { width: 64px; height: 44px; }
+  body.fb .dcue b { font-size: 28px; }
+  body.fb .dcue.open b { font-size: 32px; }
+  body.fb .dcue span { font-size: 14px; }
+
+  /* 버튼 모드에서 검투 막기 버튼 */
+  .dpads { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .dpads button { padding: 14px 0; border-radius: 14px; background: rgba(255,61,223,.12); color: var(--fg); border: 1.5px solid rgba(255,61,223,.4);
+    font-size: 16px; font-weight: 800; }
+  .dpads button.hot { background: #ff3ddf; color: #0b0f17; border-color: #fff; animation: blink .25s infinite alternate; }
+
+  /* 연습(튜토리얼) 안 표시 */
+  .tut-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 6px; }
+  .tut-btn { appearance: none; border: 0; margin: 0; padding: 14px 18px; border-radius: 15px; background: var(--c); color: #0b0f17;
+    font: 800 17px/1.1 "Pretendard Variable", Pretendard, system-ui, sans-serif; cursor: pointer; min-width: 120px; }
+  .tut-btn.alt { background: rgba(255,255,255,.08); color: var(--fg); box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.2); }
+  .tut-live { min-height: 20px; margin-top: 4px; font-size: 14px; font-weight: 700; color: #cfd8e6; }
+  .tut-gauge { display: block; width: min(70vw, 260px); height: auto; margin: 0 auto; overflow: visible; }
+  .tut-gauge .zone { fill: none; stroke: rgba(255,255,255,.12); stroke-width: 16; stroke-linecap: round; }
+  .tut-gauge .zone.want { stroke: color-mix(in srgb, var(--c) 35%, transparent); }
+  .tut-gauge .zone.in { stroke: var(--c); }
+  .tut-gauge .bl { stroke: #fff; stroke-width: 6; stroke-linecap: round; filter: drop-shadow(0 0 6px var(--c)); }
+  .tut-gauge .hl { fill: #aeb4be; }
+  .tut-gauge text { fill: #9aa8bf; font: 800 12px "Pretendard Variable", Pretendard, system-ui, sans-serif; }
+  .tut-hold { display: block; width: 92px; height: 92px; margin: 2px auto 0; }
+  .tut-hold circle { fill: none; stroke-width: 8; }
+  .tut-hold .bg { stroke: rgba(255,255,255,.1); }
+  .tut-hold .fg { stroke: var(--c); stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; transition: stroke-dashoffset .1s linear; }
+  .tut-hold text { fill: #fff; font: 900 20px "Pretendard Variable", Pretendard, system-ui, sans-serif; }
   .debug { position: fixed; left: 8px; right: 8px; bottom: calc(env(safe-area-inset-bottom) + 4px); font: 11px ui-monospace, monospace;
     color: rgba(255,255,255,.45); white-space: pre-wrap; pointer-events: none; z-index: 6; }
 </style>
@@ -130,13 +210,20 @@
   <section class="view center" id="vMsg"><h1 id="msgT"></h1><p id="msgB"></p><button class="ghost hidden" id="btnMsg" style="max-width:280px"></button></section>
 
   <!-- 대기실 · 경기 끝 · 관전 -->
-  <section class="view center" id="vWait">
-    <div class="big" id="waitT">대기실</div>
-    <p id="waitB"></p>
-    <div class="chips" id="waitChips"></div>
+  <section class="view wait" id="vWait">
+    <div class="wait-top">
+      <div class="big" id="waitT">대기실</div>
+      <p id="waitB"></p>
+      <div class="chips" id="waitChips"></div>
+    </div>
+    <div class="setbox" id="setBox"></div>
     <div class="practice" id="practice"></div>
-    <button class="primary" id="btnGo" style="margin-top:8px">게임 시작</button>
-    <button class="ghost" id="btnCalLobby">칼자루 자세 맞추기</button>
+    <div class="wait-bottom">
+      <div class="readyrow hidden" id="readyRow"></div>
+      <button class="primary go" id="btnGo">준비</button>
+      <button class="ghost" id="btnCalLobby">칼자루 자세 맞추기</button>
+      <div class="tutlink" id="tutLink"></div>
+    </div>
   </section>
 
   <!-- 자세 맞추기 -->
@@ -153,8 +240,8 @@
     <div class="count hidden" id="calN">3</div>
     <h1 id="calT">칼자루처럼 쥡니다</h1>
     <p id="calB">폰을 칼자루처럼 세워 쥐고
-화면이 나를 보게 한 뒤 준비를 누릅니다.</p>
-    <button class="primary" id="btnReady" style="margin-top:6px">준비</button>
+화면이 나를 보게 한 뒤 버튼을 누릅니다.</p>
+    <button class="primary" id="btnReady" style="margin-top:6px">자세 맞추기</button>
     <button class="ghost hidden" id="btnCalCancel">돌아가기</button>
   </section>
 
@@ -167,8 +254,10 @@
         <div class="hpbar" id="hpBar"><i id="hpFill"></i></div>
       </div>
     </div>
+    <div class="robotrow hidden" id="robotRow"><span class="rn" id="rName">KR-07</span><div class="rbar"><i id="rFill"></i></div><b id="rHp">100</b></div>
     <div class="stage">
       <div class="cue" id="cue"></div>
+      <div class="dcue" id="dcue"><div class="ic" id="dcIc"></div><em class="cb" id="dcCb"></em><b id="dcT"></b><span id="dcB"></span><div class="bar"><i></i></div></div>
       <div class="blade" id="blade"></div>
       <div class="hilt"></div>
       <div class="status" id="status">곧 시작해요</div>
@@ -176,6 +265,11 @@
     </div>
     <div class="hidden" id="fallback">
       <div class="pad" id="pad"><div class="dotp" id="padDot"></div><span>끌어서 칼 방향 바꾸기 (위 = 칼 세우기)</span></div>
+      <div class="dpads hidden" id="dpads">
+        <button data-z="left">◀ 왼쪽</button>
+        <button data-z="overhead">위로 눕히기</button>
+        <button data-z="right">오른쪽 ▶</button>
+      </div>
       <div class="pads">
         <button id="btnSwing">휘두르기</button>
         <button id="btnGuard">가운데로</button>
@@ -184,10 +278,9 @@
     </div>
   </section>
 </main>
-<div id="flash"></div>
 <div class="debug" id="debug"></div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
-<script src="controller.js"></script>
+<script type="module" src="controller.js"></script>
 </body>
 </html>

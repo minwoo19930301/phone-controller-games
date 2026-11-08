@@ -1,18 +1,49 @@
 // 탁구 큰 화면: 경기 진행(테이블 A·B), 슬로우 모션, 타이밍 판정, 위치 보정, CPU, 화면 분할 HUD, 소켓, 시험용 봇.
 // 서버는 방과 이벤트만 중계하고 판정은 모두 여기서 합니다.
+// 난이도(쉬움·보통·어려움)와 슬로우 모드(처음엔 물어봄)는 공통 settings 모듈이 들고, 경기 시작 때 TUNE 으로 바꿔 씁니다.
 import * as THREE from 'three';
 import { createScene, TABLE_X, ARENA_CX } from './scene.js';
 import { TABLE, BALL_R, clamp, fwdOf, rightOf, simulate, sampleFlight, flightEnd, aimShot, planContact, lateContactTime } from './physics.js';
 import { createHud } from './hud.js';
 import { sfx, audio } from './sfx.js';
+import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
+import { createTutorialBoard } from '/common/tutorial-board.js';
+import { sendHaptic } from '/common/haptics.js';
 
 const WIN_POINTS = 7;
-const WINDOW = 0.12; // 판정 창(경기 초)
-const PERFECT = 0.03;
-const GOOD = 0.07;
 const SLOW = 0.22; // 슬로우 배율
-const SLOW_LEAD = 0.32; // 타점까지 이 시간(경기 초) 안이면 슬로우
 const GRACE_MS = 230; // 판정 창이 닫힌 뒤, 늦게 도착하는 스윙을 기다리는 실제 시간
+// 난이도별 보정. 어려움 = 예전 그대로(판정 창 ±0.12초, 조준이 좌우를 정함, 실수 확률 그대로, CPU 그대로).
+// 쉬움·보통은 '휘둘렀나, 포핸드/백핸드가 맞나' 같은 큰 동작 위주로 보고, 정확한 방향은 떨어지는 곳을 살짝만 옮깁니다.
+//   window: 판정 창(경기 초, ±), perfect/good: 판정 글자 기준, lead: 타점 몇 초 전부터 슬로우·링·'지금!'
+//   assist: physics.aimShot 보정(nudge = 조준이 옮기는 비율, risk/pressure = 네트·아웃 확률 배율, powerK = 세기 모으기)
+//   earlyFree: 창보다 이른 스윙은 헛스윙 대신 연습 스윙, replace: 공에 닿기 전 더 잘 맞춘 스윙으로 바꿈,
+//   rescue: 늦게 휘둘러 공이 지나갔어도 칠 수 있던 마지막 순간에 맞힘,
+//   hand: 반대 손(포핸드 공을 백핸드로)일 때 — auto 자동으로 맞춤, soft 조금 약해짐, strict 많이 약해짐
+//   cpu: CPU 실수 확률·세기·회전
+//   rally: 긴 랠리(쉬움·보통) — 한 점 안에서 from 번째 타구부터 한 번 칠 때마다 실수 확률이 per 씩 붙습니다(CPU 포함).
+//     보정 덕에 둘 다 거의 다 넣으면 한 점이 끝나지 않아(봇끼리 90초에 158타·1점) 경기가 늘어지기 때문입니다. 어려움은 예전 그대로.
+const TUNE = {
+  easy: {
+    window: 0.3, perfect: 0.07, good: 0.16, lead: 0.44,
+    assist: { nudge: 0.1, risk: 0.12, pressure: 0.15, powerK: 0.35 },
+    earlyFree: true, replace: true, rescue: true, hand: 'auto', handQ: 1, rally: { from: 8, per: 0.025 },
+    cpu: { miss: 0.2, smashMiss: 0.4, heavyMiss: 0.16, smash: 0.2, q: [0.35, 0.8], power: [0.25, 0.65], spinAmt: [0.15, 0.5] }
+  },
+  normal: {
+    window: 0.2, perfect: 0.045, good: 0.11, lead: 0.38,
+    assist: { nudge: 0.25, risk: 0.4, pressure: 0.45, powerK: 0.65 },
+    earlyFree: true, replace: true, rescue: true, hand: 'soft', handQ: 0.85, rally: { from: 6, per: 0.03 },
+    cpu: { miss: 0.12, smashMiss: 0.33, heavyMiss: 0.13, smash: 0.35, q: [0.45, 0.9], power: [0.3, 0.75], spinAmt: [0.25, 0.75] }
+  },
+  hard: {
+    window: 0.12, perfect: 0.03, good: 0.07, lead: 0.32,
+    assist: null,
+    earlyFree: false, replace: false, rescue: false, hand: 'strict', handQ: 0.55, rally: null,
+    cpu: { miss: 0.08, smashMiss: 0.3, heavyMiss: 0.12, smash: 0.5, q: [0.5, 0.95], power: [0.3, 0.8], spinAmt: [0.3, 0.9] }
+  }
+};
+const HAND_KO = { fore: '포핸드', back: '백핸드' };
 // 사람끼리 붙은 테이블에서 아무도 휘두르지 않은 점수가 이만큼 이어지면(둘 다 자리를 떴거나 연결이 끊김) 경기를 끝냅니다.
 // 둘 다 서브를 못 치면 받는 쪽이 계속 점수를 얻어 듀스가 끝나지 않기 때문입니다.
 const DEAD_POINTS = 4;
@@ -42,6 +73,7 @@ const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const BOTS = clamp(parseInt(params.get('bots'), 10) || 0, 0, 4);
 const AUTOSTART = params.has('autostart');
+const BOT_WRONG = clamp(Number(params.get('botwrong')) || 0, 0, 1); // 시험: 봇이 반대 손으로 치는 비율
 const num = (v, d) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : d);
 
 // 캔버스에 글자를 그리기 전에 글꼴을 기다립니다(최대 2초).
@@ -51,6 +83,38 @@ await Promise.race([
 ]).catch(() => {});
 const view = createScene($('cv'));
 const hud = createHud($('views'));
+
+// ---------- 난이도·슬로우(대기실에서 고르고, 이 화면 브라우저에 기억) ----------
+const settings = createSettings({
+  game: 'pingpong',
+  fields: [
+    fields.difficulty({ hints: { easy: '타이밍 ±0.3초 · 공은 거의 다 들어가요', normal: '타이밍 ±0.2초 · 방향은 살짝만', hard: '타이밍 ±0.12초 · 조준 그대로' } }),
+    fields.slow()
+  ],
+  onChange: () => {
+    renderLobby();
+    pushState();
+  }
+});
+settings.mount($('setBox'));
+settings.mount($('setBoxOver'), { compact: true });
+const board = createTutorialBoard({ mount: $('tutDock') });
+// 연습 칸이 떠 있는 동안 대기실·결과 화면 아래를 그 높이만큼 비웁니다(칸이 글자를 가리지 않게).
+function syncDock() {
+  const h = board.el.hidden ? 0 : Math.ceil(board.el.getBoundingClientRect().height);
+  document.body.classList.toggle('dock-on', h > 0);
+  document.body.style.setProperty('--dock-h', `${h}px`);
+}
+new MutationObserver(syncDock).observe(board.el, { attributes: true, attributeFilter: ['hidden'], childList: true, subtree: true });
+if (window.ResizeObserver) new ResizeObserver(syncDock).observe(board.el);
+// 경기에 쓰는 값(시작할 때 정해서 경기 중에는 바뀌지 않음)
+function applySettings() {
+  game.diff = settings.difficulty();
+  game.tune = TUNE[game.diff] || TUNE.normal;
+  game.slow = settings.get('slow') === true;
+}
+// 슬로우가 꺼져 있으면 공이 빨리 오므로 링·'지금!'을 조금 더 일찍 띄웁니다.
+const cueLead = () => game.tune.lead + (game.slow ? 0 : 0.16);
 
 // ================================================================
 // 연결
@@ -110,6 +174,16 @@ socket.on('players', (p) => {
   pushState();
 });
 socket.on('display_replaced', () => $('replaced').classList.remove('hidden'));
+settings.attach(socket);
+board.attach(socket);
+// 서버가 세는 준비 현황(누가 아직 준비 전인지 대기실 칸에 보여 줍니다)
+let readyState = null;
+socket.on('ready_state', (st) => {
+  readyState = st && Array.isArray(st.ready) ? st : null;
+  renderLobby();
+});
+// 연습(튜토리얼) 소식이 오면 칸의 '연습 중' 표시를 바꿉니다(판이 먼저 그려지도록 한 박자 뒤).
+socket.on('tutorial', () => setTimeout(renderLobby, 30));
 socket.on('start_game', () => startGame());
 socket.on('swing', (d) => onSwing(d, false));
 socket.on('pose', (d) => onPose(d));
@@ -140,8 +214,13 @@ const game = {
   poses: {}, // slot -> { s, fc, at }
   ready: new Set(), // 준비(기준 맞춤)를 누른 자리
   overAt: 0,
-  log: [] // 최근 득점 기록(디버그)
+  log: [], // 최근 득점 기록(디버그)
+  diff: 'normal', // 이번 경기 난이도(시작할 때 settings 에서 가져옴)
+  tune: TUNE.normal,
+  slow: false,
+  stats: {} // slot -> { hits, perfect, miss, wrongHand, assisted } 결과 화면·시험용
 };
+applySettings();
 
 const human = (p) => ({ kind: 'human', slot: p.slot, name: p.name, color: p.color, bot: Boolean(p.bot), key: `p${p.slot}`, camX: 0, shake: 0 });
 const cpu = (key, color = CPU_COLOR) => ({ kind: 'cpu', slot: null, name: 'CPU', color, bot: false, key, camX: 0, shake: 0 });
@@ -184,8 +263,8 @@ const viewIndex = (slot) => game.humans.findIndex((h) => h.slot === slot);
 // ---------- 시간: 테이블마다 경기 시간과 배율, 실제 시각 ↔ 경기 시각 기록 ----------
 function slowTarget(m) {
   const p = m.plan;
-  if (!p || p.decided || !p.human) return 1;
-  return p.t - m.clock.gt < SLOW_LEAD ? SLOW : 1;
+  if (!game.slow || m.demo || !p || p.decided || !p.human) return 1;
+  return p.t - m.clock.gt < game.tune.lead ? SLOW : 1;
 }
 // 실제 시각(ms) → 그 테이블의 경기 시각. 배율이 바뀌므로 기록을 따라 적분된 값을 보간합니다.
 function toGame(m, realMs) {
@@ -217,6 +296,7 @@ function prepareServe(m) {
   m.rally = null;
   m.plan = null;
   m.swung = false; // 이번 점수 동안 사람이 한 번이라도 휘둘렀는지
+  m.rallyHits = 0; // 이번 점수의 타구 수(서브 포함)
 }
 function startToss(m) {
   const s = m.server;
@@ -248,19 +328,26 @@ function setPlan(m, side, plan, kind, info) {
     side, t: plan.t, p: plan.p, apexH: plan.apexH || 0, kind, decided: false, swing: null, cued: false, closeReal: null,
     human: pl.kind === 'human', bot: pl.bot, cpu: pl.kind === 'cpu', slot: pl.slot, botAt: null, botSwing: null, cpuSwing: null, cpuMiss: false
   };
+  // 칠 손: 탁구채가 기다리는 쪽(공이 몸 왼쪽이면 백핸드). 가운데 근처 공은 어느 손이든 됩니다.
+  p.hand = handFor(side, p.p);
+  p.zone = handZone(side, p.p);
   if (p.bot) {
     // 봇: 좋은 타이밍(가끔 실수)과 무작위 스핀으로 폰과 같은 길(onSwing)을 탑니다.
+    // ?botwrong=0.3 이면 그 비율만큼 반대 손으로 칩니다(손 판정 시험용).
     const r = Math.random();
     const err = r < 0.07 ? (Math.random() < 0.5 ? -1 : 1) * (0.13 + Math.random() * 0.08) : clamp(gauss() * 0.055, -0.115, 0.115);
     p.botAt = plan.t + err;
     p.botSwing = randomSwing(kind === 'serve', p);
+    p.botSwing.hand = Math.random() < BOT_WRONG ? (p.hand === 'fore' ? 'back' : 'fore') : p.hand;
   }
-  // 받기 어려운 공(스매시·강한 회전)은 사람도 실수 위험이 조금 늘어납니다.
+  // 받기 어려운 공(스매시·강한 회전)은 사람도 실수 위험이 조금 늘어납니다(쉬움·보통은 aimShot 이 줄여 줌).
   const heavyIn = info.w ? Math.hypot(info.w[0], info.w[1], info.w[2]) > 430 : false;
   p.pressure = (info.smash ? 0.08 : 0) + (heavyIn ? 0.03 : 0);
   if (p.cpu) {
-    p.cpuMiss = kind !== 'serve' && Math.random() < 0.08 + (info.smash ? 0.3 : 0) + (heavyIn ? 0.12 : 0);
-    p.cpuSwing = cpuSwing(m, p);
+    // CPU 세기는 난이도를 따릅니다(어려움 = 예전 CPU). 대기실 시연 경기는 예전 그대로.
+    const C = (m.demo ? TUNE.hard : game.tune).cpu;
+    p.cpuMiss = kind !== 'serve' && Math.random() < C.miss + (info.smash ? C.smashMiss : 0) + (heavyIn ? C.heavyMiss : 0);
+    p.cpuSwing = cpuSwing(m, p, C);
   }
   m.plan = p;
 }
@@ -276,36 +363,44 @@ function randomSwing(serve, p) {
     spin, spinAmt: 0.35 + Math.random() * 0.6, side: Math.random() < 0.5 ? -1 : 1, aim: (Math.random() - 0.5) * 36
   };
 }
-function cpuSwing(m, p) {
-  let q = 0.5 + Math.random() * 0.45;
+function cpuSwing(m, p, C) {
+  const rnd = (a) => a[0] + Math.random() * (a[1] - a[0]);
+  let q = rnd(C.q);
   const r = Math.random();
   const spin = r < 0.3 ? 'top' : r < 0.45 ? 'back' : r < 0.55 ? 'side' : 'none';
-  let power = p.kind === 'serve' ? 0.2 + Math.random() * 0.6 : 0.3 + Math.random() * 0.5;
-  if (p.kind !== 'serve' && p.apexH >= 0.24 && Math.random() < 0.5) {
+  let power = p.kind === 'serve' ? 0.2 + Math.random() * 0.6 : rnd(C.power);
+  if (p.kind !== 'serve' && p.apexH >= 0.24 && Math.random() < C.smash) {
     power = 0.9 + Math.random() * 0.1;
     q = Math.max(q, 0.8);
   }
   return {
-    power, spin, spinAmt: 0.3 + Math.random() * 0.6, spinSide: Math.random() < 0.5 ? -1 : 1, aim: (Math.random() - 0.5) * 36,
-    hand: handFor(p.side, p.p), q, err: (Math.random() < 0.5 ? -1 : 1) * (1 - q) * WINDOW
+    power, spin, spinAmt: rnd(C.spinAmt), spinSide: Math.random() < 0.5 ? -1 : 1, aim: (Math.random() - 0.5) * 36,
+    hand: handFor(p.side, p.p), q, err: (Math.random() < 0.5 ? -1 : 1) * (1 - q) * TUNE.hard.window
   };
 }
 // 타점이 몸 왼쪽이면 백핸드
 function handFor(side, pos) {
   return pos[0] * rightOf(side) < -0.1 ? 'back' : 'fore';
 }
+// 포핸드·백핸드를 따질 공인지: 몸 가운데(경계 −0.1m 둘레 ±0.14m)로 오는 공은 어느 손으로 쳐도 됩니다.
+function handZone(side, pos) {
+  const xr = pos[0] * rightOf(side);
+  return xr < -0.24 ? 'back' : xr > 0.04 ? 'fore' : 'any';
+}
 
 function updatePlan(m, p, now) {
   const gt = m.clock.gt;
-  if (p.human && !p.cued && p.t - gt < SLOW_LEAD) {
+  const T = game.tune;
+  if (p.human && !p.cued && p.t - gt < cueLead()) {
     p.cued = true;
-    if (!p.bot) send('cue', { kind: p.kind === 'serve' ? 'serve' : 'incoming' }, p.slot);
+    // 폰에 '지금!'과 칠 손(포핸드/백핸드)을 알려 줍니다. 가운데 공은 아무 손이나(any).
+    if (!p.bot) send('cue', { kind: p.kind === 'serve' ? 'serve' : 'incoming', hand: p.hand, zone: p.zone }, p.slot);
     sfx.slow();
   }
   if (p.botAt != null && gt >= p.botAt) {
     p.botAt = null;
     const b = p.botSwing;
-    onSwing({ slot: p.slot, power: b.power, ago: 0, rtt: 0, spin: b.spin, spinAmt: b.spinAmt, side: b.side, aim: b.aim, hand: handFor(p.side, p.p) }, true);
+    onSwing({ slot: p.slot, power: b.power, ago: 0, rtt: 0, spin: b.spin, spinAmt: b.spinAmt, side: b.side, aim: b.aim, hand: b.hand || handFor(p.side, p.p) }, true);
     if (p.decided || m.plan !== p) return;
   }
   if (p.cpu && gt >= p.t) {
@@ -319,7 +414,7 @@ function updatePlan(m, p, now) {
     doHit(m, p.side, p.swing, p.t, p);
     return;
   }
-  if (p.human && gt >= p.t + WINDOW) {
+  if (p.human && gt >= p.t + T.window) {
     if (p.closeReal == null) p.closeReal = now + GRACE_MS;
     else if (now >= p.closeReal) {
       p.decided = true;
@@ -336,10 +431,13 @@ function readSwing(d) {
     spinAmt: clamp(num(d.spinAmt, 0.6), 0, 1),
     spinSide: num(d.side, 1) < 0 ? -1 : 1,
     aim: clamp(num(d.aim, 0), -45, 45),
-    hand: d.hand === 'back' ? 'back' : 'fore'
+    // auto = 손을 가릴 수 없는 스윙(폰 버튼 모드·키보드). 공 쪽 손으로 칩니다.
+    hand: d.hand === 'back' ? 'back' : d.hand === 'auto' ? 'auto' : 'fore'
   };
 }
-function onSwing(d, local) {
+const statOf = (slot) => (game.stats[slot] = game.stats[slot] || { hits: 0, perfect: 0, miss: 0, wrong: 0, assisted: 0 });
+
+function onSwing(d, local, atGame) {
   if (game.phase !== 'playing' || !d) return;
   const ent = humanBySlot(Number(d.slot));
   if (!ent) return;
@@ -350,51 +448,87 @@ function onSwing(d, local) {
   const now = performance.now();
   // 폰에서 휘두른 순간 = 도착 시각 − 센서 측정 시간 − 폰 왕복/2 − 화면 왕복/2
   const lag = local ? 0 : num(d.ago, 0) + num(d.rtt, 80) / 2 + displayRtt() / 2;
-  const G = toGame(m, now - lag);
+  const G = atGame != null ? atGame : toGame(m, now - lag);
   const sw = readSwing(d);
   const p = m.plan;
   if (!p || p.side !== side || p.decided || (m.state !== 'toss' && m.state !== 'rally')) {
     idleSwing(m, side, sw);
     return;
   }
-  if (p.swing) return;
+  const T = game.tune;
+  const W = T.window;
   const err = G - p.t;
-  // 슬로우가 걸리기 훨씬 전의 스윙은 연습 스윙으로 봅니다.
-  if (err < -(SLOW_LEAD + 0.08)) {
-    idleSwing(m, side, sw);
+  // 슬로우·링이 뜨기 훨씬 전의 스윙은 연습 스윙으로 봅니다.
+  if (err < -(cueLead() + 0.08)) {
+    if (!p.swing) idleSwing(m, side, sw);
     return;
   }
-  if (Math.abs(err) <= WINDOW) {
-    p.swing = { ...sw, err, q: 1 - Math.abs(err) / WINDOW };
+  if (p.swing) {
+    // 보정(쉬움·보통): 공에 닿기 전이면 더 잘 맞춘 스윙으로 바꿉니다. 백스윙이 먼저 잡혀도 이어진 앞스윙이 칩니다.
+    if (T.replace && m.clock.gt < p.t && Math.abs(err) <= W && Math.abs(err) < Math.abs(p.swing.err)) {
+      p.swing = { ...sw, err, q: 1 - Math.abs(err) / W, replaced: true };
+    }
+    return;
+  }
+  if (Math.abs(err) <= W) {
+    p.swing = { ...sw, err, q: 1 - Math.abs(err) / W };
     // 지연 때문에 이미 타점을 지났으면 휘두른 순간으로 맞춰 바로 칩니다.
     if (m.clock.gt >= p.t) {
       p.decided = true;
       const serve = m.state === 'toss';
-      const th = lateContactTime(m.flight, m.evIdx, p.t, clamp(G, p.t, m.clock.gt), TABLE.y + (serve ? LATE_MIN_H.serve : LATE_MIN_H.rally));
-      // 휘두르기 전에 공이 이미 두 번째로 튀었거나 다른 데 닿았으면 늦은 헛스윙입니다.
-      // 미뤄 둔 그 사건은 다음 프레임에 규칙대로 처리됩니다(친 사람 득점).
+      const minY = TABLE.y + (serve ? LATE_MIN_H.serve : LATE_MIN_H.rally);
+      let th = lateContactTime(m.flight, m.evIdx, p.t, clamp(G, p.t, m.clock.gt), minY);
+      // 보정(쉬움·보통): 휘두르기 전에 공이 이미 두 번째로 튀었어도, 칠 수 있던 마지막 순간에 맞힙니다.
+      if (th == null && T.rescue) {
+        th = lastHittable(m, p, G, minY);
+        if (th != null) p.swing.rescued = true;
+      }
+      // 그래도 못 치면 늦은 헛스윙입니다. 미뤄 둔 그 사건은 다음 프레임에 규칙대로 처리됩니다(친 사람 득점).
       if (th == null) onMiss(m, p, 'late', sw);
       else doHit(m, side, p.swing, th, p);
+    }
+  } else if (err < 0 && T.earlyFree) {
+    // 보정(쉬움·보통): 창이 열리기 전의 이른 스윙은 헛스윙으로 치지 않고, 다시 휘두를 수 있게 둡니다.
+    idleSwing(m, side, sw);
+    if (!pl.bot && now - (p.earlyNoteAt || 0) > 700) {
+      p.earlyNoteAt = now;
+      hudNote(pl.slot, '조금 빨라요 · 다시 휘둘러요', 900);
+      send('result', { text: '조금 빨라요 · 다시', good: false, kind: 'early' }, pl.slot);
     }
   } else {
     p.decided = true;
     onMiss(m, p, err < 0 ? 'early' : 'late', sw);
   }
 }
+// 타점(p.t) 뒤, 다음 사건(두 번째 바운드·바닥·네트) 바로 앞까지 중 공이 minY 위에 있던 가장 늦은 순간(휘두른 순간 G 를 넘지 않게)
+function lastHittable(m, p, G, minY) {
+  const evs = m.flight.events;
+  let tEnd = flightEnd(m.flight);
+  for (let k = m.evIdx; k < evs.length; k++) {
+    if (evs[k].t > p.t && evs[k].type !== 'netcord') {
+      tEnd = evs[k].t - 0.012;
+      break;
+    }
+  }
+  if (tEnd <= p.t) return p.t;
+  return lateContactTime(m.flight, m.evIdx, p.t, Math.min(G, tEnd), minY);
+}
 function idleSwing(m, side, sw) {
   const pad = m.pad[side];
   if (pad.stroke) return;
-  startStroke(m, side, m.clock.gt, sw.spin, sw.hand, null);
+  const hand = sw.hand === 'auto' ? pad.hand : sw.hand;
+  startStroke(m, side, m.clock.gt, sw.spin, hand, null);
 }
 
 function onMiss(m, p, why, sw) {
   const pl = m.sides[p.side];
   const now = performance.now();
-  if (why !== 'none') startStroke(m, p.side, m.clock.gt, sw ? sw.spin : 'none', sw ? sw.hand : handFor(p.side, p.p), null);
+  if (why !== 'none') startStroke(m, p.side, m.clock.gt, sw ? sw.spin : 'none', sw && sw.hand !== 'auto' ? sw.hand : handFor(p.side, p.p), null);
   if (pl.kind === 'human' && !m.demo) {
     const t = why === 'early' ? '빨라요' : why === 'late' ? '늦어요' : '';
     hudCall(pl.slot, why === 'none' ? '놓쳤어요' : '헛스윙', t, 'miss', 1300);
-    if (!pl.bot) send('result', { text: why === 'none' ? '놓쳤어요' : `헛스윙 · ${t}`, good: false }, pl.slot);
+    statOf(pl.slot).miss += 1;
+    if (!pl.bot) send('result', { text: why === 'none' ? '놓쳤어요' : `헛스윙 · ${t}`, good: false, kind: 'miss' }, pl.slot);
     sfx.whiff();
   }
   if (m.state === 'toss') {
@@ -413,12 +547,31 @@ function onMiss(m, p, why, sw) {
 
 // ---------- 타구 ----------
 function doHit(m, side, sw, th, p) {
+  const T = game.tune;
   const serve = m.state === 'toss';
   const st = sampleFlight(m.flight, th);
-  const smash = !serve && sw.power > 0.85 && sw.q > 0.7 && (p.apexH || 0) >= 0.24;
+  const pl = m.sides[side];
+  const human = pl.kind === 'human' && !m.demo;
+  // 큰 동작 판정: 포핸드 공을 백핸드로(또는 반대로) 쳤는지. 가운데 공(any)과 손을 가릴 수 없는 스윙(auto)은 따지지 않습니다.
+  // 탁구채는 언제나 공 쪽 손으로 그려지고, 반대 손이면 난이도만큼 타구가 약해집니다(쉬움은 자동으로 맞춤).
+  const zone = handZone(side, st.p);
+  const want = handFor(side, st.p);
+  let q = sw.q;
+  let wrong = null;
+  if (human && zone !== 'any' && sw.hand !== 'auto' && sw.hand !== zone) {
+    wrong = zone;
+    q *= T.handQ;
+  }
+  const hand = sw.hand === 'auto' || wrong || !human ? want : sw.hand;
+  const smash = !serve && sw.power > 0.85 && q > 0.7 && (p.apexH || 0) >= 0.24;
+  // 긴 랠리(쉬움·보통): 타구가 쌓일수록 실수 확률이 조금씩 붙습니다. 시연 경기는 빼고 봅니다.
+  m.rallyHits = (m.rallyHits || 0) + 1;
+  const R = !m.demo && T.rally ? T.rally : null;
+  const fatigue = R ? clamp((m.rallyHits - R.from) * R.per, 0, 0.45) : 0;
   const shot = aimShot({
-    side, p: st.p, q: sw.q, err: sw.err, power: sw.power, aim: sw.aim, spin: sw.spin, spinAmt: sw.spinAmt,
-    spinSide: sw.spinSide, hand: sw.hand, smash, serve, pressure: p.pressure || 0
+    side, p: st.p, q, err: sw.err, power: sw.power, aim: sw.aim, spin: sw.spin, spinAmt: sw.spinAmt,
+    spinSide: sw.spinSide, hand, smash, serve, pressure: p.pressure || 0, fatigue,
+    assist: human && T.assist ? { ...T.assist, win: T.window } : null
   });
   m.flight = simulate(st.p, shot.v, shot.w, { t0: th });
   m.evIdx = 0;
@@ -426,7 +579,7 @@ function doHit(m, side, sw, th, p) {
   m.state = 'rally';
   m.plan = null;
   if (serve) m.retoss = 0;
-  m.lastShot = { side, kind: shot.kind, outcome: shot.outcome, w: shot.w };
+  m.lastShot = { side, kind: shot.kind, outcome: shot.outcome, w: shot.w, q, wrong, rescued: Boolean(sw.rescued), rally: m.rallyHits };
   // 받는 쪽의 타점을 미리 계산합니다(비행이 정해져 있어 예측과 실제가 같습니다).
   const recv = 1 - side;
   const evs = m.flight.events;
@@ -437,22 +590,38 @@ function doHit(m, side, sw, th, p) {
     plan = planContact(m.flight, recv, 0);
   }
   if (plan) setPlan(m, recv, plan, 'incoming', { smash, w: shot.w });
-  startStroke(m, side, th, shot.kind, sw.hand, st.p);
-  view.flash(m.id, [st.p[0] + m.tx, st.p[1], st.p[2]], smash || sw.q > 0.88);
-  const pl = m.sides[side];
-  if (!m.demo) sfx.hit(sw.q, m.clock.scale < 0.6, smash);
-  if (pl.kind === 'human' && !m.demo) {
+  startStroke(m, side, th, shot.kind, hand, st.p);
+  view.flash(m.id, [st.p[0] + m.tx, st.p[1], st.p[2]], smash || q > 0.88);
+  if (!m.demo) sfx.hit(q, m.clock.scale < 0.6, smash);
+  if (human) {
     pl.shake = smash ? 1 : 0.55;
     const e = Math.abs(sw.err);
-    const qLabel = e <= PERFECT ? 'PERFECT' : e <= GOOD ? 'GOOD' : sw.err < 0 ? '빨라요' : '늦어요';
+    const perfect = e <= T.perfect && !wrong;
+    const good = e <= T.good;
+    const qLabel = perfect ? 'PERFECT' : good ? 'GOOD' : sw.err < 0 ? '빨라요' : '늦어요';
     const spinLabel = SPIN_LABEL[shot.kind] || '';
-    const cls = e <= PERFECT ? 'perfect' : e <= GOOD ? 'good' : 'meh';
-    hudCall(pl.slot, qLabel, spinLabel, `${cls} ${shot.kind}`, 1300);
+    const cls = perfect ? 'perfect' : good ? 'good' : 'meh';
+    // 반대 손: 쉬움은 '자동으로 맞췄어요', 보통·어려움은 '백핸드 쪽 공이었어요'
+    const handNote = wrong ? (T.hand === 'auto' ? `${HAND_KO[wrong]}로 맞췄어요` : `${HAND_KO[wrong]} 쪽 공이었어요`) : '';
+    hudCall(pl.slot, qLabel, spinLabel || handNote, `${cls} ${shot.kind}${wrong && !spinLabel ? ' hand' : ''}`, 1300);
+    if (wrong && spinLabel) hudNote(pl.slot, handNote, 1100);
+    const S = statOf(pl.slot);
+    S.hits += 1;
+    if (perfect) S.perfect += 1;
+    if (wrong) S.wrong += 1;
+    if (sw.rescued || (wrong && T.hand === 'auto')) S.assisted += 1;
     if (!pl.bot) {
-      const data = { text: spinLabel ? `${qLabel} · ${spinLabel}` : qLabel, good: e <= GOOD };
+      const data = { text: [qLabel, spinLabel, handNote].filter(Boolean).join(' · '), good: good && !wrong, kind: 'hit' };
       if (shot.kind !== 'none') data.spin = shot.kind;
+      if (wrong) data.wrong = wrong;
       send('result', data, pl.slot);
+      // 맞힌 폰을 진동(폰도 휘두르는 순간 스스로 울리고, 220ms 안의 같은 진동은 한 번만 울립니다)
+      sendHaptic(socket, pl.slot, smash || perfect ? 'strong' : 'hit', 0.5 + 0.4 * q);
     }
+  }
+  // 긴 랠리는 두 사람 화면에 알려 줍니다(10회부터 5회마다).
+  if (!m.demo && m.rallyHits >= 10 && m.rallyHits % 5 === 0 && shot.outcome === 'in') {
+    for (const pl2 of m.sides) if (pl2.kind === 'human') hudNote(pl2.slot, `랠리 ${m.rallyHits}회!`, 1000);
   }
   // 받는 사람 화면에 들어오는 스핀 예고
   const rp = m.sides[recv];
@@ -536,7 +705,7 @@ function point(m, winner, why) {
     const op = m.score[1 - side];
     const reason = REASON[why][good ? 1 : 0];
     hudToast(pl.slot, good ? '득점!' : '실점', `${reason} · ${me} : ${op}`, good);
-    if (!pl.bot) send('result', { text: good ? `득점! ${me} : ${op}` : `실점 · ${reason} ${me} : ${op}`, good }, pl.slot);
+    if (!pl.bot) send('result', { text: good ? `득점! ${me} : ${op}` : `실점 · ${reason} ${me} : ${op}`, good, kind: 'point' }, pl.slot);
   }
   sfx.point(humanWon);
   sfx.clap(humanWon ? 16 : 6);
@@ -810,7 +979,18 @@ function startGame() {
     lobbyMessage('폰을 먼저 연결해 주세요. QR을 찍고 시작하기를 누르면 자리가 생겨요.');
     return;
   }
+  // 슬로우 모드는 묻고 정합니다. 아무도 답하지 않았으면 시작하지 않고 질문 카드를 흔듭니다
+  // (폰의 준비 버튼도 답하기 전에는 막혀 있어서 보통은 여기까지 오지 않습니다).
+  if (!settings.requireAnswered()) {
+    lobbyMessage('슬로우 모드를 켤지 먼저 골라 주세요 · 폰이나 여기서 고르거나 L 키');
+    pushState();
+    return;
+  }
   audio();
+  applySettings();
+  settings.lock(true);
+  board.hide(true);
+  game.stats = {};
   const H = list.slice(0, 4).map(human);
   const matches = [newMatch('A', H[0], H[1] || cpu('cpuA'), false)];
   if (H.length > 2) matches.push(newMatch('B', H[2], H[3] || cpu('cpuB'), false));
@@ -834,6 +1014,8 @@ function backToLobby(why) {
   game.overAt = 0;
   game.poses = {};
   game.ready.clear();
+  settings.lock(false);
+  board.hide(false);
   startDemo();
   hud.clear();
   $('lobby').classList.remove('hidden');
@@ -845,6 +1027,9 @@ function backToLobby(why) {
 
 function endGame() {
   game.phase = 'over';
+  // 결과 화면에서는 다음 판 난이도·슬로우를 바꿀 수 있습니다.
+  settings.lock(false);
+  board.hide(false);
   const rows = [];
   for (const m of game.matches) {
     if (m.demo) continue;
@@ -864,13 +1049,16 @@ function endGame() {
     e.style.setProperty('--c', r.pl.color);
     e.style.animationDelay = `${0.15 + i * 0.12}s`;
     const diff = r.me - r.op;
+    const st = statOf(r.pl.slot);
     e.innerHTML = `<span class="rank">${i + 1}</span><span class="who">${r.pl.name}</span>` +
       `<span class="res">${r.win ? '승' : r.stop ? '중단' : '패'}</span>` +
       `<span class="num"><b>${r.me} : ${r.op}</b><span>vs <em style="color:${r.opp.color}">${r.opp.name}</em> · 테이블 ${r.table}</span></span>` +
-      `<span class="num"><b>${diff > 0 ? '+' : ''}${diff}</b><span>득실</span></span>`;
+      `<span class="num"><b>${diff > 0 ? '+' : ''}${diff}</b><span>득실</span></span>` +
+      `<span class="num"><b>${st.hits}</b><span>타구 · PERFECT ${st.perfect}</span></span>`;
     box.appendChild(e);
   });
   hud.clear();
+  $('overMeta').textContent = `FINAL · ${DIFF_LABEL[game.diff] || '보통'} · 슬로우 ${game.slow ? '켬' : '끔'}`;
   $('over').classList.remove('hidden');
   sfx.clap(50);
   pushState();
@@ -902,7 +1090,8 @@ function statePlayers() {
   return out;
 }
 function pushState() {
-  send('game_state', { phase: game.phase, players: statePlayers() });
+  // settings: 폰 대기 화면의 난이도·슬로우 알약과 질문 카드. diff/slow: 이번 경기에 쓰는 값(폰 연습·표시용)
+  send('game_state', { phase: game.phase, players: statePlayers(), settings: settings.forState(), diff: game.diff, slow: game.slow });
 }
 
 // ================================================================
@@ -913,13 +1102,18 @@ function renderLobby() {
   if (!box) return;
   box.innerHTML = '';
   const list = lobbyPlayers();
+  const practicing = board.practicing();
   for (let s = 1; s <= 4; s++) {
     const p = list.find((x) => x.slot === s);
     const e = document.createElement('div');
-    e.className = 'slot' + (p ? ' on' : '') + (p && !p.connected ? ' away' : '') + (p && (p.bot || game.ready.has(s)) ? ' ready' : '') + (p && p.bot ? ' bot' : '');
+    // 준비는 서버가 세는 값(ready_state), 연습 중은 튜토리얼 판, 자세 맞춤은 calibrate 로 압니다.
+    const rdy = Boolean(p && (p.bot || (readyState && readyState.ready.includes(s))));
+    const prac = Boolean(p && !p.bot && practicing.includes(s));
+    e.className = 'slot' + (p ? ' on' : '') + (p && !p.connected ? ' away' : '') + (rdy ? ' ready' : '') + (prac ? ' prac' : '') + (p && p.bot ? ' bot' : '');
     if (p) {
       e.style.setProperty('--c', p.color);
-      e.innerHTML = `<b>${p.name}</b><small>${p.bot ? 'BOT' : game.ready.has(s) ? '준비 완료' : '준비 대기'}</small>`;
+      const tag = p.bot ? 'BOT' : rdy ? '준비 완료 ✓' : prac ? '연습 중' : game.ready.has(s) ? '자세 맞춤 · 준비 전' : '준비 전';
+      e.innerHTML = `<b>${p.name}</b><small>${tag}</small>`;
     } else {
       e.textContent = `${s}P 비어 있음`;
     }
@@ -1114,12 +1308,14 @@ function tick() {
         const st = sampleFlight(m.flight, m.clock.gt);
         const pr = view.project(i, [st.p[0] + m.tx, st.p[1], st.p[2]]);
         if (pr && !pr.behind) {
-          const left = clamp((p.t - m.clock.gt) / SLOW_LEAD, 0, 1);
+          const left = clamp((p.t - m.clock.gt) / cueLead(), 0, 1);
           // 공이 칸 가장자리 밖으로 나가도 링(타이밍)은 칸 안쪽 가장자리에 붙여 계속 보여 줍니다.
           const mg = pr.r + 10;
           const x = clamp(pr.x, mg, Math.max(mg, v.w - mg));
           const y = clamp(pr.y, mg, Math.max(mg, v.h - mg));
-          hud.ring(i, { x, y, ball: pr.r, R: pr.r + 2 + left * v.h * 0.16, p: left, after: m.clock.gt > p.t });
+          // 링 아래 작은 글씨로 칠 손(포핸드/백핸드)을 알려 줍니다. 가운데 공(any)은 '아무 손'.
+          const label = p.kind === 'serve' ? '서브' : p.zone === 'any' ? '아무 손이나' : HAND_KO[p.zone];
+          hud.ring(i, { x, y, ball: pr.r, R: pr.r + 2 + left * v.h * 0.16, p: left, after: m.clock.gt > p.t, label, side: p.kind === 'serve' ? 0 : p.zone === 'back' ? -1 : p.zone === 'fore' ? 1 : 0 });
         } else hud.ring(i, null);
       } else hud.ring(i, null);
     });
@@ -1142,14 +1338,46 @@ window.addEventListener('keydown', (e) => {
   if (game.phase !== 'playing' || !game.humans.length) return;
   const slot = game.humans[0].slot;
   const ent = humanBySlot(slot);
-  const hand = ent && ent.m.plan && ent.m.plan.side === ent.side ? handFor(ent.side, ent.m.plan.p) : 'fore';
-  onSwing({ slot, power: 0.8, ago: 0, rtt: 0, spin, spinAmt: 0.75, side: 1, aim: 0, hand }, true);
+  // 키보드는 손을 가릴 수 없어 공 쪽 손(auto)으로 칩니다.
+  onSwing({ slot, power: 0.8, ago: 0, rtt: 0, spin, spinAmt: 0.75, side: 1, aim: 0, hand: 'auto' }, true);
 });
 
 startDemo();
 renderLobby();
 requestAnimationFrame(tick);
-if (AUTOSTART && BOTS > 0) setTimeout(() => startGame(), 1200);
+// ?bots=N&autostart: 폰 없이 봇만으로 바로 시작(시험용). 슬로우 모드를 아직 안 정했으면 정할 때까지 기다립니다
+// (주소에 &slow=on|off 를 붙이거나 L 키·대기실 카드로 고르면 바로 시작).
+if (AUTOSTART && BOTS > 0) {
+  let auto = true;
+  const tryStart = () => {
+    if (!auto || game.phase !== 'lobby' || serverPlayers.length) return;
+    if (settings.isAnswered()) {
+      auto = false;
+      startGame();
+    } else {
+      settings.requireAnswered();
+      lobbyMessage('슬로우 모드를 고르면 바로 시작해요');
+    }
+  };
+  settings.onChange(() => setTimeout(tryStart, 400));
+  setTimeout(tryStart, 1200);
+}
 
 // 디버그: 콘솔에서 상태 보기
-window.__pp = { game, view, hud, toGame, onSwing, serverOf, lobbyPlayers, startGame, endGame, SLOW, WINDOW };
+window.__pp = {
+  game, view, hud, toGame, onSwing, serverOf, lobbyPlayers, startGame, endGame, backToLobby, SLOW, TUNE, settings, board,
+  get WINDOW() { return game.tune.window; },
+  // 시험: 지금 받을 공이 있는 첫 사람에게 스윙을 넣습니다. off = 타점과의 차(경기 초), hand = 'fore'|'back'|'auto'|'wrong'
+  swingNow(off = 0, hand = 'auto', slot) {
+    const s = slot ?? (game.humans[0] && game.humans[0].slot);
+    const ent = humanBySlot(s);
+    if (!ent || !ent.m.plan || ent.m.plan.side !== ent.side) return 'no-plan';
+    const p = ent.m.plan;
+    const h = hand === 'wrong' ? (p.zone === 'back' ? 'fore' : 'back') : hand;
+    // 휘두른 순간을 '타점 + off'(경기 시각, 지금보다 늦지 않게)로 넣습니다.
+    onSwing({ slot: s, power: 0.7, ago: 0, rtt: 0, spin: 'none', spinAmt: 0.5, side: 1, aim: 0, hand: h }, true, Math.min(ent.m.clock.gt, p.t + off));
+    return { t: p.t, gt: ent.m.clock.gt, zone: p.zone, decided: p.decided, swing: p.swing, last: ent.m.lastShot };
+  },
+  stats: () => game.stats,
+  lastShot: (id = 'A') => (game.matches.find((m) => m.id === id) || {}).lastShot
+};

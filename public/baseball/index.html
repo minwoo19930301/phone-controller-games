@@ -30,6 +30,7 @@
       <div class="pips" id="pips"></div>
     </div>
     <div class="bug-pitch" id="bPitch"></div>
+    <div class="bug-diff" id="bDiff" title="난이도"></div>
   </div>
   <div class="leader" id="leader"></div>
 </div>
@@ -51,7 +52,7 @@
     </div>
     <div class="sb-pitch" id="dPitch"></div>
   </div>
-  <div class="sb-foot"><span id="dMatch"></span><b id="dStatus"></b></div>
+  <div class="sb-foot"><span id="dMatch"></span><span class="sb-right"><b id="dStatus"></b><em class="diff-chip" id="dDiff"></em></span></div>
 </div>
 <div id="tracker" class="tracker hidden" aria-label="투구 위치(포수 시점)">
   <div class="tk-zone"></div>
@@ -79,7 +80,7 @@
 
 <div id="timing" class="timing">
   <div class="timing-bar">
-    <span class="tz early">빠름</span><span class="tz good"></span><span class="tz late">늦음</span>
+    <span class="tz early">빠름</span><span class="tz good" id="tGood"></span><span class="tz late">늦음</span>
     <i id="tMark"></i>
   </div>
   <div class="timing-label" id="tLabel"></div>
@@ -127,7 +128,8 @@
         </li>
       </ol>
       <div class="slots" id="slots"></div>
-      <div class="hint"><kbd>Enter</kbd> 게임 시작 <span class="dot"></span> <kbd>1</kbd> <kbd>2</kbd> 모드 <span class="dot"></span> <kbd>Space</kbd> 키보드 스윙 <span class="dot"></span> <kbd>P</kbd> 키보드 투구(시험용) <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
+      <div class="set-box" id="setBox"></div>
+      <div class="hint"><kbd>Enter</kbd> 게임 시작(폰이 있으면 모두 준비한 뒤) <span class="dot"></span> <kbd>D</kbd> 난이도 <span class="dot"></span> <kbd>1</kbd> <kbd>2</kbd> 모드 <span class="dot"></span> <kbd>Space</kbd> 키보드 스윙 <span class="dot"></span> <kbd>P</kbd> 키보드 투구(시험용) <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
@@ -144,7 +146,9 @@
     <div class="eyebrow">FINAL</div>
     <h1 class="wordmark sm">경기 끝</h1>
     <div class="podium" id="podium"></div>
-    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b> <span class="dot"></span> <kbd>1</kbd> <kbd>2</kbd> 모드 바꾸기</div>
+    <div class="over-set" id="overSet"></div>
+    <div class="over-tut" id="overTut"></div>
+    <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 시작</span> <span class="dot"></span> <kbd>D</kbd> 난이도 <span class="dot"></span> <kbd>1</kbd> <kbd>2</kbd> 모드 바꾸기</div>
   </div>
 </section>
 

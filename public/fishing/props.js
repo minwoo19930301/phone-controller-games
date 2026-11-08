@@ -94,6 +94,17 @@ function merged(parts) {
   return mergeGeometries(gs);
 }
 const M4 = () => new THREE.Matrix4();
+// 사람 색과 상관없는 재질은 낚싯대 4벌이 한 개씩 같이 씁니다(재질 수·유니폼 올리기를 줄임). 지우지 않습니다.
+const SHARED = new Map();
+function shared(key, make) {
+  let m = SHARED.get(key);
+  if (!m) {
+    m = make();
+    m.userData.shared = true;
+    SHARED.set(key, m);
+  }
+  return m;
+}
 
 // ================================================================
 // 선착장 끝: 판자가 가로로 깔린 마루, 모서리 기둥(물속까지), 테두리 보
@@ -289,9 +300,9 @@ const NR = 8;
 
 function makeReel(color) {
   const g = new THREE.Group(); // 로컬 z = 낚싯대 앞쪽, y = 위, x = 왼쪽
-  const black = new THREE.MeshPhysicalMaterial({ color: '#1b1d21', metalness: 0.6, roughness: 0.35, clearcoat: 0.6 });
+  const black = shared('reel-black', () => new THREE.MeshPhysicalMaterial({ color: '#1b1d21', metalness: 0.6, roughness: 0.35, clearcoat: 0.6 }));
   const accent = new THREE.MeshPhysicalMaterial({ color, metalness: 0.45, roughness: 0.3, clearcoat: 0.9 });
-  const metal = new THREE.MeshStandardMaterial({ color: '#cfd4d9', metalness: 1, roughness: 0.22 });
+  const metal = shared('metal', () => new THREE.MeshStandardMaterial({ color: '#cfd4d9', metalness: 1, roughness: 0.22 }));
   const lathe = (pts) => new THREE.LatheGeometry(pts.map(([x, y]) => new THREE.Vector2(x, y)), 22).rotateX(Math.PI / 2);
   const T = (x, y, z) => M4().makeTranslation(x, y, z);
   g.add(new THREE.Mesh(merged([
@@ -304,7 +315,7 @@ function makeReel(color) {
     [new THREE.CylinderGeometry(0.025, 0.025, 0.026, 24).rotateX(Math.PI / 2), T(0, -0.085, 0.07)],
     [new THREE.CylinderGeometry(0.031, 0.031, 0.006, 24).rotateX(Math.PI / 2), T(0, -0.085, 0.056)]
   ]), accent));
-  g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.0215, 0.0215, 0.02, 24).rotateX(Math.PI / 2).translate(0, -0.085, 0.07), std('#ece6d8', 0.6)));
+  g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.0215, 0.0215, 0.02, 24).rotateX(Math.PI / 2).translate(0, -0.085, 0.07), shared('spool-line', () => std('#ece6d8', 0.6))));
   const bail = new THREE.TorusGeometry(0.034, 0.0018, 6, 24, Math.PI).rotateY(Math.PI / 2);
   g.add(new THREE.Mesh(merged([
     [new THREE.TorusGeometry(0.025, 0.002, 6, 24), T(0, -0.085, 0.083)],
@@ -331,7 +342,7 @@ export function makeBobber(color) {
   const g = new THREE.Group();
   const R = 0.042;
   const top = new THREE.MeshPhysicalMaterial({ color, roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.08, emissive: color, emissiveIntensity: 0.12 });
-  const white = new THREE.MeshPhysicalMaterial({ color: '#f6f3ee', roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.1 });
+  const white = shared('bobber-white', () => new THREE.MeshPhysicalMaterial({ color: '#f6f3ee', roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.1 }));
   g.add(new THREE.Mesh(merged([
     [new THREE.SphereGeometry(R, 22, 12, 0, TAU, 0, Math.PI / 2)],
     [new THREE.CylinderGeometry(0.0065, 0.0065, 0.04, 8), M4().makeTranslation(0, R + 0.12, 0)]
@@ -341,7 +352,7 @@ export function makeBobber(color) {
     [new THREE.CylinderGeometry(0.0045, 0.0045, 0.11, 8), M4().makeTranslation(0, R + 0.05, 0)],
     [new THREE.CylinderGeometry(0.004, 0.002, 0.05, 6), M4().makeTranslation(0, -R - 0.02, 0)]
   ]), white));
-  g.add(new THREE.Mesh(new THREE.CylinderGeometry(R * 1.012, R * 1.012, R * 0.16, 22, 1, true), std('#151515', 0.4)));
+  g.add(new THREE.Mesh(new THREE.CylinderGeometry(R * 1.012, R * 1.012, R * 0.16, 22, 1, true), shared('bobber-band', () => std('#151515', 0.4))));
   g.userData.R = R;
   return g;
 }
@@ -353,9 +364,9 @@ export function makeBait() {
     new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.012, -0.018, 0.004), new THREE.Vector3(-0.004, -0.036, -0.006),
     new THREE.Vector3(0.014, -0.05, 0.002), new THREE.Vector3(0.004, -0.066, 0.01)
   ]);
-  const worm = new THREE.Mesh(new THREE.TubeGeometry(curve, 24, 0.0042, 6, false), underwater(new THREE.MeshStandardMaterial({ color: '#b0473f', roughness: 0.45 }), 'bait'));
+  const worm = new THREE.Mesh(new THREE.TubeGeometry(curve, 24, 0.0042, 6, false), shared('bait', () => underwater(new THREE.MeshStandardMaterial({ color: '#b0473f', roughness: 0.45 }), 'bait')));
   const hook = new THREE.Mesh(new THREE.TorusGeometry(0.009, 0.0011, 5, 12, Math.PI * 1.3).rotateZ(-Math.PI * 0.8).translate(0, -0.03, 0),
-    underwater(new THREE.MeshStandardMaterial({ color: '#c9ced3', metalness: 1, roughness: 0.3 }), 'bait-metal'));
+    shared('bait-metal', () => underwater(new THREE.MeshStandardMaterial({ color: '#c9ced3', metalness: 1, roughness: 0.3 }), 'bait-metal')));
   g.add(worm, hook);
   return g;
 }
@@ -365,10 +376,10 @@ export function makeRod(color) {
   const root = new THREE.Group();
   const rod = new THREE.Group(); // 손잡이 쪽(곧은 부분). 로컬 z = 낚싯대 방향, x = 왼쪽, y = 위
   const accentC = new THREE.Color(color);
-  const metal = new THREE.MeshStandardMaterial({ color: '#cfd4d9', metalness: 1, roughness: 0.22 });
-  const gunmetal = new THREE.MeshStandardMaterial({ color: '#3d4148', metalness: 0.9, roughness: 0.3 });
+  const metal = shared('metal', () => new THREE.MeshStandardMaterial({ color: '#cfd4d9', metalness: 1, roughness: 0.22 }));
+  const gunmetal = shared('gunmetal', () => new THREE.MeshStandardMaterial({ color: '#3d4148', metalness: 0.9, roughness: 0.3 }));
   const accent = new THREE.MeshPhysicalMaterial({ color, roughness: 0.3, clearcoat: 1 });
-  const cork = std('#ffffff', 0.85, { map: corkTex });
+  const cork = shared('cork', () => std('#ffffff', 0.85, { map: corkTex }));
   const lathe = (prof) => new THREE.LatheGeometry(prof.map(([rr, z]) => new THREE.Vector2(rr, z)), 18).rotateX(Math.PI / 2);
   rod.add(new THREE.Mesh(merged([
     [lathe([[0.0135, -0.392], [0.0145, -0.33], [0.0142, -0.2], [0.0128, -0.08], [0.0122, -0.045]])],
@@ -420,7 +431,7 @@ export function makeRod(color) {
   blankGeo.setAttribute('normal', new THREE.BufferAttribute(bnor, 3));
   blankGeo.setAttribute('color', new THREE.BufferAttribute(bcol, 3));
   blankGeo.setIndex(bidx);
-  const blank = new THREE.Mesh(blankGeo, new THREE.MeshPhysicalMaterial({ color: '#ffffff', vertexColors: true, roughness: 0.28, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.06 }));
+  const blank = new THREE.Mesh(blankGeo, shared('blank', () => new THREE.MeshPhysicalMaterial({ color: '#ffffff', vertexColors: true, roughness: 0.28, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.06 })));
   blank.frustumCulled = false;
   root.add(blank);
   const tipTop = new THREE.Mesh(new THREE.SphereGeometry(0.0042, 8, 6), metal);
@@ -524,7 +535,7 @@ export function makeRod(color) {
   function dispose() {
     root.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
-      if (o.material) o.material.dispose();
+      if (o.material && !o.material.userData.shared) o.material.dispose();
     });
   }
   return { root, rod, reel, blank, st, pose, dispose };

@@ -432,7 +432,11 @@ export function spinVector(kind, amt, dir, lat) {
 /**
  * 보정된 리턴(또는 서브) 계획. 위치는 기계가 맞추고 선수는 타이밍·세기·스핀만 정합니다.
  * o: { side, p(타점), q(0~1), err(경기 초, −빠름 +늦음), power, aim(도, + 오른쪽), spin, spinAmt, spinSide(±1),
- *      hand, smash, serve, pressure(받기 어려운 공일 때 더하는 실수 확률), rng }
+ *      hand, smash, serve, pressure(받기 어려운 공일 때 더하는 실수 확률), fatigue(긴 랠리에서 더하는 실수 확률), rng, assist }
+ * assist(쉬움·보통): { nudge(0~1, 조준·타이밍이 떨어지는 곳을 옮기는 비율), risk(실수 확률 배율), pressure(받기 어려운 공 실수 배율),
+ *      powerK(세기를 가운데로 모으는 정도, 1 = 그대로), win(판정 창, 타이밍 정규화용) }
+ *   없으면(어려움) 예전 그대로: 조준과 타이밍이 좌우를 정하고 세기가 깊이를 정합니다.
+ *   있으면 기계가 상대 코트 안쪽 안전한 곳을 고르고, 조준·타이밍은 그 둘레를 살짝(nudge)만 옮깁니다.
  * 돌려주는 값: { v, w, target, outcome('in'|'net'|'long'|'wide'), kind }
  */
 export function aimShot(o) {
@@ -440,23 +444,42 @@ export function aimShot(o) {
   const F = fwdOf(o.side);
   const Rx = rightOf(o.side);
   const p = o.p;
+  const A = o.assist || null;
   const kind = o.smash ? 'smash' : o.spin;
+  // 보정: 세기를 가운데(0.62)로 모읍니다. 너무 약하면 높이 떠서 스매시를 맞고, 너무 세면 길어집니다.
+  const power = A ? clamp(0.62 + (o.power - 0.62) * (A.powerK ?? 1), 0, 1) : o.power;
   // 깊이: 세게 칠수록 깊게(네트에서 m)
-  let depth = o.serve ? 0.5 + o.power * 0.65 : 0.42 + o.power * 0.8;
+  let depth = o.serve ? 0.5 + power * 0.65 : 0.42 + power * 0.8;
   if (kind === 'back') depth -= 0.08;
-  if (kind === 'smash') depth = 0.75 + o.power * 0.4;
-  depth = clamp(depth + (rng() - 0.5) * 0.08, 0.3, TABLE.halfL - 0.1);
+  if (kind === 'smash') depth = 0.75 + power * 0.4;
+  // 보정이 있으면 엔드라인·네트에서 넉넉히 떨어진 곳만 노립니다.
+  const dLo = A ? 0.55 : 0.3;
+  const dHi = A ? TABLE.halfL - 0.3 : TABLE.halfL - 0.1;
+  depth = clamp(depth + (rng() - 0.5) * (A ? 0.05 : 0.08), dLo, dHi);
   // 좌우: 조준(폰 화면 방향) + 타이밍(빠르면 크로스, 늦으면 스트레이트)
   const crossDir = o.hand === 'back' ? 1 : -1;
-  const tt = clamp((o.err || 0) / 0.12, -1, 1);
-  let lat = clamp((o.aim || 0) / 25, -1, 1) * 0.42 + -tt * crossDir * 0.4 + (rng() - 0.5) * 0.1;
-  lat = clamp(lat, -(TABLE.halfW - 0.09), TABLE.halfW - 0.09);
+  const latMax = TABLE.halfW - 0.09;
+  let lat;
+  if (A) {
+    // 기계가 고른 자리(가운데 근처, 조금씩 바뀜) + 선수의 방향이 반폭의 nudge 비율만큼만 옮김.
+    // 조준(폰 화면 방향)을 끝까지 돌리면 nudge 만큼(쉬움 ±10%, 보통 ±25%), 타이밍(빠르면 크로스)은 그 안에서 조금 더합니다.
+    const tt = clamp((o.err || 0) / Math.max(0.05, A.win || 0.2), -1, 1);
+    const want = clamp(clamp((o.aim || 0) / 25, -1, 1) + -tt * crossDir * 0.4, -1, 1);
+    lat = (rng() - 0.5) * 0.26 + want * (A.nudge ?? 0.25) * latMax;
+    lat = clamp(lat, -latMax * 0.62, latMax * 0.62);
+  } else {
+    const tt = clamp((o.err || 0) / 0.12, -1, 1);
+    lat = clamp((o.aim || 0) / 25, -1, 1) * 0.42 + -tt * crossDir * 0.4 + (rng() - 0.5) * 0.1;
+    lat = clamp(lat, -latMax, latMax);
+  }
   let tx = Rx * lat;
   let tz = F * depth;
   // 타이밍이 많이 어긋나면(q < 0.25) 네트·아웃 위험이 크고, 그 밖에는 대부분 들어갑니다(조금 어긋날수록 약간의 위험).
   let outcome = 'in';
   const base = o.q < 0.25 ? 0.3 + ((0.25 - o.q) / 0.25) * 0.45 : (1 - o.q) * 0.12;
-  const riskP = clamp((o.serve ? base * 0.6 : base) + (o.pressure || 0), 0, 0.9);
+  const riskP = A
+    ? clamp((o.serve ? base * 0.6 : base) * (A.risk ?? 1) + (o.pressure || 0) * (A.pressure ?? 1) + (o.fatigue || 0), 0, 0.9)
+    : clamp((o.serve ? base * 0.6 : base) + (o.pressure || 0) + (o.fatigue || 0), 0, 0.9);
   if (rng() < riskP) {
     const r = rng();
     outcome = r < 0.4 ? 'net' : r < 0.8 ? 'long' : 'wide';
@@ -469,7 +492,7 @@ export function aimShot(o) {
   const dir = [dx / dist, dz / dist];
   let w = spinVector(kind, o.spinAmt ?? 0.6, dir, (o.spinSide || 1) * Rx);
   if (o.serve) {
-    let sol = solveServe(p, [tx, tz], w, o.side, { speed: 5.6 + o.power * 2.4 });
+    let sol = solveServe(p, [tx, tz], w, o.side, { speed: 5.6 + power * 2.4 });
     let serveKind = kind;
     // 낮은 타점(늦게 친 서브)에서 옆 회전으로 사이드라인 가까이 노리면 풀이가 없을 때가 있습니다.
     // 들어가야 할 공이면 겨냥점을 가운데로 당겨(그래도 없으면 회전도 빼고) 다시 풉니다.
@@ -478,7 +501,7 @@ export function aimShot(o) {
       const d2 = Math.hypot(tx2 - p[0], tz - p[2]) || 1;
       const dir2 = [(tx2 - p[0]) / d2, (tz - p[2]) / d2];
       const w2 = spinVector(k === 0 ? kind : 'none', o.spinAmt ?? 0.6, dir2, (o.spinSide || 1) * Rx);
-      sol = solveServe(p, [tx2, tz], w2, o.side, { speed: 5.6 + o.power * 2.4 });
+      sol = solveServe(p, [tx2, tz], w2, o.side, { speed: 5.6 + power * 2.4 });
       if (sol) {
         tx = tx2;
         w = w2;
@@ -491,12 +514,12 @@ export function aimShot(o) {
     return { v, w, target: [tx, tz], outcome, kind: serveKind };
   }
   // 수평 속도: 세기 + 스핀 + 스매시
-  let vh = 6.8 + o.power * 6.2;
+  let vh = 6.8 + power * 6.2;
   if (kind === 'top') vh += 1.6 * (o.spinAmt ?? 0.6);
   if (kind === 'back') vh -= 1.6 * (o.spinAmt ?? 0.6);
-  if (kind === 'smash') vh = 15.5 + 4 * o.power;
+  if (kind === 'smash') vh = 15.5 + 4 * power;
   // 약하게 칠수록 높이 띄워서(밀어 넘기기) 상대에게 스매시 기회가 생깁니다.
-  const loft = kind === 'smash' ? 1 : 1 + (1 - o.power) * 0.45 + (kind === 'back' ? 0.12 : 0);
+  const loft = kind === 'smash' ? 1 : 1 + (1 - power) * 0.45 + (kind === 'back' ? 0.12 : 0);
   const sol = solveShot(p, [tx, tz], w, (dist / vh) * loft, { minClear: kind === 'smash' ? 0.02 : 0.035 });
   let v = sol ? sol.v : [dir[0] * vh, 2.2, dir[1] * vh];
   if (outcome === 'net') {

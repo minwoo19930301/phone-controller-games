@@ -2,7 +2,7 @@
 // 렌더러 하나로 setViewport/setScissor 를 바꿔 가며 그립니다. 칸 주인의 카트 몸통은 그 칸에서만 숨기고 운전석(후드·핸들)을 보여 줍니다.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { makeKart, makeCockpit, makeTrackMeshes, makeSky, makePuffs } from './models.js';
+import { makeKart, makeCockpit, makeTrackMeshes, makeSky, makePuffs, makeItemBox, makeBanana, makeMissile, makeBolt } from './models.js';
 
 export function createScene(cv, track) {
   const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, powerPreference: 'high-performance' });
@@ -50,13 +50,24 @@ export function createScene(cv, track) {
     });
   }
 
-  function poseKart(m, k, now) {
+  // 미끄러져 도는 각도(처음엔 빠르게, 끝엔 천천히 한 바퀴)
+  const spinAngle = (k) => {
+    if (!(k.spinT > 0)) return 0;
+    const e = 1 - k.spinT / Math.max(0.1, k.spinDur);
+    return (1 - (1 - e) * (1 - e)) * Math.PI * 2 * (k.spinDir || 1);
+  };
+  const BLACK = new THREE.Color('#000000');
+  function poseKart(m, k, now, dt) {
     const g = m.group;
     g.position.set(k.x, 0, k.z);
     // 모델 앞이 +X 라 y 회전은 -h. 살짝 옆으로 기울이고(롤), 미끄러질 땐 뒤가 흐름
-    g.rotation.set(0, -k.h, 0);
+    g.rotation.set(0, -k.h - spinAngle(k), 0);
     g.rotation.x = -k.steer * Math.min(1, Math.abs(k.vf) / 30) * 0.05;
     g.position.y = Math.sin(now * 0.05 + k.id * 7) * 0.006 * Math.min(1, Math.abs(k.vf) / 10) + (k.offroad ? Math.sin(now * 0.04) * 0.02 : 0);
+    // 번개를 맞으면 작아집니다.
+    k.vScale = k.vScale || 1;
+    k.vScale += ((k.shrinkT > 0 ? 0.58 : 1) - k.vScale) * Math.min(1, dt * 7);
+    g.scale.setScalar(k.vScale);
     const ud = g.userData;
     for (const w of ud.wheels) {
       w.spin.rotation.z = -k.wheelSpin;
@@ -64,15 +75,132 @@ export function createScene(cv, track) {
     }
     ud.flame.material.opacity = k.boostT > 0 ? 0.6 + Math.sin(now * 0.05) * 0.25 : 0;
     ud.flame.scale.setScalar(k.boostT > 0 ? 1.3 + Math.sin(now * 0.07) * 0.25 : 1);
+    // 추격 부스트 불꽃: 보정이 클수록 길고 진합니다.
+    const ch = Math.min(1, (k.chase || 0) / 0.16);
+    ud.chase.visible = ch > 0.12 && !(k.spinT > 0);
+    if (ud.chase.visible) {
+      const fl = 0.85 + Math.sin(now * 0.045 + k.id) * 0.1 + Math.sin(now * 0.11 + k.id * 3) * 0.08;
+      ud.chase.scale.set((0.55 + ch * 0.75) * fl, 0.8 + ch * 0.35, 0.8 + ch * 0.35);
+      ud.chaseMat.opacity = 0.35 + ch * 0.5;
+      ud.chaseCore.opacity = 0.3 + ch * 0.55;
+    }
+    // 무적 질주: 무지개빛으로 번쩍이는 차체 + 금빛 후광
+    const star = k.starT > 0;
+    const fade = star ? Math.min(1, k.starT / 0.8) : 0;
+    ud.aura.material.opacity = star ? (0.45 + Math.sin(now * 0.03) * 0.15) * fade : 0;
+    if (star) {
+      ud.aura.material.color.setHSL((now * 0.0012) % 1, 0.9, 0.7);
+      ud.bodyMat.emissive.setHSL((now * 0.0016) % 1, 1, 0.5);
+      ud.bodyMat.emissiveIntensity = 0.85 * fade;
+      ud.lightMat.emissive.copy(ud.bodyMat.emissive);
+      ud.lightMat.emissiveIntensity = 0.6 * fade;
+      m.wasStar = true;
+    } else if (m.wasStar) {
+      ud.bodyMat.emissive.copy(BLACK);
+      ud.lightMat.emissive.copy(BLACK);
+      m.wasStar = false;
+    }
     const c = m.cockpit;
     c.position.set(k.x, 0, k.z);
     c.rotation.set(0, -k.h, 0);
     c.rotation.x = g.rotation.x;
+    c.scale.setScalar(k.vScale);
     for (const w of c.userData.wheels) {
       w.spin.rotation.z = -k.wheelSpin;
       w.holder.rotation.y = -k.steer * 0.45;
     }
     c.userData.wheel.rotation.z = -k.steer * 1.25; // 핸들: 오른쪽 조향이면 시계 방향
+    const cb = c.userData.bodyMat;
+    if (star) { cb.emissive.copy(ud.bodyMat.emissive); cb.emissiveIntensity = 0.55 * fade; }
+    else if (cb.emissiveIntensity) { cb.emissive.copy(BLACK); cb.emissiveIntensity = 0; }
+  }
+
+  // ---------- 아이템전 소품 ----------
+  const boxMeshes = new Map(); // 상자 id -> mesh
+  const bananaPool = [];
+  const missilePool = [];
+  const boltPool = [];
+  const itemRoot = new THREE.Group();
+  scene.add(itemRoot);
+  const pool = (arr, make, n) => {
+    while (arr.length < n) {
+      const m = make();
+      m.visible = false;
+      itemRoot.add(m);
+      arr.push(m);
+    }
+    return arr;
+  };
+  pool(bananaPool, makeBanana, 14);
+  pool(missilePool, makeMissile, 6);
+  pool(boltPool, makeBolt, 8);
+  // 처음 바나나·유도탄이 나올 때 셰이더를 만드느라 끊기지 않게 미리 한 번 컴파일해 둡니다.
+  function warm(cam) {
+    const all = [...bananaPool, ...missilePool, ...boltPool, makeItemBox()];
+    const extra = all[all.length - 1];
+    itemRoot.add(extra);
+    for (const m of all) { m.visible = true; m.position.set(0, -50, 0); }
+    try { renderer.compile(scene, cam); } catch (e) {}
+    for (const m of all) m.visible = false;
+    itemRoot.remove(extra);
+  }
+  function syncItems(st, now, dt) {
+    itemRoot.visible = Boolean(st && st.on);
+    if (!st || !st.on) return;
+    for (const b of st.boxes) {
+      let m = boxMeshes.get(b.id);
+      if (!m) {
+        m = makeItemBox();
+        m.position.set(b.x, 0, b.z);
+        itemRoot.add(m);
+        boxMeshes.set(b.id, m);
+      }
+      m.visible = b.alive;
+      if (!b.alive) continue;
+      const ud = m.userData;
+      const t = now / 1000 + b.id * 0.7;
+      ud.spin.rotation.set(0.5 + Math.sin(t * 0.7) * 0.15, t * 1.4, 0.35);
+      ud.spin.position.y = 1.15 + Math.sin(t * 2.1) * 0.12;
+      ud.core.rotation.y = -t * 3;
+      const gs = b.grow < 1 ? 1 - Math.pow(1 - b.grow, 3) : 1;
+      ud.spin.scale.setScalar(Math.max(0.01, gs));
+      ud.glow.material.opacity = 0.32 + Math.sin(t * 3) * 0.08;
+    }
+    bananaPool.forEach((m, i) => {
+      const bn = st.bananas[i];
+      m.visible = Boolean(bn);
+      if (!bn) return;
+      m.position.set(bn.x, 0, bn.z);
+      m.rotation.y = -bn.h + bn.id;
+      // 떨어진 직후 살짝 튕깁니다.
+      m.position.y = bn.age < 0.35 ? Math.sin((bn.age / 0.35) * Math.PI) * 0.5 : 0;
+    });
+    missilePool.forEach((m, i) => {
+      const ms = st.missiles[i];
+      m.visible = Boolean(ms);
+      if (!ms) return;
+      m.position.set(ms.x, 0.75 + Math.sin(now * 0.02 + ms.id) * 0.05, ms.z);
+      m.rotation.set(Math.sin(now * 0.03) * 0.4, -ms.h, 0);
+      m.userData.fire.scale.setScalar(0.9 + Math.random() * 0.5);
+      if (Math.random() < dt * 40) {
+        puffs.spawn(ms.x - Math.cos(ms.h) * 0.9, 0.75, ms.z - Math.sin(ms.h) * 0.9, (Math.random() - 0.5), 0.6, (Math.random() - 0.5), '#e9e6f2', 0.5, 0.7, 0.5, 2.6);
+      }
+    });
+    let bi = 0;
+    for (const fx of st.fx) {
+      if (fx.kind !== 'bolt') continue;
+      const a = 1 - fx.t / fx.max;
+      for (const v of fx.victims) {
+        const m = boltPool[bi++];
+        if (!m) break;
+        m.visible = true;
+        m.position.set(v.x, 0, v.z);
+        m.rotation.y = Math.random() * Math.PI;
+        m.userData.mat.opacity = a * (0.6 + Math.random() * 0.4);
+        m.userData.flash.material.opacity = a * 0.9;
+      }
+    }
+    for (; bi < boltPool.length; bi++) boltPool[bi].visible = false;
   }
 
   // ---------- 카메라와 화면 분할 ----------
@@ -117,14 +245,16 @@ export function createScene(cv, track) {
     renderer.setScissorTest(false);
   }
 
-  function update(dt, now, karts) {
+  function update(dt, now, karts, itemsState) {
     trackMeshes.update(now / 1000);
     for (const k of karts) {
       const m = models.get(k.id);
-      if (m) poseKart(m, k, now);
+      if (m) poseKart(m, k, now, dt);
     }
+    syncItems(itemsState, now, dt);
     puffs.update(dt);
   }
 
+  warm(cams[0]);
   return { render, update, setRoster, puffs, renderer, scene, THREE };
 }

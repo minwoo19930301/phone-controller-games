@@ -16,6 +16,12 @@ const E_WALL = 0.9; // 벽 반발
 const E_MALLET = 0.88; // 말렛 반발
 const E_POST = 0.8;
 const FRICTION = 0.14; // 초당 감속 비율(공기 부상이라 아주 작음)
+// 판마다 정한 퍽 최고 속도(쉬움·보통은 느림)를 넘는 빠르기는 바로 자르지 않고 짧게 줄입니다.
+// 바로 자르면 말렛이 퍽보다 빨라서, 다음 계산 단계마다 말렛이 퍽을 다시 따라잡아 '딱' 이 수십 번 겹치고 퍽이 말렛에 붙어 끌려갑니다.
+// 그래서 맞은 순간은 말렛 빠르기까지 허용하고(퍽이 말렛보다 앞서 나감), 넘친 몫은 초당 OVER_DECAY 로 빠르게 줄여 최고 속도로 맞춥니다.
+const OVER_DECAY = 30; // 0.05초면 넘친 몫의 78% 가 줄어듭니다
+const ABS_PUCK = 9.5; // 어떤 경우에도 넘지 않는 빠르기
+const RECONTACT = 0.09; // 이 시간(초) 안에 같은 말렛에 다시 닿은 건 같은 타격으로 봅니다(소리·진동·기록 한 번)
 
 export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
@@ -38,19 +44,35 @@ export function padRegionOf(side, lane) {
   return { x0, x1, z0, z1 };
 }
 
-export function createSim() {
-  return {
+/**
+ * 판 하나. cfg 는 난이도에 따라 바뀌는 값입니다(없으면 예전 그대로 = 어려움).
+ * cfg: { goal: 골문 폭(m), maxPuck: 퍽 최고 속도(m/s), friction: 초당 감속 비율 }
+ */
+export function createSim(cfg = {}) {
+  const sim = {
     puck: { x: 0, z: 0, vx: 0, vz: 0, spin: 0, angle: 0, live: false },
     mallets: [],
     lastTouch: null, // 마지막으로 친 말렛 id
-    lastTouchSpeed: 0
+    lastTouchSpeed: 0,
+    t: 0, // 판 시간(초). 같은 타격 묶기에 씁니다
+    goal: RINK.GOAL,
+    maxPuck: MAX_PUCK,
+    friction: FRICTION
   };
+  return tuneSim(sim, cfg);
+}
+/** 경기 중이 아닐 때(대기실 데모) 난이도가 바뀌면 같은 판의 값만 바꿉니다. */
+export function tuneSim(sim, cfg = {}) {
+  if (Number.isFinite(cfg.goal)) sim.goal = clamp(cfg.goal, 0.2, 0.6);
+  if (Number.isFinite(cfg.maxPuck)) sim.maxPuck = clamp(cfg.maxPuck, 2, 9);
+  if (Number.isFinite(cfg.friction)) sim.friction = clamp(cfg.friction, 0, 1.5);
+  return sim;
 }
 
 export function addMallet(sim, id, side, lane) {
   const r = regionOf(side, lane);
   const home = homeOf(side, lane);
-  const m = { id, side, lane, ...r, x: home.x, z: home.z, px: home.x, pz: home.z, vx: 0, vz: 0, tx: home.x, tz: home.z, maxV: MAX_MALLET };
+  const m = { id, side, lane, ...r, x: home.x, z: home.z, px: home.x, pz: home.z, vx: 0, vz: 0, tx: home.x, tz: home.z, maxV: MAX_MALLET, assist: 0, hitT: -1 };
   sim.mallets.push(m);
   return m;
 }
@@ -72,12 +94,34 @@ export function placePuck(sim, x, z) {
   sim.lastTouchSpeed = 0;
 }
 
-function capPuck(p) {
+function capPuck(p, max = MAX_PUCK) {
   const s = Math.hypot(p.vx, p.vz);
-  if (s > MAX_PUCK) {
-    p.vx *= MAX_PUCK / s;
-    p.vz *= MAX_PUCK / s;
+  if (s > max) {
+    p.vx *= max / s;
+    p.vz *= max / s;
   }
+}
+
+// 겨냥 도우미(쉬움·보통): 상대 쪽으로 보낸 퍽의 방향을 상대 골문 쪽으로 조금 꺾어 줍니다.
+// 곧장 노린 골문과 옆 벽에 비친 골문(벽 맞혀 꺾어 넣기) 중 퍽이 가는 방향에 더 가까운 쪽으로 당기므로, 벽을 노린 슛도 살아 있습니다.
+// 골문에서 너무 벗어난(57° 넘게) 패스·걷어내기는 건드리지 않습니다. m.assist = 0..1 (꺾는 비율)
+const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+function assistAim(sim, m, p) {
+  const sp = Math.hypot(p.vx, p.vz);
+  if (sp < 0.5 || p.vz * -m.side <= 0) return; // 상대 쪽으로 가는 퍽만
+  const gz = -m.side * (RINK.L / 2);
+  const span = sim.goal * 0.3;
+  const gx = clamp(p.x * 0.35, -span, span); // 골문 안쪽, 퍽이 있는 쪽으로 살짝
+  const cur = Math.atan2(p.vx, p.vz);
+  let best = null;
+  for (const tx of [gx, -RINK.W - gx, RINK.W - gx]) {
+    const d = wrapAngle(Math.atan2(tx - p.x, gz - p.z) - cur);
+    if (best === null || Math.abs(d) < Math.abs(best)) best = d;
+  }
+  if (best === null || Math.abs(best) > 1.0) return;
+  const a = cur + best * clamp(m.assist, 0, 1);
+  p.vx = Math.sin(a) * sp;
+  p.vz = Math.cos(a) * sp;
 }
 
 // 기둥(점)과 퍽 충돌
@@ -99,8 +143,9 @@ function post(p, px, pz, events) {
 }
 
 // 벽, 골문, 기둥. 골이 들어가면 들어간 쪽(side)을 돌려줍니다.
-function walls(p, events) {
-  const { W, L, PR, GOAL } = RINK;
+function walls(sim, p, events) {
+  const { W, L, PR } = RINK;
+  const GOAL = sim.goal;
   const hw = W / 2;
   const hl = L / 2;
   const gh = GOAL / 2;
@@ -192,11 +237,15 @@ function malletHit(sim, m, mx, mz, events) {
     // 비껴 맞으면 퍽이 돕니다(그림에만 씀)
     const vt = rvx * -nz + rvz * nx;
     p.spin += clamp(vt * 18, -40, 40);
+    if (m.assist > 0) assistAim(sim, m, p);
     const shot = Math.hypot(p.vx, p.vz); // 속도 상한을 걸기 전 타구 속도(기록용)
-    capPuck(p);
+    // 맞은 순간은 말렛 빠르기까지 허용(넘친 몫은 step 에서 곧 줄어듦). 어려움(예전)은 6.5m/s 그대로입니다.
+    capPuck(p, Math.min(ABS_PUCK, Math.max(sim.maxPuck, Math.hypot(m.vx, m.vz) * 1.05)));
     const now = Math.hypot(p.vx, p.vz);
+    const again = sim.t - m.hitT < RECONTACT && sim.lastTouch === m.id; // 같은 타격이 이어지는 중
     if (-vn > 0.05) {
-      events.push({ type: 'hit', id: m.id, rel: -vn, speed: now, shot, x: p.x, z: p.z });
+      m.hitT = sim.t;
+      if (!again) events.push({ type: 'hit', id: m.id, rel: -vn, speed: Math.min(now, sim.maxPuck), shot, x: p.x, z: p.z });
       sim.lastTouch = m.id;
       sim.lastTouchSpeed = now;
     }
@@ -219,12 +268,21 @@ export function step(sim, dt, events) {
   });
   const n = clamp(Math.ceil(maxMove / (RINK.PR * 0.35)), 2, 40);
   const h = dt / n;
-  const fr = Math.exp(-FRICTION * h);
+  const fr = Math.exp(-sim.friction * h);
   const R = RINK.PR + RINK.MR;
+  const over = Math.exp(-OVER_DECAY * h);
   for (let k = 1; k <= n; k++) {
     const u = k / n;
+    sim.t += h;
     p.vx *= fr;
     p.vz *= fr;
+    // 최고 속도를 넘친 몫만 빠르게 줄입니다(위 OVER_DECAY 설명).
+    const sp = Math.hypot(p.vx, p.vz);
+    if (sp > sim.maxPuck) {
+      const k2 = (sim.maxPuck + (sp - sim.maxPuck) * over) / sp;
+      p.vx *= k2;
+      p.vz *= k2;
+    }
     p.x += p.vx * h;
     p.z += p.vz * h;
     p.spin *= Math.exp(-1.2 * h);
@@ -234,7 +292,7 @@ export function step(sim, dt, events) {
       m.cz = starts[i][1] + (m.z - starts[i][1]) * u;
       malletHit(sim, m, m.cx, m.cz, events);
     });
-    const g = walls(p, events);
+    const g = walls(sim, p, events);
     if (g) {
       events.push({ type: 'goal', side: g, x: p.x, z: p.z, speed: Math.hypot(p.vx, p.vz) });
       p.live = false;
@@ -328,7 +386,7 @@ export function aiTarget(sim, m, ai) {
       ai.state = 'attack';
       // 겨냥: 골문 안 아무 데나, 가끔은 옆 벽을 맞혀 꺾어 넣기
       ai.bank = Math.random() < 0.25 ? (Math.random() < 0.5 ? -1 : 1) : 0;
-      ai.aimX = (Math.random() - 0.5) * (RINK.GOAL * 0.75) + gauss() * ai.aimErr;
+      ai.aimX = (Math.random() - 0.5) * (sim.goal * 0.75) + gauss() * ai.aimErr;
     }
     // 움직이는 퍽은 말렛이 닿을 즈음의 자리를 노립니다.
     const dist = Math.hypot(m.x - p.x, m.z - p.z);

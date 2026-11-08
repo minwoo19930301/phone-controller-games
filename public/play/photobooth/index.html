@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#140e16">
+<title>네컷 사진관 · 폰</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <span class="me" id="me">…</span><span class="room" id="room"></span>
+  <span class="camchip hidden" id="camChip"><i></i><span id="camChipT">카메라</span></span>
+</header>
+<div class="banner hidden" id="banner"></div>
+<main>
+  <!-- 처음 -->
+  <section class="view center on" id="vStart">
+    <svg class="art" viewBox="0 0 220 210" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <g transform="rotate(-8 70 110)">
+        <rect x="22" y="20" width="96" height="176" rx="18" fill="#221822" stroke="#fff" stroke-width="3"/>
+        <rect x="32" y="40" width="76" height="132" rx="6" fill="#ffd9ea"/>
+        <circle cx="70" cy="96" r="22" fill="#ffd7bf"/>
+        <path d="M48 92c2-20 42-24 44 0" fill="#3b2a24"/>
+        <circle cx="62" cy="98" r="2.6" fill="#1d1b22"/><circle cx="78" cy="98" r="2.6" fill="#1d1b22"/>
+        <path d="M63 106q7 6 14 0" stroke="#7a2b35" stroke-width="2.6"/>
+        <path d="M40 172c4-26 56-26 60 0" fill="var(--c)"/>
+        <circle cx="70" cy="30" r="4" fill="#fff"/>
+      </g>
+      <g transform="rotate(7 168 110)">
+        <rect x="140" y="18" width="56" height="176" rx="3" fill="#fbf8f1"/>
+        <rect x="146" y="24" width="44" height="34" fill="#ff5a5f"/>
+        <rect x="146" y="62" width="44" height="34" fill="#3ab4ff"/>
+        <rect x="146" y="100" width="44" height="34" fill="#ffc93c"/>
+        <rect x="146" y="138" width="44" height="34" fill="#5ee07a"/>
+        <path d="M152 184h32" stroke="#241a20" stroke-width="3"/>
+      </g>
+      <path d="M118 52l14-8M122 70l16 0M118 88l14 8" stroke="#ffd27a" stroke-width="3"/>
+    </svg>
+    <h1>폰이 네컷 사진기가 돼요</h1>
+    <p>앞 카메라로 셀카를 찍으면
+큰 화면 네컷에 쏙 들어가요.</p>
+    <button class="primary" id="btnStart">시작하기</button>
+    <div class="privacy"><i></i>사진은 이 방 큰 화면에만 가고, 10분 뒤 사라져요</div>
+  </section>
+
+  <!-- 메시지 -->
+  <section class="view center" id="vMsg"><h1 id="msgT"></h1><p id="msgB"></p></section>
+
+  <!-- 대기실 · 다 찍음 · 결과 -->
+  <section class="view" id="vWait">
+    <div class="w-scroll" id="wScroll">
+    <div class="w-head"><div class="w-title" id="wTitle">대기실</div><div class="w-sub" id="wSub"></div></div>
+
+    <div class="cam-card" id="camCard">
+      <div class="cam-box" id="camBoxWait">
+        <div class="cam-off" id="camOff">
+          <svg viewBox="0 0 48 48"><rect x="6" y="14" width="36" height="26" rx="5"/><circle cx="24" cy="27" r="7.5"/><path d="M17 14l3-5h8l3 5"/></svg>
+          <b id="camOffT">카메라가 꺼져 있어요</b>
+          <span id="camOffB">셀카를 찍으려면 앞 카메라를 켜요</span>
+          <button type="button" class="pill-btn" id="btnCam">카메라 켜기</button>
+          <button type="button" class="link-btn" id="btnFile">카메라 없이 폰 카메라 앱으로 찍기</button>
+        </div>
+        <div class="cam-live hidden" id="camLive"><i></i>큰 화면에도 보여요</div>
+      </div>
+    </div>
+
+    <div class="r-sheet hidden" id="rSheet"><img id="rSheetImg" alt="다 찍은 네컷"></div>
+    <div class="my-shots hidden" id="myShots"></div>
+
+    <div class="final hidden" id="final">
+      <div class="final-img" id="finalBox">
+        <img id="finalImg" alt="완성된 네컷">
+        <div class="final-wait" id="finalWait"><i></i><span>큰 화면에서 굽는 중…</span></div>
+      </div>
+      <div class="final-btns" id="finalBtns">
+        <button type="button" class="save" id="btnSaveMine" hidden>내 네컷 저장</button>
+        <button type="button" class="save" id="btnSaveAll">사진 저장</button>
+      </div>
+      <div class="final-note" id="finalNote">10분 뒤 사라져요 · 사진을 길게 눌러도 저장돼요</div>
+    </div>
+
+    <div class="opts" id="opts">
+      <div class="opt-label">모드</div>
+      <div class="modes" id="modeBtns"></div>
+      <div class="opt-label">프레임</div>
+      <div class="themes" id="themeBtns"></div>
+      <div id="setBox" class="set-box"></div>
+    </div>
+    </div>
+
+    <div class="foot">
+      <div class="people" id="people"></div>
+      <button class="primary" id="btnGo">준비</button>
+      <div class="tut-link" id="tutLink"></div>
+    </div>
+  </section>
+
+  <!-- 촬영 -->
+  <section class="view" id="vShoot">
+    <div class="s-top">
+      <span class="s-cut" id="sCut">CUT 1/4</span>
+      <span class="s-who" id="sWho"></span>
+    </div>
+    <div class="s-prompt" id="sPrompt"></div>
+    <div class="s-stage" id="sStage">
+      <div class="cam-frame" id="camFrame">
+        <canvas class="freeze hidden" id="freeze"></canvas>
+        <div class="s-live" id="sLive"><i></i>LIVE</div>
+        <div class="s-count" id="sCount"><b></b></div>
+        <div class="s-flash" id="sFlash"></div>
+        <div class="s-nocam hidden" id="sNoCam"><b>폰 카메라 앱으로 찍어요</b><span>숫자가 끝나면 ‘지금 찍기’를 눌러요</span></div>
+      </div>
+    </div>
+    <div class="s-bottom" id="sBottom">
+      <div class="s-status" id="sStatus"></div>
+      <div class="s-btns hidden" id="sReview">
+        <button type="button" class="ghost" id="btnRetake">다시 찍기</button>
+        <button type="button" class="primary" id="btnKeep">좋아요 ✓</button>
+      </div>
+      <div class="s-bar hidden" id="sBar"><i></i></div>
+      <button type="button" class="primary hidden" id="btnSnapFile">📷 지금 찍기</button>
+    </div>
+  </section>
+
+  <!-- 꾸미기 -->
+  <section class="view" id="vDeco"></section>
+</main>
+<div class="toast" id="toast"></div>
+<div class="debug" id="debug"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script type="module" src="controller.js"></script>
+</body>
+</html>

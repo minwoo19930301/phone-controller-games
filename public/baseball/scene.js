@@ -850,6 +850,34 @@ export function createScene(canvas) {
     flat(new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false }), 7));
   scene.add(ballShadow);
 
+  // 타이밍 링(쉬움·보통): 공이 지나갈 자리에 링이 떠서 줄어들고, 공이 닿는 순간 가운데 작은 원과 겹칩니다. 그때 휘두르면 됩니다.
+  // 링 두께가 크기와 상관없이 같게 보이도록 평면 위에 셰이더로 그립니다(단위 m).
+  const cueMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    uniforms: { uR: { value: 0.5 }, uW: { value: 0.05 }, uC: { value: new THREE.Color('#ffffff') }, uA: { value: 1 }, uSpot: { value: 1 } },
+    vertexShader: 'varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform float uR; uniform float uW; uniform vec3 uC; uniform float uA; uniform float uSpot; varying vec2 vP;
+      void main(){
+        float d = length(vP);
+        float aa = fwidth(d) * 1.3;
+        float ring = 1.0 - smoothstep(uW * 0.5 - aa, uW * 0.5 + aa, abs(d - uR));
+        float spot = (1.0 - smoothstep(0.011 - aa, 0.011 + aa, abs(d - 0.085))) * uSpot;
+        float glow = exp(-pow((d - uR) / (uW * 2.4), 2.0)) * 0.32;
+        float a = max(max(ring, spot), glow) * uA;
+        if (a < 0.004) discard;
+        gl_FragColor = vec4(uC, a);
+      }`
+  });
+  const cue = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), cueMat);
+  cue.renderOrder = 30;
+  cue.visible = false;
+  scene.add(cue);
+  const cueWhite = new THREE.Color('#ffffff');
+  const cueGold = new THREE.Color('#ffd23a');
+
   // 타구 궤적
   const trailMat = new LineMaterial({ color: '#ffffff', linewidth: 5, transparent: true, opacity: 0.85, toneMapped: false });
   let trail = null;
@@ -1058,6 +1086,22 @@ export function createScene(canvas) {
     ballShadow.scale.set(sh, 1, sh);
     halo.material.opacity = v.mode === 'hit' ? 0.8 : 0.45;
     halo.scale.setScalar(v.mode === 'hit' ? 1.4 : 0.32);
+
+    // 타이밍 링. v.cue = { x, y, u }: u 는 공을 놓은 순간 0, 홈플레이트를 지나는 순간 1
+    if (v.cue && v.mode === 'pitch' && v.cue.u > -0.02 && v.cue.u < 1.3) {
+      const u = v.cue.u;
+      const k = Math.min(1, Math.max(0, u));
+      const near = Math.max(0, 1 - Math.abs(u - 1) / 0.1); // 닿는 순간 번쩍
+      cue.visible = true;
+      cue.position.set(v.cue.x, v.cue.y, 0.12);
+      cueMat.uniforms.uR.value = 0.085 + (1 - k) * 0.86;
+      cueMat.uniforms.uW.value = 0.026 + (1 - k) * 0.03 + near * 0.012;
+      cueMat.uniforms.uC.value.copy(cueWhite).lerp(cueGold, Math.min(1, k * k * 0.85 + near));
+      cueMat.uniforms.uA.value = u > 1 ? Math.max(0, 1 - (u - 1) / 0.3) : 0.35 + 0.65 * k;
+      cueMat.uniforms.uSpot.value = 0.7 + near * 0.3;
+    } else {
+      cue.visible = false;
+    }
 
     if (trail && v.hitI != null) {
       trail.geometry.instanceCount = Math.max(0, Math.min(trail.userData.n - 1, Math.floor(v.hitI / 2)));

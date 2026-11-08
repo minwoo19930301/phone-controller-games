@@ -4,7 +4,7 @@
 // 한 마리의 하루: 헤엄(순항·어슬렁·멈춤·돌진) → 찌를 알아챔 → 다가가 살핌 → 톡톡(예신) → 덥석(본신)
 // → 챔질이 맞으면 걸림(줄에 끌려옴) / 늦으면 미끼만 떼어 먹고 떠남 / 너무 일찍 채면 놀라 도망.
 import {
-  AREA, MIX, BIG_KG, BAIT_DEPTH, SPECIES, COVER, bedDepth, lakeQ, coverAt, rollWeight, fishInfo, bigness
+  AREA, MIX, BIG_KG, BAIT_DEPTH, SPECIES, COVER, ASSIST, bedDepth, lakeQ, coverAt, rollWeight, fishInfo, bigness
 } from './logic.js';
 
 export const POP = 12; // 늘 살아 있는 물고기 수(쉽게 바꿀 수 있게 한곳에)
@@ -26,8 +26,10 @@ function defaultInView(x, y, z, r) {
   return dz > 0.4 && Math.abs(x) - r < dz * 1.02 && z < 46;
 }
 
-export function createPond({ rand = Math.random, inView = defaultInView, count = POP, now = 0 } = {}) {
+export function createPond({ rand = Math.random, inView = defaultInView, count = POP, now = 0, assist = ASSIST.hard } = {}) {
   const fish = [];
+  // 난이도별 도움(logic.js ASSIST). 알아채는 거리·다가올 확률·망설이는 시간·물기 전 톡톡 횟수에 씁니다.
+  let A = assist || ASSIST.hard;
   const events = [];
   let nextId = 1;
   let nextSchool = 1;
@@ -256,10 +258,11 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
     f.ignoreUntil = Math.max(f.ignoreUntil, t + ignoreFor);
   }
 
+  const noticeOf = (f) => f.noticeR * A.notice;
   function lureScore(f, l) {
     const d = d2(f, l);
     const recentTwitch = t - (l.twitchAt || -99) < 2.5;
-    const reach = f.noticeR + (recentTwitch ? 1.5 : 0);
+    const reach = noticeOf(f) + (recentTwitch ? 1.5 : 0);
     if (d > reach) return -1e9;
     let s = 1 - d / reach + (recentTwitch ? 0.6 : 0) + (t - (l.landAt || -99) < 3 ? 0.15 : 0) - (l.moving ? 0.2 : 0);
     if (l.fishId && l.fishId !== f.id) s -= 0.3;
@@ -298,8 +301,8 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
         spook(f, l.x, l.z, R(1, 2), 2.5);
         continue;
       }
-      if (d < f.noticeR && !ignoring(f, l.slot) && (f.mode === 'roam' || f.mode === 'enter')) {
-        const at = t + R(0.4, 1.8) * (1 + f.big * 0.5);
+      if (d < noticeOf(f) && !ignoring(f, l.slot) && (f.mode === 'roam' || f.mode === 'enter')) {
+        const at = t + R(0.4, 1.8) * (1 + f.big * 0.5) * A.commit;
         if (!f.noticeAt || at < f.noticeAt) {
           f.noticeAt = at;
           f.noticeBoost = 0;
@@ -311,10 +314,14 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
     for (const f of fish) {
       if (f.mode === 'inspect' && f.lure === l.slot) {
         // 살피던 물고기: 큰 놈은 톡 건드리면 덥석 무는 일이 많고, 작은 놈은 가끔 놀랍니다.
+        // 쉬운 난이도에서는 물기 전에 톡톡을 꼭 정한 횟수만큼 하므로, 아직이면 톡톡을 앞당깁니다.
         const r = rand();
         if (l.fishId === f.id || !l.fishId) {
-          if (r < 0.22 + 0.4 * f.big) startBite(f, l);
-          else if (f.big < 0.2 && r > 0.88) toRoam(f, l.slot, 5);
+          if ((f.nibsDone || 0) < A.nibMin) {
+            f.nibLeft = Math.max(f.nibLeft, A.nibMin - (f.nibsDone || 0));
+            f.nextNib = Math.min(f.nextNib, t + R(0.15, 0.4));
+          } else if (r < 0.22 + 0.4 * f.big) startBite(f, l);
+          else if (f.big < 0.2 && r > 0.88 && !f.guided) toRoam(f, l.slot, 5);
           else f.inspEnd = Math.min(f.inspEnd, t + R(0.4, 1.4));
         }
         continue;
@@ -325,7 +332,7 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
         spook(f, l.x, l.z, R(0.6, 1.2), 1.5);
         continue;
       }
-      if (d < f.noticeR + 1.5 && t >= f.ignoreUntil) {
+      if (d < noticeOf(f) + 1.5 && t >= f.ignoreUntil) {
         // 다른 찌를 노리던 물고기도 톡 건드린 찌 쪽이 더 끌리면 갈아탑니다(곧 다시 견줘 봅니다).
         if (f.mode === 'approach') f.nextEval = t;
         else {
@@ -339,6 +346,7 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
   }
 
   function startBite(f, l) {
+    f.guided = false;
     f.mode = 'bite';
     f.lure = l.slot;
     l.fishId = f.id;
@@ -446,12 +454,13 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
     }
     if (m === 'approach' || m === 'inspect') {
       const l = lureOf(f.lure);
-      if (!l || ignoring(f, l.slot)) {
+      if (!l || (ignoring(f, l.slot) && !f.guided)) {
+        f.guided = false;
         toRoam(f, null, 0);
         return;
       }
       // 견주기: 다른 찌가 훨씬 끌리면(가깝거나 방금 톡 움직였으면) 그쪽으로 갑니다.
-      if (t >= f.nextEval) {
+      if (t >= f.nextEval && !f.guided) {
         f.nextEval = t + 0.5;
         const b = bestLure(f);
         if (b && b.l !== l && b.s > lureScore(f, l) + 0.35 && l.fishId !== f.id) {
@@ -468,7 +477,7 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
       f.noticeAt = 0;
       const b = bestLure(f);
       if (b) {
-        const p = CURIOUS[f.sp] * (1 - 0.5 * f.big) * (1 + f.noticeBoost);
+        const p = CURIOUS[f.sp] * (1 - 0.5 * f.big) * (1 + f.noticeBoost) + A.curious;
         if (rand() < p) {
           startApproach(f, b.l);
           return;
@@ -481,8 +490,8 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
       f.nextScan = t + R(1.6, 3.2);
       if (!f.noticeAt) {
         const b = bestLure(f);
-        if (b && rand() < 0.42) {
-          f.noticeAt = t + R(0.2, 0.9);
+        if (b && rand() < 0.42 + A.curious) {
+          f.noticeAt = t + R(0.2, 0.9) * A.commit;
           f.noticeBoost = -0.35;
         }
       }
@@ -492,18 +501,22 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
 
   function thinkApproach(f, l) {
     const d = d2(f, l);
-    if (t - f.approachT0 > 14) {
-      toRoam(f, l.slot, 10);
+    if (t - f.approachT0 > (f.guided ? 40 : A.approach)) {
+      f.guided = false;
+      toRoam(f, l.slot, 10 * A.ignore);
       return;
     }
     f.tx = l.x;
     f.tz = l.z;
-    f.tgtSpeed = d > 2 ? f.len * 1.5 + 0.18 : clamp(f.len * 0.3 + (d - 0.4) * 0.35, 0.05, f.len * 1.5);
+    // 안내받는 물고기(튜토리얼)는 조금 서둘러 옵니다.
+    const hurry = f.guided ? 1.8 : 1;
+    f.tgtSpeed = d > 2 ? (f.len * 1.5 + 0.18) * hurry : clamp(f.len * 0.3 + (d - 0.4) * 0.35, 0.05, f.len * 1.5);
     if (d < f.len * 0.5 + 0.38) {
       f.mode = 'inspect';
       f.orbitA = Math.atan2(f.x - l.x, f.z - l.z);
-      f.inspEnd = t + R(0.8, 1.8) * (1 + 1.4 * f.big);
-      f.nibLeft = Math.floor(R(0, 3.99));
+      f.inspEnd = t + R(0.8, 1.8) * (1 + 1.4 * f.big) * A.commit;
+      f.nibsDone = 0;
+      f.nibLeft = f.guided ? Math.max(2, A.nibMin) : Math.max(A.nibMin, Math.floor(R(0, 3.99)));
       f.nextNib = t + R(0.35, 0.8);
     }
   }
@@ -525,17 +538,19 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
     }
     if (f.nibLeft > 0 && t >= f.nextNib) {
       f.nibLeft -= 1;
+      f.nibsDone = (f.nibsDone || 0) + 1;
       f.nibAt = t;
       f.nextNib = t + R(0.6, 1.4);
-      if (f.nibLeft === 0) f.inspEnd = Math.max(f.inspEnd, t + R(0.5, 1.2));
-      events.push({ type: 'nibble', fish: f, slot: l.slot });
+      if (f.nibLeft === 0) f.inspEnd = Math.max(f.inspEnd, t + R(0.5, 1.2) * Math.max(0.6, A.commit));
+      // last: 이 톡톡 다음에는 곧 물 차례(폰에 "곧 쑥 들어가요"를 띄웁니다)
+      events.push({ type: 'nibble', fish: f, slot: l.slot, last: f.nibLeft === 0 && A.nibMin > 0 });
       return;
     }
     if (f.nibLeft === 0 && t >= f.inspEnd) {
       const twitched = t - (l.twitchAt || -99) < 2;
-      const p = 0.82 - 0.42 * f.big + (twitched ? 0.3 : 0);
+      const p = f.guided ? 1 : 0.82 - 0.42 * f.big + (twitched ? 0.3 : 0) + A.biteP;
       if (rand() < p) startBite(f, l);
-      else toRoam(f, l.slot, R(8, 14));
+      else toRoam(f, l.slot, R(8, 14) * A.ignore);
     }
   }
 
@@ -735,8 +750,8 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
     releaseClaim(f);
     events.push({ type: 'steal', fish: f, slot });
     const l = lureList.find((x) => x.slot === slot);
-    spook(f, l ? l.x : f.x - Math.sin(f.yaw), l ? l.z : f.z - Math.cos(f.yaw), R(1.2, 2), 6);
-    f.ignoreLure[slot] = t + 22;
+    spook(f, l ? l.x : f.x - Math.sin(f.yaw), l ? l.z : f.z - Math.cos(f.yaw), R(1.2, 2), 6 * A.ignore);
+    f.ignoreLure[slot] = t + 22 * A.ignore;
   }
   function hook(f, slot) {
     releaseClaim(f);
@@ -799,7 +814,64 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
   }
   // 너무 일찍 챘을 때: 그 물고기는 한동안 어떤 찌에도 오지 않습니다.
   function scare(f, fromX, fromZ) {
-    spook(f, fromX, fromZ, R(1.2, 2), R(25, 40));
+    spook(f, fromX, fromZ, R(1.2, 2), R(25, 40) * A.ignore);
+  }
+  // 일찍 챘지만 놀라지 않은 경우(쉬운 난이도): 잠깐 물러섰다가 다시 살핍니다.
+  function startle(f) {
+    if (!f || f.mode !== 'inspect') return;
+    f.orbitA += R(-0.6, 0.6);
+    f.nibAt = t - 1;
+    f.nextNib = Math.max(f.nextNib, t + R(0.7, 1.2));
+    f.nibLeft = Math.max(f.nibLeft, 1);
+  }
+  // 튜토리얼: 이 찌로 물고기 한 마리를 데려와 톡톡 두 번 뒤 꼭 물게 합니다.
+  // 가까이 헤엄치는 물고기를 먼저 고르고, 없으면 작은 물고기를 조금 떨어진 깊은 곳에 내보냅니다.
+  function guide(l, { maxW = 1.4 } = {}) {
+    if (!l || !l.active) return null;
+    let best = null;
+    let bd = 1e9;
+    for (const f of fish) {
+      if (f.mode !== 'roam' && f.mode !== 'approach' && f.mode !== 'inspect' && f.mode !== 'enter') continue;
+      if (f.w > maxW || (f.lure != null && f.lure !== l.slot && f.mode !== 'roam')) continue;
+      const d = d2(f, l);
+      if (d < bd && d < 8) {
+        bd = d;
+        best = f;
+      }
+    }
+    if (!best) {
+      for (let i = 0; i < 12 && !best; i++) {
+        const a = R(0, Math.PI * 2);
+        const x = l.x + Math.sin(a) * 3.2;
+        const z = l.z + Math.cos(a) * 3.2;
+        if (lakeQ(x, z) > 0.84 || bedDepth(x, z) < 1.1 || z < AREA.z0 + 0.6) continue;
+        best = spawn(true, rand() < 0.5 ? 'blg' : 'lmb', rand() < 0.5 ? 0.22 : 0.7, { x, z });
+        if (best) best.y = -Math.min(1.2, bedDepth(x, z) - 0.2);
+      }
+      if (!best) return null;
+    }
+    releaseClaim(best);
+    best.ignoreUntil = 0;
+    best.ignoreLure = {};
+    best.noticeAt = 0;
+    best.guided = true;
+    startApproach(best, l);
+    return best;
+  }
+  function setAssist(a) {
+    A = a || ASSIST.hard;
+  }
+  // 자리를 비운 사람: 그 자리 번호에 남은 물고기 기억(외면 시간·다가가던 찌)을 지웁니다.
+  // 들락날락이 잦으면 새로 들어온 사람이 앞사람이 놓친 물고기들의 '외면'을 물려받아 한동안 아무것도 안 무는 일이 있었습니다.
+  function forgetSlot(slot) {
+    for (const f of fish) {
+      if (f.ignoreLure[slot]) delete f.ignoreLure[slot];
+      if (f.lure === slot && (f.mode === 'approach' || f.mode === 'inspect' || f.mode === 'bite')) {
+        f.guided = false;
+        toRoam(f, null, 0);
+      }
+    }
+    for (const l of lureList) if (l.slot === slot) l.fishId = null;
   }
   // 시험용: 이 찌를 바로 물게 합니다.
   function forceBite(f, l) {
@@ -835,7 +907,8 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
   }
 
   return {
-    fish, update, byId, steal, hook, drive, land, release, lose, scare, forceBite, mouth, setTarget,
+    fish, update, byId, steal, hook, drive, land, release, lose, scare, startle, guide, setAssist, forgetSlot, forceBite, mouth, setTarget,
+    get assist() { return A; },
     spawn: (species, weight, at) => spawn(!!at, species, weight, at),
     aliveCount, get target() { return target; }, get time() { return t; }
   };

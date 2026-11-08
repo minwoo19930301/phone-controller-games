@@ -170,7 +170,6 @@ body[data-mode="duel"] .only-derby, body:not([data-mode="duel"]) .only-duel { di
 .mode.on b::after { content: "선택됨"; margin-left: 10px; font-size: 11px; font-weight: 800; color: #1a1406; background: var(--gold);
   padding: 2px 8px; border-radius: 999px; vertical-align: 3px; }
 .slot.bot { border-style: solid; }
-.slot.on.bot::after { content: "봇"; }
 .screen { position: fixed; inset: 0; display: grid; place-items: center; padding: 40px;
   background: linear-gradient(90deg, rgba(6, 11, 21, 0.92) 0%, rgba(6, 11, 21, 0.7) 50%, rgba(6, 11, 21, 0.35) 100%); }
 .lobby { display: flex; align-items: center; gap: 72px; width: min(1180px, 100%); }
@@ -195,9 +194,54 @@ body[data-mode="duel"] .only-derby, body:not([data-mode="duel"]) .only-duel { di
 .slot b { font-family: var(--display); font-weight: 400; font-size: 30px; }
 .slot.on { border: 2px solid var(--c); background: linear-gradient(135deg, color-mix(in srgb, var(--c) 30%, transparent), transparent);
   color: var(--fg); animation: pop 0.4s cubic-bezier(.2, 1.6, .4, 1); }
-.slot.on::after { content: "준비"; position: absolute; top: 8px; right: 10px; font-size: 11px; color: var(--c); }
+/* 들어온 사람의 준비 상태: 준비 완료 ✓ / 준비 전 / 연습 중 / 연결 끊김 */
+.slot-st { position: absolute; top: 7px; right: 9px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+  border-radius: 999px; font-size: 11px; font-weight: 800; letter-spacing: 0.02em; color: var(--dim);
+  background: rgba(255, 255, 255, 0.07); }
+.slot-st i { font-style: normal; font-weight: 900; }
+.slot.ready { box-shadow: 0 0 0 1px var(--c), 0 8px 26px color-mix(in srgb, var(--c) 28%, transparent); }
+.slot.ready .slot-st { background: var(--c); color: #0b1220; }
+.slot.practice .slot-st { color: #ffd23a; background: rgba(255, 210, 58, 0.14); }
+.slot.practice .slot-st::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #ffd23a;
+  box-shadow: 0 0 8px #ffd23a; animation: blink 0.7s infinite alternate; }
+.slot.wait b { opacity: 0.85; }
 .slot.away { opacity: 0.45; }
-.slot.away::after { content: "연결 끊김"; color: var(--dim); }
+/* 연습 중: 이름 아래에 지금 단계 제목, 칸 아래쪽에 단계 막대 */
+.slot-st em { font-style: normal; font-family: var(--display); font-weight: 400; font-size: 12px; letter-spacing: 0.04em; }
+.slot.practice, .slot.tut-done { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 5px;
+  padding: 10px 12px 12px; }
+.slot.practice b, .slot.tut-done b { font-size: 24px; line-height: 1; }
+.slot-tut { max-width: 100%; font-size: 12.5px; font-weight: 700; color: #e8edf5; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.slot.tut-done .slot-tut { color: #9dffb5; }
+.slot-bar { position: absolute; left: 10px; right: 10px; bottom: 6px; display: flex; gap: 3px; }
+.slot-bar i { flex: 1; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.16); }
+.slot-bar i.d { background: color-mix(in srgb, var(--c) 70%, transparent); }
+.slot-bar i.c { background: #ffd23a; box-shadow: 0 0 6px #ffd23a; animation: blink 0.7s infinite alternate; }
+@keyframes blink { to { opacity: 0.25; } }
+/* 난이도 패널(공통 settings.js). 모드는 위의 큰 카드로 고르므로 패널의 모드 줄은 숨깁니다. */
+.set-box { margin: -8px 0 22px; max-width: 760px; }
+.set-box .pcgs-row[data-key="mode"], .over-set .pcgs-row[data-key="mode"] { display: none !important; }
+.set-box .pcgs-panel { background: var(--glass-2); border-color: var(--line); --pcgs-accent: var(--gold); }
+.set-box .pcgs-label, .over-set .pcgs-label { width: 96px; }
+.over-set { display: flex; justify-content: center; margin: -6px 0 18px; }
+.over-set .pcgs-panel { --pcgs-accent: var(--gold); }
+/* 경기 끝 화면의 연습 현황(공통 tutorial-board 를 이 안에 붙임) */
+.over-tut { margin: -4px 0 18px; }
+.over-tut .pcgb { align-items: center; }
+.over-tut .pcgb.inline .pcgb-head { align-self: center; }
+.over-tut .pcgb.inline .pcgb-tiles { justify-content: center; }
+.over-tut .pcgb.inline .pcgb-tile { flex: 0 1 300px; }
+/* 경기 중 점수판의 난이도 표시 */
+.bug-diff { display: grid; place-items: center; padding: 0 14px; border-left: 1px solid var(--line); font-size: 13px; font-weight: 800;
+  color: var(--dim); letter-spacing: 0.04em; writing-mode: horizontal-tb; }
+.bug-diff:empty { display: none; }
+.bug-diff[data-lv="easy"], .diff-chip[data-lv="easy"] { color: #5ee07a; }
+.bug-diff[data-lv="normal"], .diff-chip[data-lv="normal"] { color: #8fd8ff; }
+.bug-diff[data-lv="hard"], .diff-chip[data-lv="hard"] { color: #ff7a59; }
+.sb-right { display: inline-flex; align-items: center; gap: 10px; }
+.diff-chip { font-style: normal; font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); }
+.diff-chip:empty { display: none; }
 @keyframes pop { from { transform: scale(0.9); } to { transform: none; } }
 .hint { color: var(--dim); font-size: 15px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .hint .dot { width: 4px; height: 4px; border-radius: 50%; background: rgba(255, 255, 255, 0.25); margin: 0 4px; }

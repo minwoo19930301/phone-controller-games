@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#140e16">
+<title>네컷 사진관</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+
+<!-- 대기실 -->
+<section id="lobby" class="screen lobby-screen">
+  <div class="lobby">
+    <div class="l-left">
+      <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 · 셀카 네컷</div>
+      <h1 class="wordmark">네컷 사진관<small>FOUR-CUT PHOTO BOOTH</small></h1>
+      <p class="lede">각자 폰으로 셀카를 찍어 네컷을 만들고, 마지막엔 다 같이 낙서하고 스티커를 붙여 저장해요.</p>
+      <div class="pick">
+        <div class="pick-label">모드<kbd>M</kbd></div>
+        <div class="modes" id="modes"></div>
+      </div>
+      <div class="row2">
+        <div class="pick">
+          <div class="pick-label">프레임<kbd>T</kbd></div>
+          <div class="themes" id="themes"></div>
+        </div>
+        <div id="settingsBox" class="settings-box"></div>
+      </div>
+    </div>
+    <div class="l-bottom">
+      <div class="players" id="players"></div>
+      <div id="tutBox" class="tut-box"></div>
+      <div class="hint" id="lobbyHint"></div>
+    </div>
+    <div class="l-right">
+      <div class="sample" id="sample"></div>
+      <div class="qr-card">
+        <img id="qr" alt="참가 QR">
+        <div class="qr-text">
+          <div class="qr-k">폰 카메라로 찍어 들어와요</div>
+          <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
+          <div class="qr-url" id="url"></div>
+          <div class="qr-warn hidden" id="warn">http 주소라 폰 카메라가 안 켜질 수 있어요. 그때는 폰이 '직접 찍기'로 바꿔 찍어요. https 주소면 실시간으로 찍혀요.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 촬영 · 다 찍음 · 꾸미기 · 결과 -->
+<section id="studio" class="screen studio hidden">
+  <aside class="side" id="side">
+    <div class="side-eyebrow" id="sideEyebrow"></div>
+    <div class="side-title" id="sideTitle"></div>
+    <div class="side-prompt" id="sidePrompt"></div>
+    <div class="side-sub" id="sideSub"></div>
+    <div class="side-count" id="sideCount"></div>
+    <div class="side-cuts" id="sideCuts"></div>
+    <div class="side-people" id="sidePeople"></div>
+  </aside>
+  <div class="stage" id="stage"></div>
+  <div class="mirror-wrap" id="mirrorWrap">
+    <div class="mirror" id="mirror">
+      <div class="bulbs" id="bulbs"></div>
+      <canvas id="mirrorCv"></canvas>
+      <div class="m-tag" id="mirrorTag"></div>
+      <div class="m-count" id="mirrorCount"><b></b><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46"/></svg></div>
+    </div>
+  </div>
+  <div class="result" id="result">
+    <div class="r-eyebrow">DONE</div>
+    <h2 class="r-title" id="rTitle">완성!</h2>
+    <p class="r-sub" id="rSub">폰에서도 바로 저장할 수 있어요.</p>
+    <div class="r-btns" id="rBtns"></div>
+    <div class="r-note"><i></i><span id="rNote">사진은 이 화면과 서버 메모리에만 있고 10분 뒤 사라져요</span></div>
+    <div class="r-next" id="rNext"></div>
+    <div class="r-keys"><kbd>S</kbd> 저장 <span class="dot"></span> 폰에서 모두 준비하면 한 번 더 <span class="dot"></span> <kbd>Esc</kbd> 처음으로</div>
+  </div>
+</section>
+
+<div id="join" class="join hidden">
+  <img id="qrMini" alt="">
+  <div><span class="join-k">참가</span><b id="codeMini">----</b></div>
+</div>
+<div id="flash" class="flash"></div>
+<div id="confetti" class="confetti"></div>
+<div id="toast" class="toast"></div>
+
+<section id="replaced" class="screen hidden replaced">
+  <div><h1>다른 화면에서 열었어요</h1><p>이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+</section>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script type="module" src="booth.js"></script>
+</body>
+</html>

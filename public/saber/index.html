@@ -28,7 +28,7 @@
     <div class="lobby-copy">
       <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 · 화면 분할</div>
       <h1 class="wordmark">BEAM<br>BLADE</h1>
-      <p class="lede">폰을 칼자루처럼 쥐고 날아오는 걸 쳐내세요.</p>
+      <p class="lede" id="lede">폰을 칼자루처럼 쥐고, 로봇 검객이 예고한 쪽을 막은 뒤 비틀거릴 때 베세요.</p>
       <ol class="steps">
         <li>
           <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="18" y="20" width="12" height="24" rx="3"/><path d="M24 20V3"/><path d="M21 26h6"/></svg>
@@ -49,8 +49,10 @@
         <div><b>+50</b><span>격추</span></div>
         <div><b>100</b><span>체력 · 0 이면 쓰러짐</span></div>
       </div>
+      <div class="setbox" id="setBox"></div>
       <div class="slots" id="slots"></div>
-      <div class="hint"><kbd>Enter</kbd> 게임 시작 <span class="dot"></span> 칼 소리는 폰에서 나요, 폰 소리를 켜 두세요 <span class="dot"></span> 화면을 한 번 누르면 큰 화면 소리가 켜져요</div>
+      <div class="tutbox" id="tutBoard"></div>
+      <div class="hint"><span>폰에서 모두 <b>준비</b>를 누르면 시작</span> <span class="dot"></span> 칼 소리는 폰에서 나요 <span class="dot"></span> 화면을 한 번 누르면 큰 화면 소리가 켜져요</div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
@@ -64,10 +66,11 @@
 
 <section id="over" class="screen over-screen hidden">
   <div class="over">
-    <div class="eyebrow">TRAINING COMPLETE</div>
-    <h1 class="wordmark sm">훈련 결과</h1>
+    <div class="eyebrow" id="overMeta">DUEL COMPLETE</div>
+    <h1 class="wordmark sm" id="overTitle">검투 결과</h1>
     <div class="podium" id="podium"></div>
-    <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b></div>
+    <div class="setbox over-set" id="setBoxOver"></div>
+    <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 한 판 더</span> <span class="dot"></span> 모드·난이도는 여기서 바꿀 수 있어요</div>
   </div>
 </section>
 

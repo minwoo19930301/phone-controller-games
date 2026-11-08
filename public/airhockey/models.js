@@ -208,7 +208,9 @@ const slotMat = new THREE.MeshStandardMaterial({ color: '#06070a', roughness: 0.
 const SLOT_D = RW - 0.01; // 골문 홈 앞뒤 길이(판 끝 ~ 뒤 턱 안쪽 면 바로 앞)
 const SLOT_H = 0.07; // 골문 홈 깊이(떨어지는 퍽 −0.06 이 바닥에 안 닿게)
 
-export function makeRails() {
+// goal: 골문 폭(m). 난이도마다 달라서 대기실에서 바뀌면 scene.setGoal 이 레일을 새로 만듭니다.
+export function makeRails(goalW = RINK.GOAL) {
+  const GOAL = goalW; // 아래 코드는 이 판의 골문 폭을 씁니다
   const g = new THREE.Group();
   const yC = TOP + RH / 2 - 0.012;
   const hgt = RH + 0.024;
@@ -306,6 +308,12 @@ export function makeRails() {
   const base = { A: 3.2, B: 3.2 };
   return {
     group: g,
+    goal: goalW,
+    // 다시 만들 때 이 판에서만 쓴 모양·재질을 GPU 에서 내립니다(railMat·chromeMat·slotMat 같은 공용 재질은 그대로).
+    dispose() {
+      g.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      for (const m of [matA, matB, spillA, spillB, goalLamps.A.material, goalLamps.B.material]) m.dispose();
+    },
     setColors(cA, cB) {
       matA.emissive.set(cA);
       matB.emissive.set(cB);
@@ -417,7 +425,7 @@ function drawSide(g, w, h, cA, cB) {
   g.fillText('PRO  ·  ARCADE  SERIES', w / 2, h * 0.84);
 }
 
-export function makeCabinet() {
+export function makeCabinet(goalW = RINK.GOAL) {
   const g = new THREE.Group();
   const OW = W + 2 * RW + 0.03;
   const OL = L + 2 * RW + 0.03;
@@ -436,26 +444,30 @@ export function makeCabinet() {
   apron.castShadow = true;
   apron.receiveShadow = true;
   g.add(apron);
-  const topShape = new THREE.Shape();
-  topShape.moveTo(-OW / 2, -OL / 2);
-  topShape.lineTo(OW / 2, -OL / 2);
-  topShape.lineTo(OW / 2, OL / 2);
-  topShape.lineTo(-OW / 2, OL / 2);
-  topShape.closePath();
-  for (const sz of [-1, 1]) {
-    const z0 = sz * (L / 2);
-    const z1 = sz * (L / 2 + RW);
-    const hole = new THREE.Path();
-    hole.moveTo(-GOAL / 2, z0);
-    hole.lineTo(GOAL / 2, z0);
-    hole.lineTo(GOAL / 2, z1);
-    hole.lineTo(-GOAL / 2, z1);
-    hole.closePath();
-    topShape.holes.push(hole);
-  }
-  const topGeo = new THREE.ShapeGeometry(topShape);
-  topGeo.rotateX(-Math.PI / 2); // 모양 (x, y) → 바닥 (x, −z), 위를 봅니다. 구멍이 ±z 대칭이라 부호는 상관없음
-  const topPlate = new THREE.Mesh(topGeo, darkMetal);
+  // 윗판: 골문 폭만큼 두 자리를 비웁니다. 골문 폭이 바뀌면(난이도) 이 모양만 다시 만듭니다.
+  const topGeoFor = (gw) => {
+    const topShape = new THREE.Shape();
+    topShape.moveTo(-OW / 2, -OL / 2);
+    topShape.lineTo(OW / 2, -OL / 2);
+    topShape.lineTo(OW / 2, OL / 2);
+    topShape.lineTo(-OW / 2, OL / 2);
+    topShape.closePath();
+    for (const sz of [-1, 1]) {
+      const z0 = sz * (L / 2);
+      const z1 = sz * (L / 2 + RW);
+      const hole = new THREE.Path();
+      hole.moveTo(-gw / 2, z0);
+      hole.lineTo(gw / 2, z0);
+      hole.lineTo(gw / 2, z1);
+      hole.lineTo(-gw / 2, z1);
+      hole.closePath();
+      topShape.holes.push(hole);
+    }
+    const geo = new THREE.ShapeGeometry(topShape);
+    geo.rotateX(-Math.PI / 2); // 모양 (x, y) → 바닥 (x, −z), 위를 봅니다. 구멍이 ±z 대칭이라 부호는 상관없음
+    return geo;
+  };
+  const topPlate = new THREE.Mesh(topGeoFor(goalW), darkMetal);
   topPlate.position.y = aTop;
   topPlate.receiveShadow = true;
   g.add(topPlate);
@@ -536,6 +548,10 @@ export function makeCabinet() {
   g.add(coin);
   return {
     group: g,
+    setGoal(gw) {
+      topPlate.geometry.dispose();
+      topPlate.geometry = topGeoFor(gw);
+    },
     setColors(cA, cB, nameA, nameB) {
       drawEnd(endCanvas[0].getContext('2d'), 1024, 200, cA, nameA);
       drawEnd(endCanvas[1].getContext('2d'), 1024, 200, cB, nameB);

@@ -141,12 +141,211 @@ export function makeKart(color, num) {
   flame.position.set(-1.45, 0.34, 0);
   flame.scale.set(1.3, 1.3, 1);
   g.add(flame);
+  // 추격 부스트 불꽃(파랑·보라): 뒤처진 카트 꽁무니에서 길게 흔들립니다. 바깥 불꽃 + 안쪽 흰 심지.
+  const chase = new THREE.Group();
+  chase.position.set(-1.2, 0.36, 0);
+  const chaseMat = new THREE.MeshBasicMaterial({ map: flameTex, color: '#8a7dff', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0, side: THREE.DoubleSide });
+  const chaseCore = new THREE.MeshBasicMaterial({ map: flameTex, color: '#d8f0ff', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0, side: THREE.DoubleSide });
+  for (const [m, w, len] of [[chaseMat, 0.62, 1.7], [chaseCore, 0.3, 1.0]]) {
+    for (const rot of [0, Math.PI / 2]) {
+      const pl = new THREE.Mesh(new THREE.PlaneGeometry(len, w), m);
+      pl.position.x = -len / 2;
+      pl.rotation.x = rot;
+      chase.add(pl);
+    }
+  }
+  chase.visible = false;
+  g.add(chase);
+  // 무적 질주: 카트를 감싸는 금빛 후광
+  const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: '#ffe680', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+  aura.position.set(0, 0.6, 0);
+  aura.scale.set(4.2, 3.2, 1);
+  g.add(aura);
   // 그림자 모양(바닥에 붙는 검은 원)
   const blob = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 2.2), new THREE.MeshBasicMaterial({ map: glowTex, color: '#000', transparent: true, opacity: 0.55, depthWrite: false }));
   blob.rotation.x = -Math.PI / 2;
   blob.position.set(0, 0.03, 0);
   g.add(blob);
-  g.userData = { wheels, flame, helmet };
+  g.userData = { wheels, flame, helmet, chase, chaseMat, chaseCore, aura, bodyMat: body, lightMat: light };
+  return g;
+}
+
+// 불꽃 텍스처: 왼쪽(뿌리)이 진하고 오른쪽 끝으로 가늘어지는 혀 모양. 추격 불꽃에 씁니다.
+const flameTex = canvasTex(128, 32, (g, w, h) => {
+  const gr = g.createLinearGradient(0, 0, w, 0);
+  gr.addColorStop(0, 'rgba(255,255,255,0)');
+  gr.addColorStop(0.18, 'rgba(255,255,255,.95)');
+  gr.addColorStop(0.55, 'rgba(255,255,255,.55)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr;
+  g.beginPath();
+  g.moveTo(0, h / 2);
+  g.quadraticCurveTo(w * 0.2, 1, w * 0.45, h * 0.18);
+  g.quadraticCurveTo(w * 0.8, h * 0.32, w, h / 2);
+  g.quadraticCurveTo(w * 0.8, h * 0.68, w * 0.45, h * 0.82);
+  g.quadraticCurveTo(w * 0.2, h - 1, 0, h / 2);
+  g.fill();
+});
+
+// ---------------------------------------------------------------
+// 아이템전 소품: 아이템 상자, 바나나 껍질, 유도탄, 번개
+// ---------------------------------------------------------------
+// 상자 면: 무지개 테두리 + 가운데 큰 물음표. 글꼴이 준비된 뒤(처음 상자를 만들 때) 그립니다.
+const drawBox = (g, w, h) => {
+  const gr = g.createLinearGradient(0, 0, w, h);
+  ['#ff5a5f', '#ffb347', '#ffe14a', '#5ee07a', '#3ab4ff', '#c77dff'].forEach((c, i, a) => gr.addColorStop(i / (a.length - 1), c));
+  g.fillStyle = gr;
+  g.fillRect(0, 0, w, h);
+  g.fillStyle = 'rgba(255,255,255,.18)';
+  g.fillRect(18, 18, w - 36, h - 36);
+  g.clearRect(30, 30, w - 60, h - 60);
+  g.fillStyle = 'rgba(255,255,255,.14)';
+  g.fillRect(30, 30, w - 60, h - 60);
+  g.font = '400 176px Anton, Impact, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.lineWidth = 14;
+  g.strokeStyle = 'rgba(40,20,80,.85)';
+  g.strokeText('?', w / 2, h / 2 + 10);
+  g.fillStyle = '#ffffff';
+  g.fillText('?', w / 2, h / 2 + 10);
+};
+let boxMat = null;
+const boxCoreMat = new THREE.MeshBasicMaterial({ color: '#fff6c9', transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending });
+const boxGeo = new THREE.BoxGeometry(1.25, 1.25, 1.25);
+const boxCoreGeo = new THREE.OctahedronGeometry(0.34, 0);
+
+export function makeItemBox() {
+  const g = new THREE.Group();
+  const spin = new THREE.Group();
+  if (!boxMat) {
+    const tex = canvasTex(256, 256, drawBox);
+    boxMat = new THREE.MeshStandardMaterial({ map: tex, transparent: true, opacity: 0.82, roughness: 0.2, metalness: 0.1, emissive: '#ffffff', emissiveMap: tex, emissiveIntensity: 0.35, depthWrite: false });
+  }
+  const cube = new THREE.Mesh(boxGeo, boxMat);
+  cube.renderOrder = 2;
+  const core = new THREE.Mesh(boxCoreGeo, boxCoreMat);
+  spin.add(cube, core);
+  spin.position.y = 1.15;
+  g.add(spin);
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: '#fff2b0', transparent: true, opacity: 0.4, depthWrite: false, blending: THREE.AdditiveBlending }));
+  glow.position.y = 1.15;
+  glow.scale.set(3, 3, 1);
+  g.add(glow);
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.7, 20), new THREE.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.28, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.04;
+  g.add(shadow);
+  g.userData = { spin, core, glow, shadow };
+  return g;
+}
+
+// 바나나 껍질: 가운데 속살 + 바닥으로 늘어진 껍질 네 갈래 + 갈색 꼭지
+const peelMat = std('#ffd93b', { roughness: 0.45, side: THREE.DoubleSide });
+const peelIn = std('#fff2b5', { roughness: 0.7, side: THREE.DoubleSide });
+const peelTip = std('#5c3d00', { roughness: 0.8 });
+export function makeBanana() {
+  const g = new THREE.Group();
+  // 껍질 한 갈래: 끝이 둥근 길쭉한 판을 바깥쪽으로 휘게 만든 것
+  const petalGeo = new THREE.PlaneGeometry(0.34, 0.8, 1, 8);
+  const pos = petalGeo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i) + 0.4; // 0..0.8
+    const x = pos.getX(i) * (1 - Math.pow(y / 0.8, 3) * 0.75);
+    pos.setXYZ(i, x, y, Math.sin((y / 0.8) * 1.6) * 0.22);
+  }
+  petalGeo.computeVertexNormals();
+  for (let i = 0; i < 4; i++) {
+    const holder = new THREE.Group();
+    holder.rotation.y = (i * Math.PI) / 2 + 0.4;
+    const petal = new THREE.Mesh(petalGeo, peelMat);
+    petal.rotation.x = 1.75; // 바깥·아래로 늘어뜨리기
+    petal.position.y = 0.42;
+    holder.add(petal);
+    const inner = new THREE.Mesh(petalGeo, peelIn);
+    inner.rotation.x = 1.75;
+    inner.position.set(0, 0.42, -0.012);
+    inner.scale.setScalar(0.9);
+    holder.add(inner);
+    g.add(holder);
+  }
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 0.42, 8), peelMat);
+  stem.position.y = 0.55;
+  g.add(stem);
+  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.12, 8), peelTip);
+  tip.position.y = 0.8;
+  g.add(tip);
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.75, 18), new THREE.MeshBasicMaterial({ color: '#000', transparent: true, opacity: 0.3, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.03;
+  g.add(shadow);
+  g.scale.setScalar(1.25);
+  return g;
+}
+
+// 유도탄: 빨간 몸통 + 흰 머리 + 꼬리 날개 + 뒤쪽 불꽃. 앞 +X.
+const misBody = std('#ff4040', { roughness: 0.35, metalness: 0.3 });
+const misNose = std('#f6f6f2', { roughness: 0.3 });
+const misFin = std('#c9ced8', { roughness: 0.4, metalness: 0.6 });
+export function makeMissile() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.1, 14), misBody);
+  body.rotation.z = Math.PI / 2;
+  g.add(body);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.45, 14), misNose);
+  nose.rotation.z = -Math.PI / 2;
+  nose.position.x = 0.77;
+  g.add(nose);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.235, 0.235, 0.12, 14), misNose);
+  band.rotation.z = Math.PI / 2;
+  band.position.x = 0.25;
+  g.add(band);
+  for (let i = 0; i < 4; i++) {
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.03, 0.5), misFin);
+    fin.position.x = -0.42;
+    fin.rotation.x = (i * Math.PI) / 2;
+    g.add(fin);
+  }
+  const fire = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: '#ffb347', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.95 }));
+  fire.position.x = -0.8;
+  fire.scale.set(1.1, 1.1, 1);
+  g.add(fire);
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: '#ff6a5a', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.45 }));
+  halo.scale.set(2.6, 2.6, 1);
+  g.add(halo);
+  g.userData = { fire };
+  return g;
+}
+
+// 번개 줄기: 하늘에서 카트로 떨어지는 지그재그 띠(빛나는 판 두 장을 엇갈려 세움)
+const boltTex = canvasTex(64, 512, (g, w, h) => {
+  const pts = [[w / 2, 0]];
+  for (let y = 40; y < h; y += 40 + Math.random() * 30) pts.push([w / 2 + (Math.random() - 0.5) * w * 0.7, y]);
+  pts.push([w / 2, h]);
+  for (const [lw, col] of [[22, 'rgba(160,140,255,.35)'], [10, 'rgba(220,220,255,.85)'], [4, '#ffffff']]) {
+    g.strokeStyle = col;
+    g.lineWidth = lw;
+    g.lineJoin = 'round';
+    g.beginPath();
+    pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    g.stroke();
+  }
+});
+export function makeBolt() {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ map: boltTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, opacity: 0 });
+  for (const r of [0, Math.PI / 2]) {
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 26), mat);
+    pl.position.y = 13;
+    pl.rotation.y = r;
+    g.add(pl);
+  }
+  const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: '#cfc4ff', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+  flash.position.y = 0.8;
+  flash.scale.set(7, 7, 1);
+  g.add(flash);
+  g.userData = { mat, flash };
+  g.visible = false;
   return g;
 }
 
@@ -217,7 +416,7 @@ export function makeCockpit(color) {
   top.position.set(0, 0.115, 0);
   spin.add(top);
   g.add(outer);
-  g.userData = { wheels, wheel: spin };
+  g.userData = { wheels, wheel: spin, bodyMat: body };
   return g;
 }
 
@@ -638,7 +837,7 @@ export function makeSky() {
 // ---------------------------------------------------------------
 // 먼지·불꽃 파티클 풀
 // ---------------------------------------------------------------
-export function makePuffs(scene, count = 90) {
+export function makePuffs(scene, count = 160) {
   const items = [];
   const mat = (c) => new THREE.SpriteMaterial({ map: glowTex, color: c, transparent: true, depthWrite: false, opacity: 0 });
   for (let i = 0; i < count; i++) {
