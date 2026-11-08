@@ -379,7 +379,7 @@ export function createDiscPicker(container, opts = {}) {
     if (!s) return;
     $('.dp-name').textContent = s.title;
     $('.dp-sub').textContent = `${s.en} · ${s.composer}`;
-    $('.dp-meta').innerHTML = `<span class="dp-eq"><s></s><s></s><s></s><s></s></span><span>${esc(s.genre || '')}</span><i></i><span>${s.bpm} BPM</span><i></i><span>${fmtTime(s.lengthSec || 0)}</span>${s.mood ? `<i></i><span>${esc(s.mood)}</span>` : ''}`;
+    $('.dp-meta').innerHTML = `<span class="dp-eq"><s></s><s></s><s></s><s></s></span><span>${esc(s.genre || '')}</span><i></i><span>${s.bpm} BPM</span><i></i><span>${fmtTime(s.lengthSec || 0)}</span><i></i><span>게임용 편곡</span>${s.mood ? `<i></i><span>${esc(s.mood)}</span>` : ''}`;
     chips.forEach((b) => {
       const d = b.dataset.d;
       b.classList.toggle('is-on', d === difficulty);

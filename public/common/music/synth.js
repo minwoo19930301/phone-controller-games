@@ -1,5 +1,5 @@
-// 샘플 없이 WebAudio 로 합성하는 악기 모음과 박자 스케줄러(Transport)입니다.
-// 큰 화면(자동 반주·녹화 믹스)과 폰(내 악기 소리) 모두에서 씁니다. 다른 파일을 불러오지 않습니다.
+// 실제 악기 녹음 샘플과 WebAudio 대체 음색을 사용하는 악기 모음과 박자 스케줄러(Transport)입니다.
+// 큰 화면(자동 반주·녹화 믹스)과 폰(내 악기 소리) 모두에서 씁니다. 필요한 악기 샘플만 불러옵니다.
 //
 //   const synth = createSynth();                 // 탭 안에서 await synth.resume() 으로 소리를 엽니다
 //   const vio = synth.instrument('violin');      // 악기 하나
@@ -422,6 +422,75 @@ function castanet(ctx, dst, t, vel, tune) {
   toneHit(ctx, dst, t, { f0: 1750 * k, gain: 0.4 * v, dec: 0.035, type: 'triangle' });
 }
 
+// ───────────── 실악기 녹음 샘플 ─────────────
+// Versilian Studios VSCO 2 Community Edition (CC0). 녹음 출처와 변환 방법은 samples/README.md.
+// 악기별로 필요할 때만 불러오며, 느린 연결이나 로드 실패 때에는 기존 합성 음색을 유지합니다.
+const SAMPLE_NOTES = {
+  piano: [29, 41, 53, 65, 77, 89, 101], violin: [60, 72, 84, 96],
+  strings: [57, 60, 67, 74], cello: [45, 48, 55, 62], bass: [24, 33, 47],
+  flute: [60, 72, 84], trumpet: [58, 62, 69, 72], horn: [45, 48, 62, 65], glock: [72, 84, 96],
+};
+const SAMPLE_BASE = new URL('./samples/', import.meta.url);
+const sampleContexts = new WeakMap();
+function sampleBank(ctx, name) {
+  if (!SAMPLE_NOTES[name] || typeof fetch !== 'function') return null;
+  let banks = sampleContexts.get(ctx);
+  if (!banks) { banks = new Map(); sampleContexts.set(ctx, banks); }
+  if (banks.has(name)) return banks.get(name);
+  const bank = { notes: [], promise: null };
+  banks.set(name, bank);
+  bank.promise = Promise.all(SAMPLE_NOTES[name].map(async (midi) => {
+    const response = await fetch(new URL(`${name}-${midi}.mp3`, SAMPLE_BASE));
+    if (!response.ok) throw new Error(`sample ${name}-${midi}: ${response.status}`);
+    return { midi, buffer: await ctx.decodeAudioData(await response.arrayBuffer()) };
+  })).then((notes) => { bank.notes = notes; }).catch(() => {
+    // Failed loads never silence the game: use the existing synthesis instead.
+    bank.notes = [];
+  });
+  return bank;
+}
+function sampleVoice(inst, midi, t, vel, bank) {
+  const { ctx, name } = inst;
+  const sample = bank.notes.reduce((best, item) => Math.abs(item.midi - midi) < Math.abs(best.midi - midi) ? item : best);
+  const source = ctx.createBufferSource(), amp = ctx.createGain(), level = ctx.createGain();
+  source.buffer = sample.buffer;
+  const sustained = !!SUSTAIN[name];
+  // The loop end was crossfaded into the loop start during sample preparation.
+  if (sustained && sample.buffer.duration >= 4.59) { source.loop = true; source.loopStart = 1.4; source.loopEnd = 4.6; }
+  const rate = (pitch) => Math.pow(2, (pitch - sample.midi) / 12);
+  source.playbackRate.value = rate(midi);
+  amp.gain.setValueAtTime(0, t);
+  amp.gain.linearRampToValueAtTime((0.25 + Math.max(0, vel) * 0.75) * (sustained ? 0.7 : 0.9), t + (sustained ? 0.035 : 0.006));
+  level.gain.value = 1;
+  source.connect(amp).connect(level).connect(inst.out);
+  source.start(t);
+  let ended = false;
+  const natural = source.loop ? Infinity : t + sample.buffer.duration / rate(midi);
+  const v = {
+    midi, stopAt: natural,
+    off(when) {
+      if (ended) return;
+      ended = true;
+      const at = Math.max(when ?? ctx.currentTime, t + 0.02);
+      if (at >= natural) return;
+      holdAt(amp.gain, at);
+      const release = sustained ? 0.15 : 0.08;
+      amp.gain.setTargetAtTime(0, at, release / 3);
+      v.stopAt = Math.min(natural, at + release * 2 + 0.03);
+      try { source.stop(v.stopAt); } catch (e) {}
+    },
+    setPitch(pitch, glide = 0.03) {
+      const now = ctx.currentTime;
+      source.playbackRate.cancelScheduledValues(now);
+      source.playbackRate.setTargetAtTime(rate(pitch), now, glide);
+      v.midi = pitch;
+    },
+    setBend(cents) { source.detune.setTargetAtTime(cents, ctx.currentTime, 0.02); },
+    setLevel(x, tc = 0.03) { level.gain.setTargetAtTime(Math.max(0, x), ctx.currentTime, tc); },
+  };
+  return v;
+}
+
 // ───────────── 합성기 본체 ─────────────
 const LEVEL = { piano: 0.55, glock: 1, celesta: 1, timpani: 1, drums: 0.9, castanets: 0.9 };
 const VERB = { piano: 0.22, strings: 0.34, violin: 0.28, cello: 0.25, trumpet: 0.2, horn: 0.3, flute: 0.28, choir: 0.4, bass: 0.06, drums: 0.08, castanets: 0.12, glock: 0.3, celesta: 0.3, timpani: 0.18 };
@@ -507,6 +576,7 @@ function makeInstrument(synth, name, { gain = 1, pan = 0, dest = null, reverb = 
   send.gain.value = reverb ?? VERB[name] ?? 0.2;
   node.connect(send).connect(chain.vin);
   const voices = [];
+  const samples = sampleBank(ctx, name);
   const inst = {
     name, ctx, out, info: INSTRUMENT_INFO[name],
     /** 길이를 아는 음. 타악기(drums)는 midi 가 GM 타악기 번호입니다. */
@@ -525,7 +595,7 @@ function makeInstrument(synth, name, { gain = 1, pan = 0, dest = null, reverb = 
       const now = ctx.currentTime;
       for (let i = voices.length - 1; i >= 0; i--) if (voices[i].stopAt < now) voices.splice(i, 1);
       if (voices.length >= maxVoices) { const old = voices.shift(); old.off(t); }
-      const v = SUSTAIN[name] ? sustainVoice(inst, midi, t, vel) : BELLS[name] ? bellVoice(inst, midi, t, vel) : pianoVoice(inst, midi, t, vel);
+      const v = samples && samples.notes.length ? sampleVoice(inst, midi, t, vel, samples) : SUSTAIN[name] ? sustainVoice(inst, midi, t, vel) : BELLS[name] ? bellVoice(inst, midi, t, vel) : pianoVoice(inst, midi, t, vel);
       voices.push(v);
       return v;
     },
