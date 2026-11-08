@@ -1,6 +1,6 @@
 // CD 고르기 화면: 케이스에 든 CD 가 가로 선반에 줄지어 있고, 끌거나 튕겨서 넘기면 가운데 CD 가 케이스에서 빠져나와 돕니다.
 // 마우스·터치·펜 끌기(관성·자리 맞춤), 휠, ← → 키, 폰에서 원격으로 움직이기(nudge / fling / select)를 지원합니다.
-// 다른 파일을 불러오지 않습니다(다른 프로젝트에 그대로 복사해 씁니다). 미리듣기 소리는 preview 콜백으로 받습니다.
+// 게임용 미리듣기는 preview 콜백으로 받고, 일부 곡은 별도로 실연주 녹음을 감상할 수 있습니다.
 //
 //   const picker = createDiscPicker(el, {
 //     songs, difficulty: 'normal',
@@ -14,6 +14,12 @@
 
 const DIFF_LABEL = { easy: '쉬움', normal: '보통', hard: '어려움' };
 const CSS_ID = 'disc-picker-css';
+// 실제 연주 녹음은 게임용 편곡과 별개입니다. 파일별 원본·라이선스: music/recordings/README.md
+const RECORDINGS = {
+  'fur-elise': { file: 'fur-elise.mp3', artist: 'V Gao (Gaodifan) · 피아노', source: 'https://commons.wikimedia.org/wiki/File:FurElise.ogg', license: 'CC0', licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/' },
+  gymnopedie: { file: 'gymnopedie.mp3', artist: 'Michael Laucke · 기타 편곡 연주', source: 'https://commons.wikimedia.org/wiki/File:Satie_Gymnopedie_No_1_performed_by_Michael_Laucke.flac', license: 'CC BY-SA 4.0', licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0/' },
+};
+
 const CSS = `
 .dp-root{position:relative;display:flex;flex-direction:column;width:100%;height:100%;min-height:340px;color:#f4f6fb;user-select:none;-webkit-user-select:none;
   font-family:var(--dp-font,Pretendard,'Pretendard Variable','Apple SD Gothic Neo','Noto Sans KR',system-ui,sans-serif);outline:none;--dp-accent:#7fd4ff;overflow:hidden}
@@ -71,6 +77,12 @@ const CSS = `
 .dp-chip small{font-size:clamp(10px,.9vw,12px);color:rgba(230,236,248,.55)}
 .dp-chip.is-on{background:linear-gradient(180deg,rgba(255,255,255,.2),rgba(255,255,255,.07));color:#fff;box-shadow:inset 0 0 0 2px var(--dp-chip,#fff),0 6px 22px rgba(0,0,0,.35);transform:translateY(-2px)}
 .dp-chip[data-d=easy]{--dp-chip:#5ee07a}.dp-chip[data-d=normal]{--dp-chip:#ffc93c}.dp-chip[data-d=hard]{--dp-chip:#ff5a5f}
+.dp-listen{margin:7px auto 0;border:1px solid rgba(255,255,255,.3);border-radius:999px;background:rgba(14,21,35,.74);color:#fff;padding:7px 14px;font:700 13px var(--dp-font,system-ui);cursor:pointer}
+.dp-listen[hidden],.dp-recording[hidden]{display:none}
+.dp-recording{position:absolute;inset:0;z-index:2500;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(4,8,18,.84);-webkit-backdrop-filter:blur(9px);backdrop-filter:blur(9px)}
+.dp-recording-card{width:min(100%,440px);border:1px solid rgba(255,255,255,.2);border-radius:22px;background:#182135;padding:22px;text-align:left;box-shadow:0 18px 60px #0008}
+.dp-recording h3{font-size:20px;margin:0 0 7px}.dp-recording p{font-size:14px;line-height:1.5;color:#e0e6f3;margin:8px 0}
+.dp-recording audio{display:block;width:100%;margin:16px 0}.dp-recording a{color:#b5defd}.dp-recording .dp-rec-close{border:0;border-radius:12px;padding:10px 18px;font:700 14px var(--dp-font,system-ui);cursor:pointer}
 .dp-root.is-disabled .dp-stage{cursor:default}
 .dp-flash{position:absolute;inset:0;pointer-events:none;background:radial-gradient(40% 50% at 50% 45%,rgba(255,255,255,.35),rgba(255,255,255,0));opacity:0;z-index:3000}
 .dp-root.is-select .dp-flash{animation:dp-flash .6s ease-out}
@@ -303,9 +315,11 @@ export function createDiscPicker(container, opts = {}) {
   prev.setAttribute('aria-label', '이전 곡');
   next.setAttribute('aria-label', '다음 곡');
   stage.append(floor, row, prev, next);
-  const info = el('div', 'dp-info', `<div class="dp-name"></div><div class="dp-sub"></div><div class="dp-meta"></div><div class="dp-chips"></div>`);
+  const info = el('div', 'dp-info', `<div class="dp-name"></div><div class="dp-sub"></div><div class="dp-meta"></div><div class="dp-chips"></div><button type="button" class="dp-listen" hidden>실제 연주 전곡 듣기</button>`);
   const flash = el('div', 'dp-flash');
-  root.append(head, stage, info, flash);
+  const recording = el('div', 'dp-recording', `<div class="dp-recording-card" role="dialog" aria-modal="true" aria-labelledby="dp-rec-title"><h3 id="dp-rec-title">실제 연주 전곡 감상</h3><p class="dp-rec-song"></p><p>감상용 녹음이에요. 게임은 별도의 짧은 편곡으로 진행됩니다.</p><audio controls preload="none"></audio><p class="dp-rec-error" role="status" hidden></p><p><a class="dp-rec-source" target="_blank" rel="noopener noreferrer">녹음 출처</a> · <a class="dp-rec-license" target="_blank" rel="noopener noreferrer"></a></p><button type="button" class="dp-rec-close">닫기</button></div>`);
+  recording.hidden = true;
+  root.append(head, stage, info, flash, recording);
   container.appendChild(root);
   const $ = (s) => root.querySelector(s);
 
@@ -339,6 +353,7 @@ export function createDiscPicker(container, opts = {}) {
   let W = 240, pos = start, vel = 0, target = start, dragging = false, raf = 0, last = 0;
   let open = 0, liveIndex = -1, settledIndex = -1, enabled = true, difficulty = o.difficulty;
   let stopPrev = null, prevTimer = 0, playTimer = 0, gestured = false;
+  let fullActive = false;
 
   function gesture() { if (!gestured) { gestured = true; if (o.onGesture) o.onGesture(); } }
   function measure() {
@@ -379,6 +394,7 @@ export function createDiscPicker(container, opts = {}) {
     if (!s) return;
     $('.dp-name').textContent = s.title;
     $('.dp-sub').textContent = `${s.en} · ${s.composer}`;
+    $('.dp-listen').hidden = !RECORDINGS[s.id];
     $('.dp-meta').innerHTML = `<span class="dp-eq"><s></s><s></s><s></s><s></s></span><span>${esc(s.genre || '')}</span><i></i><span>${s.bpm} BPM</span><i></i><span>${fmtTime(s.lengthSec || 0)}</span><i></i><span>게임용 편곡</span>${s.mood ? `<i></i><span>${esc(s.mood)}</span>` : ''}`;
     chips.forEach((b) => {
       const d = b.dataset.d;
@@ -423,11 +439,12 @@ export function createDiscPicker(container, opts = {}) {
   }
   function schedulePreview() {
     clearTimeout(prevTimer);
-    if (!o.preview || !o.autoPreview || !enabled) return;
+    if (!o.preview || !o.autoPreview || !enabled || fullActive) return;
     const i = settledIndex;
     prevTimer = setTimeout(() => { if (i === settledIndex && !dragging) startPreview(songs[i]); }, o.previewDelay);
   }
   function startPreview(song) {
+    if (fullActive) return;
     stopPreview();
     try { stopPrev = o.preview(song) || null; } catch (e) { console.error(e); stopPrev = null; }
     if (!stopPrev) return;
@@ -441,8 +458,46 @@ export function createDiscPicker(container, opts = {}) {
     root.classList.remove('is-playing');
     if (stopPrev) { try { const f = stopPrev; stopPrev = null; if (typeof f === 'function') f(); else if (f.then) f.then((g) => typeof g === 'function' && g()); } catch (e) {} }
   }
+  const player = recording.querySelector('audio');
+  function closeRecording() {
+    fullActive = false;
+    player.pause();
+    player.removeAttribute('src');
+    player.load();
+    recording.hidden = true;
+  }
+  $('.dp-listen').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!enabled) return;
+    const song = songs[liveIndex];
+    const rec = song && RECORDINGS[song.id];
+    if (!rec) return;
+    gesture();
+    stopPreview();
+    fullActive = true;
+    recording.hidden = false;
+    recording.querySelector('.dp-rec-song').textContent = `${song.title} · ${rec.artist}`;
+    const source = recording.querySelector('.dp-rec-source'); source.href = rec.source;
+    const license = recording.querySelector('.dp-rec-license'); license.href = rec.licenseUrl; license.textContent = rec.license;
+    recording.querySelector('.dp-rec-error').hidden = true;
+    player.src = new URL(`./music/recordings/${rec.file}`, import.meta.url).href;
+    player.play().catch(() => {
+      const err = recording.querySelector('.dp-rec-error');
+      if (fullActive) { err.textContent = '재생 버튼을 누르거나, 녹음 출처에서 들어 주세요.'; err.hidden = false; }
+    });
+  });
+  player.addEventListener('error', () => {
+    if (!fullActive) return;
+    const err = recording.querySelector('.dp-rec-error');
+    err.textContent = '녹음을 불러오지 못했어요. 녹음 출처에서 들어 주세요.'; err.hidden = false;
+  });
+  recording.querySelector('.dp-rec-close').addEventListener('click', (e) => { e.stopPropagation(); closeRecording(); schedulePreview(); });
+  recording.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Escape') { e.preventDefault(); closeRecording(); schedulePreview(); }
+  });
   const clampI = (i) => Math.max(0, Math.min(n - 1, i));
-  function moved() { if (settledIndex !== -1 && Math.round(target) !== settledIndex) { stopPreview(); settledIndex = -1; } }
+  function moved() { if (fullActive) closeRecording(); if (settledIndex !== -1 && Math.round(target) !== settledIndex) { stopPreview(); settledIndex = -1; } }
 
   // ── 입력 ──
   let down = null;
@@ -507,7 +562,7 @@ export function createDiscPicker(container, opts = {}) {
   const onKey = (e) => {
     if (!enabled || !root.isConnected || root.offsetParent === null) return;
     const tg = e.target;
-    if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable)) return;
+    if (fullActive || (tg && (['INPUT', 'TEXTAREA', 'BUTTON', 'A', 'AUDIO'].includes(tg.tagName) || tg.isContentEditable))) return;
     let used = true;
     if (e.key === 'ArrowLeft') api.nudge(-1);
     else if (e.key === 'ArrowRight') api.nudge(1);
@@ -549,6 +604,7 @@ export function createDiscPicker(container, opts = {}) {
     goToId(id, o2) { const i = songs.findIndex((s) => s.id === id); if (i >= 0) api.goTo(i, o2); },
     select() {
       if (!enabled) return;
+      closeRecording();
       const i = Math.round(target);
       if (Math.abs(pos - i) > 0.02) { api.goTo(i); }
       const it = items[i];
@@ -574,12 +630,13 @@ export function createDiscPicker(container, opts = {}) {
       $('.dp-driver b').textContent = d.label || '';
       $('.dp-driver span').textContent = d.text || '고르는 중';
     },
-    setEnabled(v) { enabled = !!v; root.classList.toggle('is-disabled', !enabled); if (!enabled) stopPreview(); else if (settledIndex >= 0) schedulePreview(); },
+    setEnabled(v) { enabled = !!v; root.classList.toggle('is-disabled', !enabled); if (!enabled) { closeRecording(); stopPreview(); } else if (settledIndex >= 0) schedulePreview(); },
     setChartInfo(fn) { o.chartInfo = fn; renderInfo(); },
     refresh() { renderInfo(); },
     preview() { if (o.preview) startPreview(songs[Math.round(target)]); },
     stopPreview,
     destroy() {
+      closeRecording();
       stopPreview();
       cancelAnimationFrame(raf);
       if (o.keyboard) window.removeEventListener('keydown', onKey);
