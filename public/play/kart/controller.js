@@ -959,10 +959,13 @@ $('btnReady').addEventListener('click', () => {
   audio();
   // 영점은 출발 카운트다운 때 지금 쥔 자세로 다시 확인합니다(alignForRace). 여기서 세로로 들고 누른 자세를 영점으로 삼지 않습니다.
   if (zero == null && gotSensor && !flat && holdLive != null && holdLive !== 0) setZero();
+  if (!send('start_game', {})) {
+    $('waitB').textContent = '연결 중이에요. 다시 연결되면 준비를 눌러 주세요.';
+    return;
+  }
   readyPressed = true;
   paintReady();
   haptics.play('good', 0.8, { noFlash: true });
-  send('start_game', {});
 });
 $('btnStart').addEventListener('click', async () => {
   if (mode !== 'start') return;
