@@ -124,16 +124,17 @@
     <button class="ghost" id="btnRedo" style="margin-top:18px;max-width:260px">다시 어드레스</button>
   </section>
 
+  <section class="view" id="vAnalysis" style="overflow:auto;touch-action:pan-y"><button class="ghost" id="closeAnalysis">닫기</button><p>센서 기반 추정이며 실제 궤도·구질과 다를 수 있어요.</p><div id="analysisDetail"></div></section>
   <!-- 결과 -->
   <section class="view center" id="vResult">
     <div class="big" id="resT"></div>
     <div class="chips" id="resChips"></div>
-    <p id="resB"></p>
+    <p id="resB"></p><p style="font-size:12px">스윙 궤적·구질은 휴대폰 센서와 자세 모델로 계산한 추정치예요.</p><div id="analysisSummary" style="width:100%;max-width:420px;overflow:auto"></div>
   </section>
 </main>
 <div class="debug" id="debug"></div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
-<script src="controller.js"></script>
+<script type="module" src="controller.js"></script>
 </body>
 </html>

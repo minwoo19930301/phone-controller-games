@@ -1,7 +1,9 @@
 // 골프 니어핀 큰 화면: 차례, 타구 계산, 점수. 클럽 움직임은 폰에서 오는 방향을 그대로 씁니다.
 import { modal, grit, organ, bell } from '/common/voice.js';
-import { createScene, CLUBS } from './scene.js';
-import { PIN, TEE_H, WATER_Y, height, surface, slope, pinHeight } from './course.js';
+import { createScene, CLUBS } from './scene-round.js';
+import { COURSES } from './courses/index.js';
+import { recommendClub } from './clubs.js';
+import { analyzeSwing, summarize, renderPanel } from './analysis.js';
 
 const ROUNDS = 3;
 const RD = Math.PI / 180;
@@ -11,9 +13,14 @@ await Promise.race([
   Promise.all([document.fonts.load('400 64px Anton'), document.fonts.load('800 64px "Pretendard Variable"')]),
   new Promise((r) => setTimeout(r, 2000))
 ]).catch(() => {});
-const view = createScene($('cv'));
-const PIN_Y = pinHeight();
-const PIN_DIST = Math.round(Math.hypot(PIN.x, PIN.z));
+let selectedCourse = COURSES[0], hole = selectedCourse.holes[0], difficulty = 'normal';
+const view = createScene($('cv'), hole, selectedCourse, difficulty);
+const height=(x,z)=>hole.height(x,z), surface=(x,z)=>hole.surface(x,z), slope=(x,z)=>hole.slope(x,z);
+const pinDist=()=>Math.round(hole.distToPin(...game.scores[game.order[game.turn]].pos));
+const waterY=(x,z)=>hole.waterLevel(x,z) ?? height(x,z);
+for(const c of COURSES){const o=document.createElement('option');o.value=c.id;o.textContent=`${c.name} · ${c.blurb}`;$('courseChoice').appendChild(o)}
+$('courseChoice').addEventListener('change', e=>{selectedCourse=COURSES.find(c=>c.id===e.target.value)||COURSES[0];hole=selectedCourse.holes[0];view.setHole(hole,selectedCourse,difficulty)});
+$('difficultyChoice').addEventListener('change', e=>{difficulty=e.target.value;view.setHole(hole,selectedCourse,difficulty)});
 
 // ---------- 소리 ----------
 let actx = null;
@@ -107,7 +114,7 @@ socket.on('cancel', (d) => {
   game.sub = 'aim';
   game.activity = performance.now();
   view.resetSwing();
-  view.setAim(game.aim, PIN_DIST);
+  view.setAim(game.aim, pinDist());
   prompt(`${playerInfo(d.slot).name} 차례`, '폰에서 방향을 맞추고 어드레스를 눌러요');
   pushState();
 });
@@ -115,7 +122,7 @@ socket.on('aim', (d) => {
   if (!isTurn(d.slot) || game.sub !== 'aim') return;
   game.activity = performance.now();
   game.aim = Math.max(-25, Math.min(25, Number(d.yaw) || 0));
-  view.setAim(game.aim, PIN_DIST);
+  view.setAim(game.aim, pinDist());
   renderShotInfo();
 });
 socket.on('club', (d) => {
@@ -132,7 +139,7 @@ socket.on('address', (d) => {
   }
   if (typeof d.aim === 'number') {
     game.aim = d.aim;
-    view.setAim(game.aim, PIN_DIST);
+    view.setAim(game.aim, pinDist());
   }
   view.address(d.shaft0 || [0.55, -0.83, 0]);
   game.sub = 'swing';
@@ -144,6 +151,15 @@ socket.on('address', (d) => {
 socket.on('pose', (d) => {
   if (!isTurn(d.slot) || game.sub !== 'swing' || !Array.isArray(d.s) || !Array.isArray(d.fc)) return;
   view.pose(d.s, d.fc);
+});
+let lastAnalysis=null,analysisPanel=null;
+$('showAnalysis').addEventListener('click',()=>{if(!lastAnalysis)return;$('analysisDialog').showModal();if(analysisPanel)analysisPanel.dispose();analysisPanel=renderPanel($('analysisPanel'),lastAnalysis,[],{player:playerInfo(game.lastSlot||game.order[game.turn])});});
+$('closeAnalysis').addEventListener('click',()=>$('analysisDialog').close());
+$('analysisDialog').addEventListener('close',()=>{if(analysisPanel)analysisPanel.dispose();analysisPanel=null;});
+socket.on('swing_data', (d) => {
+  if(!isTurn(d.slot) || !d.samples?.length) return;
+  try {const analysis=analyzeSwing(d,{club:game.club,impact:game.flight?.shot});lastAnalysis=analysis;$('showAnalysis').hidden=false;socket.emit('d2c',{event:'analysis',slot:d.slot,data:{summary:summarize(analysis),score:analysis.score,tips:analysis.tips}});}
+  catch(e){console.warn('스윙 분석을 표시하지 못했습니다',e)}
 });
 socket.on('impact', (d) => {
   if (!isTurn(d.slot) || game.sub !== 'swing') return;
@@ -194,7 +210,8 @@ const game = {
 function addToOrder(slot) {
   if (game.order.includes(slot)) return;
   game.order.push(slot);
-  game.scores[slot] = { best: null, shots: [] };
+  const tee=hole.teeByDifficulty[difficulty];
+  game.scores[slot] = { best: null, shots: [], strokes: 0, total: 0, pos:[tee.x,tee.z], holed:false };
 }
 
 function pushState() {
@@ -204,7 +221,7 @@ function pushState() {
     event: 'game_state',
     data: {
       phase: game.phase, sub: game.sub, turn: game.phase === 'playing' ? game.order[game.turn] : null,
-      round: game.round, rounds: ROUNDS, pin: PIN_DIST, scores, shot: game.shot, lastSlot: game.lastSlot
+      round: game.round, rounds: ROUNDS, pin: game.phase === 'playing' ? pinDist() : null, scores, shot: game.shot, lastSlot: game.lastSlot, club: game.club
     }
   });
 }
@@ -227,6 +244,7 @@ function startGame() {
     return;
   }
   audio();
+  if(hole!==selectedCourse.holes[0]){hole=selectedCourse.holes[0];view.setHole(hole,selectedCourse,difficulty);}
   game.phase = 'playing';
   game.order = [];
   game.scores = {};
@@ -250,20 +268,22 @@ function beginTurn() {
   document.documentElement.style.setProperty('--c', p.color);
   game.sub = 'aim';
   game.aim = 0;
-  game.club = '7i';
+  const score=game.scores[slot];
+  game.club = recommendClub(hole.distToPin(...score.pos), {onGreen:hole.inGreen(...score.pos),tee:score.strokes===0}).toLowerCase();
   game.flight = null;
   game.shot += 1;
   game.activity = performance.now();
   game.awaySince = null;
+  view.setBall(...score.pos);
   view.resetSwing();
   view.setGolfer(p.color, game.club);
-  view.setAim(0, PIN_DIST);
+  view.setAim(0, pinDist());
   view.setTrail(null);
   $('shotPanel').classList.remove('on');
   $('pinTag').classList.remove('on');
   $('bName').textContent = p.name;
-  $('bRound').textContent = `라운드 ${game.round} / ${ROUNDS}`;
-  $('bPin').textContent = PIN_DIST;
+  $('bRound').textContent = `${selectedCourse.name} ${game.round}홀 · PAR ${hole.par} · ${score.strokes+1}타`;
+  $('bPin').textContent = pinDist();
   renderShotInfo();
   callout(p.name, '폰에서 방향과 클럽을 고르고 어드레스를 눌러요', 'player', 2200);
   prompt(`${p.name} 차례`, '폰에서 방향을 맞추고 어드레스를 눌러요');
@@ -273,17 +293,14 @@ function beginTurn() {
 }
 
 function nextTurn() {
-  game.turn += 1;
-  if (game.turn >= game.order.length) {
-    game.turn = 0;
-    game.round += 1;
-    if (game.round > ROUNDS) {
-      endGame();
-      return;
-    }
-    newWind();
-  }
-  beginTurn();
+  const current=game.scores[game.order[game.turn]];
+  if(!current.holed){beginTurn();return;}
+  const next=game.order.findIndex((s,i)=>i>game.turn&&!game.scores[s].holed);
+  if(next>=0){game.turn=next;beginTurn();return;}
+  if(game.round>=ROUNDS){endGame();return;}
+  game.round++;hole=selectedCourse.holes[game.round-1];view.setHole(hole,selectedCourse,difficulty);
+  for(const slot of game.order){const sc=game.scores[slot],t=hole.teeByDifficulty[difficulty];sc.pos=[t.x,t.z];sc.strokes=0;sc.holed=false;sc.shots=[];}
+  game.turn=0;newWind();beginTurn();
 }
 
 function backToLobby(why) {
@@ -322,6 +339,7 @@ function watchTurn(now) {
       prompt(`${slot}P 연결을 기다려요`, '15초 안에 돌아오지 않으면 다음 사람 차례로 넘어가요');
     }
     if (now - game.awaySince > 15000) {
+      game.scores[slot].holed=true;game.scores[slot].total+=hole.par+5;
       callout(`${slot}P 건너뜀`, '연결이 끊겼어요', 'miss', 1800);
       nextTurn();
     }
@@ -332,6 +350,7 @@ function watchTurn(now) {
     prompt(`${playerInfo(slot).name} 차례`, '폰에서 방향을 맞추고 어드레스를 눌러요');
   }
   if (now - game.activity > 75000) {
+    game.scores[slot].holed=true;game.scores[slot].total+=hole.par+5;
     callout(`${slot}P 건너뜀`, '오래 기다려서 다음 차례로 넘어가요', 'miss', 1800);
     nextTurn();
   }
@@ -346,9 +365,7 @@ function endGame() {
   $('pinTag').classList.remove('on');
   prompt('', '');
   const ranked = [...game.order].sort((a, b) => {
-    const x = game.scores[a].best;
-    const y = game.scores[b].best;
-    return (x == null ? 1e9 : x) - (y == null ? 1e9 : y);
+    return game.scores[a].total - game.scores[b].total;
   });
   const box = $('podium');
   box.innerHTML = '';
@@ -360,7 +377,7 @@ function endGame() {
     el.style.setProperty('--c', p.color);
     el.style.animationDelay = `${0.15 + i * 0.12}s`;
     el.innerHTML = `<span class="rank">${i + 1}</span><span class="who">${p.name}</span>` +
-      `<span class="num"><b>${sc.best == null ? '-' : sc.best < 0.1 ? 'IN' : sc.best.toFixed(1)}</b><span>${sc.best != null && sc.best < 0.1 ? '홀인원' : '핀까지(m)'}</span></span>`;
+      `<span class="num"><b>${sc.total}</b><span>총 타수</span></span>`;
     box.appendChild(el);
   });
   $('over').classList.remove('hidden');
@@ -377,28 +394,31 @@ function surfaceInfo(s) {
     tee: { bounce: 0.3, keep: 0.55, roll: 1.6 },
     rough: { bounce: 0.18, keep: 0.3, roll: 4.2 },
     trees: { bounce: 0.15, keep: 0.2, roll: 6 },
+    deep: { bounce: 0.15, keep: 0.2, roll: 6 }, waste: { bounce: 0.1, keep: 0.2, roll: 10 }, path: { bounce: .4, keep: .7, roll: 1 }, ob: { bounce: 0, keep: 0, roll: 99 },
     bunker: { bounce: 0.05, keep: 0.05, roll: 20 },
     water: { bounce: 0, keep: 0, roll: 99 }
-  }[s];
+  }[s] || { bounce: .2, keep: .4, roll: 3 };
 }
 
 // 공 궤적: 공기 저항 + 백스핀 양력 + 사이드스핀 휨 + 바람, 땅에 닿으면 튀고 구릅니다.
 function simulate(shot) {
   const loft = CLUBS[shot.club].loft;
-  const clubSpeed = Math.min(46, Math.max(8, shot.speed * RD * 1.55));
+  const putting = shot.club === 'pt';
+  const clubSpeed = putting ? Math.max(.25, Math.min(5, shot.speed * RD * .28)) : Math.min(55, Math.max(4, shot.speed * RD * CLUBS[shot.club].lengthM * 1.65));
   const q = Math.max(0.55, Math.min(1, 1 - Math.max(0, shot.miss - 8) / 40));
   const ballSpeed = clubSpeed * CLUBS[shot.club].smash * (0.85 + 0.15 * q);
-  const launch = loft * 0.72 * (0.94 + Math.random() * 0.12) + (1 - q) * (Math.random() - 0.5) * 12;
+  const launch = putting ? 0 : loft * 0.72 * (0.94 + Math.random() * 0.12) + (1 - q) * (Math.random() - 0.5) * 12;
   const face = Math.max(-25, Math.min(25, shot.face));
   const path = Math.max(-25, Math.min(25, shot.path));
   const start = shot.aim + 0.8 * face + 0.2 * path; // + 는 오른쪽
   const side = 0.16 * (face - path) * (ballSpeed / 50); // m/s², + 는 오른쪽으로 휨
-  const psi = start * RD;
+  const origin=game.scores[game.order[game.turn]].pos, target=hole.aimFrom(...origin);
+  const psi = start * RD - Math.atan2(target.x-origin[0],target.z-origin[1]);
   const fwd = [-Math.sin(psi), Math.cos(psi)];
   const right = [-Math.cos(psi), -Math.sin(psi)];
-  let x = 0;
-  let y = TEE_H + 0.07;
-  let z = 0;
+  let x = origin[0];
+  let y = height(...origin) + .0214;
+  let z = origin[1];
   let vx = fwd[0] * ballSpeed * Math.cos(launch * RD);
   let vz = fwd[1] * ballSpeed * Math.cos(launch * RD);
   let vy = ballSpeed * Math.sin(launch * RD);
@@ -409,7 +429,7 @@ function simulate(shot) {
   let carry = null;
   let landedOn = null;
   let bounces = 0;
-  let airborne = true;
+  let airborne = !putting;
   let holed = false;
   let t = 0;
   for (; t < 20; t += dt) {
@@ -429,11 +449,11 @@ function simulate(shot) {
       if (y <= gh + 0.0214 && vy < 0) {
         const s0 = surface(x, z);
         if (carry == null) {
-          carry = Math.hypot(x, z);
+          carry = Math.hypot(x-origin[0], z-origin[1]);
           landedOn = s0;
         }
-        if (s0 === 'water' && y < WATER_Y + 0.3) {
-          pts.push([x, WATER_Y, z]);
+        if (s0 === 'water' && y < waterY(x,z) + 0.3) {
+          pts.push([x, waterY(x,z), z]);
           return { pts, carry, landedOn: 'water', rest: [x, z], surface: 'water', clubSpeed, ballSpeed, launch, face, path, holed };
         }
         const info = surfaceInfo(s0);
@@ -450,7 +470,7 @@ function simulate(shot) {
       const s0 = surface(x, z);
       const info = surfaceInfo(s0);
       if (s0 === 'water') {
-        pts.push([x, WATER_Y, z]);
+        pts.push([x, waterY(x,z), z]);
         return { pts, carry, landedOn, rest: [x, z], surface: 'water', clubSpeed, ballSpeed, launch, face, path, holed };
       }
       const sp = Math.hypot(vx, vz);
@@ -469,22 +489,22 @@ function simulate(shot) {
       z += vz * dt;
       y = height(x, z) + 0.0214;
       // 컵에 들어가기
-      if (Math.hypot(x - PIN.x, z - PIN.z) < 0.06 && sp < 1.8) {
+      if (Math.hypot(x - hole.pin.x, z - hole.pin.z) < 0.12 && sp < 1.8) {
         holed = true;
-        x = PIN.x;
-        z = PIN.z;
-        y = PIN_Y - 0.05;
+        x = hole.pin.x;
+        z = hole.pin.z;
+        y = hole.pinHeight() - 0.05;
         pts.push([x, y, z]);
         break;
       }
       if (Math.hypot(vx, vz) < 0.02) break;
     }
     pts.push([x, y, z]);
-    if (Math.abs(x) > 80 || z > 205 || z < -20) {
+    if (x < hole.bounds.x0 || x > hole.bounds.x1 || z < hole.bounds.z0 || z > hole.bounds.z1 || surface(x,z) === 'ob') {
       return { pts, carry, landedOn, rest: [x, z], surface: 'ob', clubSpeed, ballSpeed, launch, face, path, holed };
     }
   }
-  return { pts, carry: carry || Math.hypot(x, z), landedOn, rest: [x, z], surface: surface(x, z), clubSpeed, ballSpeed, launch, face, path, holed };
+  return { pts, carry: carry || Math.hypot(x-origin[0], z-origin[1]), landedOn, rest: [x, z], surface: surface(x, z), clubSpeed, ballSpeed, launch, face, path, holed };
 }
 
 function hitShot(d) {
@@ -526,23 +546,27 @@ function finishShot(now) {
   const slot = game.order[game.turn];
   const p = playerInfo(slot);
   const sc = game.scores[slot];
-  const dist = Math.hypot(f.rest[0] - PIN.x, f.rest[1] - PIN.z);
+  const dist = hole.distToPin(...f.rest);
   let title;
   let note = '';
   let kind = '';
   let counted = null;
+  sc.strokes++; sc.total++;
   if (f.holed) {
-    title = 'HOLE IN ONE';
+    sc.holed=true;
+    title = sc.strokes===1 ? 'HOLE IN ONE' : '홀인!';
     kind = 'hr';
     counted = 0;
     sfx.cup();
     sfx.clap(60);
   } else if (f.surface === 'water') {
-    title = '물에 빠졌어요';
+    sc.strokes++;sc.total++;
+    title = '물에 빠졌어요 · 1벌타';
     kind = 'miss';
     sfx.splash();
   } else if (f.surface === 'ob') {
-    title = 'OB';
+    sc.strokes++;sc.total++;
+    title = 'OB · 1벌타';
     note = '코스 밖으로 나갔어요';
     kind = 'miss';
   } else {
@@ -558,6 +582,8 @@ function finishShot(now) {
     }
     note = `핀까지 ${dist.toFixed(1)}m`;
   }
+  if(counted != null && !f.holed) sc.pos=[...f.rest];
+  if(sc.strokes>=hole.par+5&&!sc.holed){sc.holed=true;note='최대 타수 · 다음 차례';}
   if (counted != null && (sc.best == null || counted < sc.best)) sc.best = counted;
   sc.shots.push({ dist: counted, rest: f.rest });
   game.lastSlot = slot;
@@ -576,12 +602,12 @@ function finishShot(now) {
   // 공이 멈춘 자리 표시
   const marks = [];
   for (const s of game.order) {
-    const best = game.scores[s].shots.filter((x) => x.dist != null).sort((a, b) => a.dist - b.dist)[0];
+    const best = game.scores[s].shots.filter((x) => x.dist != null).at(-1);
     if (best) marks.push({ x: best.rest[0], z: best.rest[1], color: playerInfo(s).color });
   }
   view.setMarkers(marks);
   if (counted != null) {
-    $('pinTag').textContent = f.holed ? '홀인원!' : `${dist.toFixed(1)}m`;
+    $('pinTag').textContent = f.holed ? (sc.strokes===1?'홀인원!':'홀인!') : `${dist.toFixed(1)}m`;
     $('pinTag').classList.add('on');
   }
   game.sub = 'result';
@@ -615,9 +641,7 @@ function renderBoard() {
   const b = $('leader');
   b.innerHTML = '';
   const rows = [...game.order].sort((a, c) => {
-    const x = game.scores[a].best;
-    const y = game.scores[c].best;
-    return (x == null ? 1e9 : x) - (y == null ? 1e9 : y);
+    return game.scores[a].total - game.scores[c].total;
   });
   for (const slot of rows) {
     const p = playerInfo(slot);
@@ -625,7 +649,7 @@ function renderBoard() {
     const row = document.createElement('div');
     row.className = 'row' + (slot === game.order[game.turn] ? ' now' : '');
     row.innerHTML = `<i style="background:${p.color}"></i><span class="n">${p.name}</span>` +
-      `<b>${sc.best == null ? '-' : sc.best < 0.1 ? 'IN' : sc.best.toFixed(1)}</b><small>m</small>`;
+      `<b>${sc.total}</b><small>타</small>`;
     b.appendChild(row);
   }
 }
@@ -647,7 +671,7 @@ function tick() {
       trailI = i;
       const inAir = ball[1] > height(ball[0], ball[2]) + 0.3;
       mode = now - f.t0 < 350 ? 'swing' : inAir || ball[2] < 60 ? 'flight' : 'land';
-      if (now - f.t0 > 350) $('live').innerHTML = `${Math.round(Math.hypot(ball[0], ball[2]))}<small>m</small>`;
+      if (now - f.t0 > 350) $('live').innerHTML = `${Math.round(Math.hypot(ball[0]-game.scores[game.order[game.turn]].pos[0], ball[2]-game.scores[game.order[game.turn]].pos[1]))}<small>m</small>`;
       if (i >= f.pts.length - 1 && !f.done) {
         $('live').textContent = '';
         finishShot(now);
@@ -688,4 +712,4 @@ function debugSwing(phiDeg) {
   for (let a = 0; Math.abs(a) <= Math.abs(phiDeg); a += step) view.pose(at(a), [0, 0, 1]);
   game.sub = 'swing';
 }
-window.__golf = { game, simulate, view, debugSwing };
+window.__golf = { game, simulate, view, debugSwing, get hole(){ return hole; } };

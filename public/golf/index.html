@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0d2a1c">
-<title>골프 니어핀</title>
+<title>폰 컨트롤 골프</title>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
 </script>
-<style>/* 대기실 설명은 한 줄만 */ .lobby-copy .steps, .lobby-copy .spins, .lobby-copy .rules { display: none !important; }</style>
+<style>/* 대기실 설명은 한 줄만 */ .lobby-copy .steps, .lobby-copy .spins, .lobby-copy .rules { display: none !important; } .golf-options {display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.golf-options label{display:flex;gap:8px;align-items:center;color:#dceadf;font-weight:700}.golf-options select{max-width:290px;padding:9px;border:1px solid #668172;border-radius:8px;background:#102b1d;color:#fff;font:inherit}</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
@@ -42,6 +42,8 @@
 <div id="call" class="call"><div class="call-main" id="callMain"></div><div class="call-sub" id="callSub"></div></div>
 <div id="live" class="live"></div>
 <div id="pinTag" class="pin-tag"></div>
+<button id="showAnalysis" hidden style="position:fixed;right:20px;bottom:20px;z-index:100;padding:12px;border-radius:10px;border:0;background:#d4f36b;font-weight:800">스윙 분석 · 다시보기</button>
+<dialog id="analysisDialog" style="width:96vw;max-width:1300px;max-height:96vh;background:#10241a;color:white;border:0;border-radius:20px;overflow:auto"><button id="closeAnalysis" style="float:right;padding:8px">닫기</button><p>센서와 자세 모델로 계산한 추정치입니다. 실제 궤도·구질과 다를 수 있어요.</p><div id="analysisPanel"></div></dialog>
 
 <div id="shotPanel" class="shot">
   <div class="stat"><span>클럽 스피드</span><b id="sClub">-</b><small>km/h</small></div>
@@ -55,9 +57,10 @@
 <section id="lobby" class="screen">
   <div class="lobby">
     <div class="lobby-copy">
-      <div class="eyebrow">PHONE CONTROLLER GAMES · PAR 3</div>
-      <h1 class="wordmark">CLOSEST<br>TO THE PIN</h1>
-      <p class="lede">폰을 골프채처럼 휘두르세요.</p>
+      <div class="eyebrow">PHONE CONTROLLER GAMES · 3 HOLES</div>
+      <h1 class="wordmark">PHONE<br>GOLF</h1>
+      <p class="lede">폰을 골프채처럼 휘둘러 티샷부터 퍼팅까지 즐겨요. <a href="/golf/nearpin.html" style="color:#d4f36b">니어핀 모드 →</a></p>
+      <div class="golf-options"><label>코스 <select id="courseChoice"></select></label><label>난이도 <select id="difficultyChoice"><option value="easy">쉬움</option><option value="normal" selected>보통</option><option value="hard">어려움</option></select></label></div>
       <ol class="steps">
         <li>
           <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 34c6-14 26-14 32 0"/><path d="M24 34V12"/><path d="M24 12l8 3-8 3"/><path d="M14 30l-4 6M34 30l4 6"/></svg>
@@ -87,7 +90,7 @@
 <section id="over" class="screen hidden">
   <div class="over">
     <div class="eyebrow">FINAL</div>
-    <h1 class="wordmark sm">니어핀 결과</h1>
+    <h1 class="wordmark sm">라운드 결과</h1>
     <div class="podium" id="podium"></div>
     <div class="hint"><kbd>Enter</kbd> 또는 폰의 <b>다시 하기</b></div>
   </div>

@@ -1,3 +1,6 @@
+import { CLUBS as BAG } from '/golf/clubs.js';
+import { createSwingCapture, synthSwing, feedSwing } from './swing-capture.js';
+import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
 // 골프 컨트롤러. 폰의 방향을 계속 큰 화면으로 흘려보내고, 임팩트는 폰에서 직접 잡습니다.
 // 좌표는 어드레스 때 정한 기준축으로 보냅니다: r = 목표 오른쪽(공 쪽), u = 위, f = 목표 쪽.
 (() => {
@@ -7,12 +10,7 @@
   const ROOM = (params.get('room') || '').toUpperCase();
   $('room').textContent = ROOM ? `방 ${ROOM}` : '';
 
-  const CLUBS = [
-    { id: '5i', name: '5I', sub: '롱 아이언' },
-    { id: '7i', name: '7I', sub: '미들' },
-    { id: '9i', name: '9I', sub: '숏' },
-    { id: 'pw', name: 'PW', sub: '웨지' }
-  ];
+  const CLUBS = BAG.map(c=>({id:c.id.toLowerCase(),name:c.short,sub:c.name}));
 
   let token = null;
   try { token = localStorage.getItem('pcg-token'); } catch (e) {}
@@ -28,6 +26,8 @@
     (volatile ? socket.volatile : socket).emit('c2d', { event, data });
     return true;
   }
+  let lastSwing=null, analysisPanel=null;
+  const capture=createSwingCapture({send:(event,data)=>send(event,data),club:()=>club,onDone:packet=>{lastSwing=packet}});
   const isTouch = navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
   let impactAt = 0;
   let holdTimer = null;
@@ -110,9 +110,10 @@
 
   function onSample(v, t) {
     if (!basis) return;
-    if (mode !== 'swing') return;
     const s = toBasis(v.top);
     const fc = toBasis(v.face);
+    capture.sample(t,s,fc);
+    if (mode !== 'swing') return;
     send('pose', { s, fc }, true);
     drawMeter(s);
 
@@ -130,12 +131,12 @@
       const old = k[Math.max(0, k.length - 4)];
       const rate = (swing.phi - old.phi) / Math.max(0.012, (t - old.t) / 1000);
 
-      if (swing.stage === 'ready' && swing.phi < -60) swing.stage = 'back';
+      if (swing.stage === 'ready' && swing.phi < (club === 'pt' ? -8 : -60)) swing.stage = 'back';
       if (swing.stage === 'back') {
         swing.top = Math.min(swing.top, swing.phi);
-        if (rate > 250 && swing.phi > swing.top + 25) swing.stage = 'down';
+        if (rate > (club === 'pt' ? 30 : 250) && swing.phi > swing.top + (club === 'pt' ? 3 : 25)) swing.stage = 'down';
         // 천천히 다시 내려놓으면 처음부터
-        if (d < 20 && rate < 250) resetSwing();
+        if (d < (club === 'pt' ? 3 : 20) && rate < (club === 'pt' ? 30 : 250)) resetSwing();
       }
       if (swing.stage === 'down') {
         if (!hasGyro) swing.gyroPeak = Math.max(swing.gyroPeak, rate);
@@ -169,6 +170,8 @@
     // 속도는 자이로(rotationRate) 최댓값을 씁니다. 자이로가 없으면 방향 차이로 잰 값.
     const speed = swing.gyroPeak;
     swing.stage = 'done';
+    capture.impact(performance.now());
+    setTimeout(()=>capture.finish(),1800);
     const data = { speed: Math.round(speed), face: +face.toFixed(1), path: +path.toFixed(1), miss: +miss.toFixed(1), club, aim };
     if (!send('impact', data)) {
       lostConnection();
@@ -215,6 +218,7 @@
     onSample(lastOri, performance.now());
   }
   function onMotion(e) {
+    capture.motion(e);
     const r = e.rotationRate;
     if (r && (r.alpha != null || r.beta != null || r.gamma != null)) {
       hasGyro = true;
@@ -280,7 +284,7 @@
   function drawClubs() {
     const box = $('clubs');
     box.innerHTML = '';
-    for (const c of CLUBS) {
+    for (const c of CLUBS.filter(c=>state.mode!=='near'||['5i','7i','9i','pw'].includes(c.id))) {
       const b = document.createElement('button');
       b.className = c.id === club ? 'on' : '';
       b.innerHTML = `<b>${c.name}</b><span>${c.sub}</span>`;
@@ -317,6 +321,8 @@
       clearInterval(tick);
       if (mode !== 'hold') return;
       calibrate(last);
+      lastSwing=null;$('analysisSummary').replaceChildren();
+      capture.begin({shaft0:basis.shaft0,club});
       if (!send('address', { shaft0: basis.shaft0, club, aim })) {
         lostConnection();
         return;
@@ -333,7 +339,7 @@
   // 스윙이 안 잡히거나 자세가 틀어졌으면 다시 조준부터
   $('btnRedo').addEventListener('click', () => {
     clearInterval(holdTimer);
-    resetSwing();
+    resetSwing();capture.cancel();lastSwing=null;$('analysisSummary').replaceChildren();
     send('cancel', {});
     mode = 'wait';
     render();
@@ -364,6 +370,7 @@
     basis = { r: [1, 0, 0], u: [0, 1, 0], f: [0, 0, 1], shaft0 };
     basis.back = norm(cross(shaft0, [0, 0, -1]));
     resetSwing();
+    capture.begin({shaft0,club});
     basis.faceYaw0 = 0;
     send('address', { shaft0, club, aim, fake: true });
     mode = 'swing';
@@ -390,11 +397,13 @@
       if (ms < 2400) requestAnimationFrame(run);
     };
     requestAnimationFrame(run);
+    // 느린 PC에서도 센서 없는 연습 샷은 끝까지 진행합니다.
+    setTimeout(()=>{if(mode==='swing'&&swing.stage!=='done'){send('impact',{speed:club==='pt'?140:1150,face:0,path:0,miss:1,club,aim});impactAt=performance.now();mode='result';$('resT').textContent='연습 샷';$('resB').textContent='큰 화면을 보세요';show('vResult');feedSwing(capture,synthSwing({shaft0,seed:7}).events,{begin:{shaft0,club}});}},2700);
   }
 
   // ---------- 화면 상태 ----------
   function render() {
-    if (!me) return;
+    if (!me || mode === 'analysis') return;
     const myTurn = state.phase === 'playing' && state.turn === me.slot;
     const mine = (state.scores || {})[me.slot];
     $('myStats').innerHTML = mine && mine.best != null
@@ -426,7 +435,7 @@
     if (mode !== 'aim') {
       // 새 차례: 큰 화면과 같은 값(핀 방향, 7번)에서 시작합니다.
       aim = 0;
-      club = '7i';
+      club = state.club || '7i';
       resetSwing();
     }
     mode = 'aim';
@@ -436,6 +445,15 @@
     show('vAim');
     if (navigator.vibrate) navigator.vibrate([20, 60, 20]);
   }
+
+  socket.on('analysis', ({summary})=>{
+    renderSummary($('analysisSummary'),summary,{onDetails:()=>{
+      if(!lastSwing)return;
+      if(analysisPanel)analysisPanel.dispose();
+      mode='analysis';show('vAnalysis');analysisPanel=renderPanel($('analysisDetail'),analyzeSwing(lastSwing,{club:lastSwing.club}),[],{compact:true});
+    }});
+  });
+  $('closeAnalysis').addEventListener('click',()=>{if(analysisPanel)analysisPanel.dispose();analysisPanel=null;mode='wait';render()});
 
   socket.on('connect', () => socket.emit('join', { role: 'controller', room: ROOM, token }));
   socket.on('assigned', (p) => {
