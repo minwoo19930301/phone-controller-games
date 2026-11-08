@@ -4,6 +4,7 @@ import { createScene, CLUBS } from './scene-round.js';
 import { COURSES } from './courses/index.js';
 import { recommendClub } from './clubs.js';
 import { analyzeSwing, summarize, renderPanel } from './analysis.js';
+import { nextFarthest, nextTeeOrder } from './turn-order.mjs';
 
 const ROUNDS = 3;
 const RD = Math.PI / 180;
@@ -293,11 +294,10 @@ function beginTurn() {
 }
 
 function nextTurn() {
-  const current=game.scores[game.order[game.turn]];
-  if(!current.holed){beginTurn();return;}
-  const next=game.order.findIndex((s,i)=>i>game.turn&&!game.scores[s].holed);
-  if(next>=0){game.turn=next;beginTurn();return;}
+  const slot = nextFarthest(game.order, game.scores, hole.distToPin);
+  if (slot !== null) { game.turn = game.order.indexOf(slot); beginTurn(); return; }
   if(game.round>=ROUNDS){endGame();return;}
+  game.order = nextTeeOrder(game.order, game.scores);
   game.round++;hole=selectedCourse.holes[game.round-1];view.setHole(hole,selectedCourse,difficulty);
   for(const slot of game.order){const sc=game.scores[slot],t=hole.teeByDifficulty[difficulty];sc.pos=[t.x,t.z];sc.strokes=0;sc.holed=false;sc.shots=[];}
   game.turn=0;newWind();beginTurn();
@@ -339,7 +339,8 @@ function watchTurn(now) {
       prompt(`${slot}P 연결을 기다려요`, '15초 안에 돌아오지 않으면 다음 사람 차례로 넘어가요');
     }
     if (now - game.awaySince > 15000) {
-      game.scores[slot].holed=true;game.scores[slot].total+=hole.par+5;
+      const score = game.scores[slot], remaining = Math.max(0, hole.par + 5 - score.strokes);
+      score.holed = true; score.strokes += remaining; score.total += remaining;
       callout(`${slot}P 건너뜀`, '연결이 끊겼어요', 'miss', 1800);
       nextTurn();
     }
@@ -350,7 +351,8 @@ function watchTurn(now) {
     prompt(`${playerInfo(slot).name} 차례`, '폰에서 방향을 맞추고 어드레스를 눌러요');
   }
   if (now - game.activity > 75000) {
-    game.scores[slot].holed=true;game.scores[slot].total+=hole.par+5;
+    const score = game.scores[slot], remaining = Math.max(0, hole.par + 5 - score.strokes);
+    score.holed = true; score.strokes += remaining; score.total += remaining;
     callout(`${slot}P 건너뜀`, '오래 기다려서 다음 차례로 넘어가요', 'miss', 1800);
     nextTurn();
   }
@@ -388,7 +390,7 @@ function endGame() {
 // ---------- 타구 ----------
 function surfaceInfo(s) {
   return {
-    green: { bounce: 0.22, keep: 0.5, roll: 0.75 },
+    green: { bounce: 0.22, keep: 0.5, roll: 0.549 },
     fringe: { bounce: 0.25, keep: 0.45, roll: 1.4 },
     fairway: { bounce: 0.3, keep: 0.55, roll: 1.6 },
     tee: { bounce: 0.3, keep: 0.55, roll: 1.6 },
@@ -404,9 +406,9 @@ function surfaceInfo(s) {
 function simulate(shot) {
   const loft = CLUBS[shot.club].loft;
   const putting = shot.club === 'pt';
-  const clubSpeed = putting ? Math.max(.25, Math.min(5, shot.speed * RD * .28)) : Math.min(55, Math.max(4, shot.speed * RD * CLUBS[shot.club].lengthM * 1.65));
+  const clubSpeed = putting ? Math.max(.25, Math.min(4.4, shot.speed * RD * .9)) : Math.min(55, Math.max(4, shot.speed * RD * CLUBS[shot.club].lengthM * 1.65));
   const q = Math.max(0.55, Math.min(1, 1 - Math.max(0, shot.miss - 8) / 40));
-  const ballSpeed = clubSpeed * CLUBS[shot.club].smash * (0.85 + 0.15 * q);
+  const ballSpeed = clubSpeed * CLUBS[shot.club].smash * (putting ? 1.2 : 1) * (0.85 + 0.15 * q);
   const launch = putting ? 0 : loft * 0.72 * (0.94 + Math.random() * 0.12) + (1 - q) * (Math.random() - 0.5) * 12;
   const face = Math.max(-25, Math.min(25, shot.face));
   const path = Math.max(-25, Math.min(25, shot.path));

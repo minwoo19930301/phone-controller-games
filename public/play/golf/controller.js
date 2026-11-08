@@ -1,5 +1,6 @@
 import { CLUBS as BAG } from '/golf/clubs.js';
 import { createSwingCapture, synthSwing, feedSwing } from './swing-capture.js';
+import { resolveSwingSpeed } from './swing-speed.mjs';
 import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
 // 골프 컨트롤러. 폰의 방향을 계속 큰 화면으로 흘려보내고, 임팩트는 폰에서 직접 잡습니다.
 // 좌표는 어드레스 때 정한 기준축으로 보냅니다: r = 목표 오른쪽(공 쪽), u = 위, f = 목표 쪽.
@@ -82,9 +83,9 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
   let hasGyro = false; // rotationRate 에 숫자가 들어오는 기기인지
   const toBasis = (v) => [dot(v, basis.r), dot(v, basis.u), dot(v, basis.f)];
 
-  const swing = { stage: 'ready', phi: 0, prev: null, prevT: 0, prevD: 0, top: 0, gyroPeak: 0, samples: [] };
+  const swing = { stage: 'ready', phi: 0, prev: null, prevT: 0, prevD: 0, top: 0, gyroPeak: 0, orientationPeak: 0, samples: [] };
   function resetSwing() {
-    Object.assign(swing, { stage: 'ready', phi: 0, prev: null, prevT: 0, prevD: 0, top: 0, gyroPeak: 0, samples: [] });
+    Object.assign(swing, { stage: 'ready', phi: 0, prev: null, prevT: 0, prevD: 0, top: 0, gyroPeak: 0, orientationPeak: 0, samples: [] });
   }
 
   function calibrate(v) {
@@ -139,6 +140,7 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
         if (d < (club === 'pt' ? 3 : 20) && rate < (club === 'pt' ? 30 : 250)) resetSwing();
       }
       if (swing.stage === 'down') {
+        swing.orientationPeak = Math.max(swing.orientationPeak, rate);
         if (!hasGyro) swing.gyroPeak = Math.max(swing.gyroPeak, rate);
         // 어드레스 방향에 가장 가까워졌다가 멀어지기 시작하는 순간이 임팩트입니다.
         if ((swing.prevD < 45 && d > swing.prevD) || swing.phi > 40) impact();
@@ -168,7 +170,7 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
     face = ((face + 540) % 360) - 180;
     const path = Math.atan2(vel[0], Math.abs(vel[2]) + 1e-6) / RD; // + 는 안에서 밖으로
     // 속도는 자이로(rotationRate) 최댓값을 씁니다. 자이로가 없으면 방향 차이로 잰 값.
-    const speed = swing.gyroPeak;
+    const speed = resolveSwingSpeed(swing.gyroPeak, swing.orientationPeak, hasGyro);
     swing.stage = 'done';
     capture.impact(performance.now());
     setTimeout(()=>capture.finish(),1800);

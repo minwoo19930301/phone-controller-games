@@ -1,3 +1,4 @@
+import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
 // 퍼팅 컨트롤러. 터치로 조준하고, 폰을 퍼터 그립처럼 쥐고 시계추처럼 밀면 그 세기를 폰에서 직접 잽니다.
 // 좌표는 어드레스 때 정한 기준축으로 보냅니다: u = 위, f = 홀 쪽(어드레스 때 화면이 보는 수평 방향), r = f × u(오른쪽).
 (() => {
@@ -164,20 +165,23 @@
         det.stage = 'fwd';
         det.fwdAt = t;
         det.thStart = det.minTh;
-        det.peak = hasGyro ? rotNow : rate;
+        // A gyro can report zero or arrive late even while orientation moves.
+        det.peak = resolveSwingSpeed(hasGyro ? rotNow : 0, rate, hasGyro);
         det.peakAt = t;
         det.faceAtPeak = face;
       }
       return;
     }
     if (det.stage === 'fwd') {
-      // 속도는 자이로(rotationRate) 최댓값. 자이로가 없는 기기만 방향 변화로 잰 값을 씁니다.
-      if (!hasGyro && rate > det.peak) {
-        det.peak = rate;
+      // Preserve the gyro peak, with a conservative orientation fallback for
+      // devices whose rotationRate remains zero or arrives out of step.
+      const orientationRate = resolveSwingSpeed(0, rate, hasGyro);
+      if (orientationRate > det.peak) {
+        det.peak = orientationRate;
         det.peakAt = t;
         det.faceAtPeak = face;
       }
-      const g = hasGyro ? rotNow : rate;
+      const g = resolveSwingSpeed(hasGyro ? rotNow : 0, rate, hasGyro);
       // 최고 속도를 막 지나면 바로 보냅니다(늦게 보내면 큰 화면 공이 늦게 출발). 자이로 없는 기기는 값이 거칠어 조금 더 기다립니다.
       const dropped = g < det.peak * (hasGyro ? 0.85 : 0.6) && t - det.peakAt > 25;
       if (dropped || rate < -8 || t - det.fwdAt > 700) fire(t);
