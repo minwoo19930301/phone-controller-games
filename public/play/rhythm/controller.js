@@ -718,7 +718,7 @@ function paintOver() {
   const gc = GRADE_COL[r.grade] || '#7fd4ff';
   $('vOver').style.setProperty('--gc', gc);
   $('ovSong').textContent = r.song || '';
-  $('ovRank').innerHTML = r.of > 1 ? `<b>${r.rank}</b>위 <span>/ ${r.of}명</span>` : '<b>혼자</b> 플레이';
+  $('ovRank').innerHTML = r.late ? '<b>중간 참가</b> · 남은 노트 기준' : r.of > 1 ? `<b>${r.rank}</b>위 <span>/ ${r.of}명</span>` : '<b>혼자</b> 플레이';
   $('ovGrade').textContent = r.grade;
   const tags = [];
   if (r.pfc) tags.push('<span class="pfc">ALL PERFECT</span>');

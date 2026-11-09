@@ -120,9 +120,11 @@ socket.on('room', async (r) => {
   if (r.fresh && hadRoom && game.phase !== 'lobby') backToLobby('서버가 다시 시작돼서 대기실로 돌아왔어요');
   hadRoom = true;
   $('code').textContent = r.code;
+  $('codeMini').textContent = r.code;
   try {
     const res = await fetch(`/api/qr?room=${r.code}`).then((x) => x.json());
     $('qr').src = res.qr;
+    $('qrMini').src = res.qr;
     $('url').textContent = res.url.replace(/^https?:\/\//, '');
     $('warn').classList.toggle('hidden', Boolean(res.secure));
   } catch (e) {}
@@ -133,6 +135,7 @@ socket.on('players', (p) => {
   const before = new Set(serverPlayers.map((x) => x.slot));
   serverPlayers = p.players || [];
   for (const pl of serverPlayers) if (!before.has(pl.slot)) sfx.join();
+  if (game.phase === 'playing') joinRace(serverPlayers);
   renderLobby();
   pushState();
 });
@@ -213,6 +216,29 @@ function makeRacer(id, info) {
   return k;
 }
 
+// A late player takes over an unfinished CPU car at its current position. This
+// keeps the race and all other scores intact while opening a new split view.
+function joinRace(players) {
+  // Do not drop someone into the closing countdown just before results.
+  if (game.endAt) return;
+  let changed = false;
+  for (const p of players) {
+    if (!p.connected) continue;
+    let k = game.humans.find((r) => r.slot === p.slot);
+    if (k && k.kind === 'human') continue; // reconnect: retain their own car
+    if (!k) k = game.karts.find((r) => r.kind === 'cpu' && !r.finished);
+    if (!k) continue; // no active CPU to take over; the next race will include them
+    Object.assign(k, { slot:p.slot, name:p.name, color:p.color, kind:'human', num:p.slot, late:game.sub === 'race',
+      inp:{steer:0,gas:0,brake:0,t:0}, assist:ASSIST[game.diff] || ASSIST.normal });
+    view.refreshRacer(k);
+    if (!game.humans.includes(k)) game.humans.push(k);
+    game.humans.sort((a,b) => a.slot-b.slot);
+    send('cue', { type:'item', state:k.item ? 'have' : 'none', kind:k.item || undefined }, k.slot);
+    changed = true;
+  }
+  if (changed) pushState();
+}
+
 // 대기실·결과 화면 배경: CPU 카트 네 대가 계속 달립니다(아이템전이면 상자도 먹고 아이템도 씁니다).
 function buildDemo() {
   game.karts = CPU_INFO.map((c, i) => {
@@ -278,6 +304,7 @@ function startGame() {
   board.hide(true);
   $('lobby').classList.add('hidden');
   $('over').classList.add('hidden');
+  $('join').classList.remove('hidden');
   for (const k of humans) if (k.kind === 'human') send('cue', { type: 'item', state: 'none' }, k.slot);
   pushState();
 }
@@ -285,8 +312,9 @@ function startGame() {
 function endGame() {
   if (game.phase !== 'playing') return;
   const order = standings();
-  game.results = order.map((k, i) => ({
-    id: k.id, rank: i + 1, name: k.name, color: k.color, kind: k.kind, finished: k.finished, time: k.finishT,
+  const ranked = order.filter((k) => !k.late), late = order.filter((k) => k.late);
+  game.results = [...ranked, ...late].map((k, i) => ({
+    id: k.id, rank: k.late ? null : i + 1, late:Boolean(k.late), name: k.name, color: k.color, kind: k.kind, finished: k.finished, time: k.finishT,
     best: k.best === Infinity ? 0 : k.best, laps: Math.min(k.lapsDone, LAPS)
   }));
   game.phase = 'over';
@@ -296,10 +324,11 @@ function endGame() {
   board.hide(false);
   for (const r of game.results) {
     const k = game.karts.find((x) => x.id === r.id);
-    if (k && k.slot && k.kind !== 'cpu') send('result', { rank: r.rank, total: game.karts.length, time: Math.round(r.time), best: Math.round(r.best), finished: r.finished }, k.slot);
+    if (k && k.slot && k.kind !== 'cpu') send('result', { rank: r.rank, late:r.late, total: game.karts.length, time: Math.round(r.time), best: Math.round(r.best), finished: r.finished }, k.slot);
   }
   renderOver();
   $('over').classList.remove('hidden');
+  $('join').classList.add('hidden');
   pushState();
 }
 
@@ -312,6 +341,7 @@ function backToLobby(msg) {
   buildDemo();
   $('lobby').classList.remove('hidden');
   $('over').classList.add('hidden');
+  $('join').classList.add('hidden');
   renderLobby();
   pushState();
   if (msg) lobbyMessage(msg);
@@ -656,7 +686,7 @@ function simulate(dt, now) {
         k.speedMul = 1;
         k.chase = 0;
         items.clearKart(k);
-        if (!game.firstFinishAt && game.humans.includes(k)) game.firstFinishAt = now;
+        if (!game.firstFinishAt && game.humans.includes(k) && !k.late) game.firstFinishAt = now;
         if (k.slot && k.kind !== 'cpu') {
           sfx.finish();
           send('cue', { type: 'finish', rank: k.rank, time: Math.round(k.finishT) }, k.slot);
@@ -774,7 +804,7 @@ function pushState() {
       if (k.kind === 'cpu') continue;
       players[k.slot] = {
         rank: order.indexOf(k) + 1, lap: Math.min(LAPS, k.lapsDone + 1), fin: k.finished, time: Math.round(k.finishT || 0), n: game.karts.length,
-        chase: Math.round((k.chase || 0) * 100) / 100, item: k.item || null, roll: k.itemRoll > 0, star: k.starT > 0
+        chase: Math.round((k.chase || 0) * 100) / 100, item: k.item || null, roll: k.itemRoll > 0, star: k.starT > 0, late:Boolean(k.late)
       };
     }
   }
@@ -822,9 +852,9 @@ function renderOver() {
     e.className = 'r';
     e.style.setProperty('--c', r.color);
     e.style.animationDelay = `${i * 0.12}s`;
-    const tag = r.kind === 'cpu' ? 'CPU' : r.kind === 'bot' ? 'BOT' : '플레이어';
+    const tag = r.late ? '중간 참가 · CPU 차량 이어받음' : r.kind === 'cpu' ? 'CPU' : r.kind === 'bot' ? 'BOT' : '플레이어';
     e.innerHTML =
-      `<div class="rank">${r.rank}</div><div class="who">${r.name}</div><span class="tag">${tag}</span>` +
+      `<div class="rank">${r.late ? '–' : r.rank}</div><div class="who">${r.name}</div><span class="tag">${tag}</span>` +
       `<div class="num"><b>${r.finished ? fmt(r.time) : '미완주'}</b><span>${r.best ? `베스트 랩 ${fmt(r.best)}` : `${r.laps}/${LAPS}바퀴`}</span></div>`;
     box.appendChild(e);
   });

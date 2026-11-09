@@ -809,7 +809,8 @@ function paintWait(sub) {
   const over = sub === 'over';
   const busy = sub === 'shoot';
   $('wTitle').textContent = lobby ? '대기실' : review ? '다 찍었어요!' : over ? '완성!' : '촬영 중';
-  $('wSub').textContent = review ? '모두 준비하면 다 같이 꾸며요' : over ? '저장하고, 한 번 더 찍어도 돼요' : busy ? '이번 판이 끝나면 함께해요' : '';
+  $('wSub').textContent = review ? '모두 준비하면 다 같이 꾸며요' : over ? '저장하고, 한 번 더 찍어도 돼요' : busy ? '촬영이 끝나면 꾸미기에 참여해요. 다음 촬영부터 사진을 찍을 수 있어요.' : '';
+  if (review && !preview) needSheets();
   if (lobby) paintWaitHead();
   $('camCard').classList.toggle('hidden', !(lobby || busy));
   $('opts').classList.toggle('hidden', !(lobby || over));

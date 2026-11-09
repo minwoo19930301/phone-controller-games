@@ -183,6 +183,7 @@ socket.on('players', (p) => {
   const before = new Set(serverPlayers.map((x) => x.slot));
   serverPlayers = p.players || [];
   for (const pl of serverPlayers) if (!before.has(pl.slot)) sfx.join();
+  if (game.phase === 'playing' && game.stage !== 'end') joinLivePlayers();
   for (const s of [...game.ready]) if (!serverPlayers.some((x) => x.slot === s)) game.ready.delete(s);
   renderLobby();
   pushState(true);
@@ -1178,6 +1179,42 @@ function syncSabers() {
   view.setStations(playing
     ? game.players.map((P) => ({ i: P.station, color: P.color, label: P.name, sub: P.bot ? 'BOT' : isDuel() ? 'DUEL' : '' }))
     : game.demo ? [{ i: game.demo.station, color: DEMO_COLOR, label: 'DEMO', sub: game.demo.mode === 'duel' ? 'DUEL' : 'AUTO' }] : []);
+}
+
+// Each player has an independent station and opponent, so a late arrival can
+// enter the ongoing round without resetting anyone else's field or score.
+function joinLivePlayers() {
+  let changed = false;
+  for (const player of serverPlayers) {
+    if (!player.connected) continue;
+    const existing = game.players.find((p) => p.slot === player.slot);
+    if (existing && !existing.bot) continue;
+    if (existing) {
+      clearField(existing);
+      duel.clear(existing);
+      game.players.splice(game.players.indexOf(existing), 1);
+    }
+    if (game.players.length >= 4) continue;
+    const occupied = new Set(game.players.map((p) => p.station));
+    const station = [1, 2, 0, 3].find((i) => !occupied.has(i));
+    if (station === undefined) continue;
+    const P = newPlayer(player, station);
+    P.calibrated = game.ready.has(P.slot);
+    P.level = settings.difficulty();
+    P.autoplay = false;
+    P.ignTarget = game.stage === 'live' ? 1 : 0;
+    game.players.push(P);
+    game.players.sort((a, b) => a.slot - b.slot);
+    if (isDuel()) duel.setup(P, { walk: game.stage !== 'live' });
+    else {
+      const v = layoutViews().find((x) => x.key === P.key);
+      P.az = clamp(((v ? hFov(v) : 90) / 2 - 9) * (Math.PI / 180), 0.32, 0.72);
+      topUpDrones(P);
+      P.nextShot = game.stage === 'live' ? 0.9 : INTRO_S + 0.6;
+    }
+    changed = true;
+  }
+  if (changed) { syncSabers(); pushState(true); }
 }
 
 // 대기실 글: 고른 모드에 맞춰 설명과 결과 화면 제목을 바꿉니다.

@@ -724,7 +724,7 @@ function mine() {
 function statusText() {
   const p = mine();
   if (!p) return '';
-  return p.fin ? `${p.rank}등으로 들어왔어요` : `${p.rank}등 · ${p.lap}/${state.laps || 3}바퀴`;
+  return p.late ? `중간 참가 · 차량 현재 ${p.rank}등 · ${p.lap}/${state.laps || 3}바퀴` : p.fin ? `${p.rank}등으로 들어왔어요` : `${p.rank}등 · ${p.lap}/${state.laps || 3}바퀴`;
 }
 const MODE_NOTE = {
   item: `<i>${ITEM_ICONS.missile}</i><span>아이템전 · 상자를 먹고 가운데 버튼으로 써요. 뒤처질수록 센 아이템이 나와요.</span>`,
@@ -774,10 +774,10 @@ function render() {
     const total = (p && p.n) || (result && result.total) || 4;
     bigEl.classList.remove('hidden');
     bigEl.classList.toggle('win', r === 1);
-    bigEl.textContent = r ? `${r}등` : '';
-    $('waitT').textContent = r === 1 ? '우승!' : r ? `${total}대 중 ${r}등` : '경기 끝';
+    bigEl.textContent = result && result.late ? '중간 참가' : r ? `${r}등` : '';
+    $('waitT').textContent = result && result.late ? '중간 참가 완료' : r === 1 ? '우승!' : r ? `${total}대 중 ${r}등` : '경기 끝';
     const t = result && result.finished ? `기록 ${fmt(result.time)}${result.best ? ` · 베스트 랩 ${fmt(result.best)}` : ''}` : '완주하지 못했어요';
-    $('waitB').textContent = `${t}\n큰 화면에서 전체 결과를 확인하세요.`;
+    $('waitB').textContent = result && result.late ? 'CPU 차량을 이어받아 참가했어요.\n순위에는 포함되지 않아요.' : `${t}\n큰 화면에서 전체 결과를 확인하세요.`;
   } else if (phase === 'playing') {
     $('waitT').textContent = '경기 중';
     $('waitB').textContent = '지금 경기가 끝나면 다음 판부터 함께해요.';

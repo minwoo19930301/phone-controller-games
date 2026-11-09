@@ -209,6 +209,108 @@ async function main() {
   await wait(450);
   assert.strictEqual(starts, 2, '준비 안 한 사람의 자리가 빠지면 남은 사람끼리 시작');
 
+  // A new phone may scan the same QR after a match starts. It receives the
+  // active state, gets its own free slot and can relay inputs without causing
+  // another start_game. Reconnection keeps the original reserved slot.
+  const dLive = mk();
+  dLive.emit('join', { role: 'display', game: 'tennis' });
+  const liveRoom = await once(dLive, 'room');
+  const live1 = mk();
+  live1.emit('join', { role: 'controller', room: liveRoom.code, token: 'live-1-abcdef' });
+  assert.strictEqual((await once(live1, 'assigned')).slot, 1);
+  let liveStarts = 0;
+  dLive.on('start_game', () => { liveStarts += 1; });
+  const firstStart = once(dLive, 'start_game');
+  live1.emit('c2d', { event: 'start_game', data: {} });
+  await firstStart;
+  const stateSent = once(live1, 'game_state');
+  dLive.emit('d2c', { event: 'game_state', data: { phase: 'playing', point: 3 } });
+  await stateSent;
+  const live2 = mk();
+  const lateState = Promise.all([once(live2, 'assigned'), once(live2, 'game_state'), once(dLive, 'players')]);
+  live2.emit('join', { role: 'controller', room: liveRoom.code, token: 'live-2-abcdef' });
+  const [lateAssigned, activeState, roster] = await lateState;
+  assert.strictEqual(lateAssigned.slot, 2);
+  assert.deepStrictEqual([activeState.phase, activeState.point], ['playing', 3]);
+  assert.deepStrictEqual(roster.players.map((p) => p.slot), [1, 2]);
+  const lateSwing = once(dLive, 'swing');
+  live2.emit('c2d', { event: 'swing', data: { power: 0.6 } });
+  assert.deepStrictEqual(await lateSwing, { power: 0.6, slot: 2 });
+  const latestState = once(live2, 'game_state');
+  live2.emit('c2d', { event: 'start_game', data: {} });
+  assert.strictEqual((await latestState).phase, 'playing');
+  await wait(100);
+  assert.strictEqual(liveStarts, 1, '중도 참가자의 준비는 이미 시작한 경기를 재시작하면 안 됨');
+  live2.disconnect();
+  await wait(400);
+  const live3 = mk();
+  live3.emit('join', { role: 'controller', room: liveRoom.code, token: 'live-3-abcdef' });
+  assert.strictEqual((await once(live3, 'assigned')).slot, 3, '경기 중 끊긴 2P 자리는 유지해야 함');
+  const live2back = mk();
+  live2back.emit('join', { role: 'controller', room: liveRoom.code, token: 'live-2-abcdef' });
+  const restored = await once(live2back, 'assigned');
+  assert.strictEqual(restored.slot, 2);
+  assert.strictEqual(restored.rejoined, true);
+
+  // Photo booth's shoot/review/decorate are all one active session, even
+  // though none is named "playing"; do not transfer a disconnected slot.
+  const dPhoto = mk();
+  dPhoto.emit('join', { role: 'display', game: 'photobooth' });
+  const photoRoom = await once(dPhoto, 'room');
+  const photo1 = mk();
+  photo1.emit('join', { role: 'controller', room: photoRoom.code, token: 'photo-1-abcdef' });
+  await once(photo1, 'assigned');
+  const shootingState = once(photo1, 'game_state');
+  dPhoto.emit('d2c', { event: 'game_state', data: { phase: 'shoot' } });
+  await shootingState;
+  photo1.disconnect();
+  await wait(400);
+  const photo2 = mk();
+  photo2.emit('join', { role: 'controller', room: photoRoom.code, token: 'photo-2-abcdef' });
+  assert.strictEqual((await once(photo2, 'assigned')).slot, 2, '사진 촬영 중인 1P 자리는 유지해야 함');
+  const photo1back = mk();
+  photo1back.emit('join', { role: 'controller', room: photoRoom.code, token: 'photo-1-abcdef' });
+  const photoRestored = await once(photo1back, 'assigned');
+  assert.strictEqual(photoRestored.slot, 1);
+  assert.strictEqual(photoRestored.rejoined, true);
+  const reviewState = once(photo2, 'game_state');
+  dPhoto.emit('d2c', { event: 'game_state', data: { phase: 'review' } });
+  await reviewState;
+  let photoStarts = 0;
+  dPhoto.on('start_game', () => { photoStarts += 1; });
+  const firstPhotoReady = new Promise((resolve) => dPhoto.on('ready_state', function watch(state) {
+    if (state.ready.includes(1)) { dPhoto.off('ready_state', watch); resolve(state); }
+  }));
+  photo1back.emit('c2d', { event: 'start_game', data: {} });
+  assert.deepStrictEqual((await firstPhotoReady).ready, [1]);
+  // Repeated display updates during review must not erase an earlier vote.
+  const reviewAgain = once(photo2, 'game_state');
+  dPhoto.emit('d2c', { event: 'game_state', data: { phase: 'review' } });
+  await reviewAgain;
+  const decorateStart = once(dPhoto, 'start_game');
+  photo2.emit('c2d', { event: 'start_game', data: {} });
+  await decorateStart;
+  assert.strictEqual(photoStarts, 1, '사진 확인 후 모두 준비하면 꾸미기 단계로 넘어가야 함');
+  // If a guest leaves during review, the others can proceed. The departed
+  // person's slot remains reserved, so a reconnect cannot steal another seat.
+  const firstAgain = new Promise((resolve) => dPhoto.on('ready_state', function watch(state) {
+    if (state.ready.includes(1)) { dPhoto.off('ready_state', watch); resolve(state); }
+  }));
+  photo1back.emit('c2d', { event: 'start_game', data: {} });
+  assert.deepStrictEqual((await firstAgain).ready, [1]);
+  const decorateAfterLeave = once(dPhoto, 'start_game');
+  photo2.disconnect();
+  await decorateAfterLeave;
+  assert.strictEqual(photoStarts, 2, '사진 확인 중 끊긴 폰 때문에 꾸미기를 기다리면 안 됨');
+  await wait(400);
+  const photoNew = mk();
+  photoNew.emit('join', { role: 'controller', room: photoRoom.code, token: 'photo-3-abcdef' });
+  assert.strictEqual((await once(photoNew, 'assigned')).slot, 3, '사진 확인 중 끊긴 자리는 유지해야 함');
+  const photo2back = mk();
+  photo2back.emit('join', { role: 'controller', room: photoRoom.code, token: 'photo-2-abcdef' });
+  const photo2restored = await once(photo2back, 'assigned');
+  assert.deepStrictEqual([photo2restored.slot, photo2restored.rejoined], [2, true]);
+
   // ping
   const t = await new Promise((r) => dA2.emit('ping_rtt', 42, r));
   assert.strictEqual(t, 42);
@@ -218,6 +320,18 @@ async function main() {
   dC.emit('join', { role: 'display', game: 'photobooth' });
   const roomC = await once(dC, 'room');
   assert.ok(roomC.key, '큰 화면은 올리기 키를 받아야 함');
+  // A rejected upload must return before the claimed body has arrived; this
+  // prevents unauthenticated clients from making express.raw buffer 90 MB.
+  const earlyRejected = await new Promise((resolve, reject) => {
+    const req = require('http').request(`${url}/api/clip?room=${roomC.code}&kind=photo`, {
+      method: 'POST', headers: { 'x-display-key': 'wrong', 'content-type': 'image/png', 'content-length': '10000000' }
+    }, (res) => { const code = res.statusCode; res.resume(); req.destroy(); resolve(code); });
+    const timer = setTimeout(() => { req.destroy(); reject(new Error('unauthorized upload waited for its body')); }, 1200);
+    req.on('close', () => clearTimeout(timer));
+    req.on('error', reject);
+    req.write('x');
+  });
+  assert.strictEqual(earlyRejected, 403, '인증 전 업로드 본문 전체를 버퍼링하면 안 됨');
   const up = (key, body) => fetch(`${url}/api/clip?room=${roomC.code}&kind=photo&name=four.png`, { method: 'POST', headers: { 'x-display-key': key, 'content-type': 'image/png' }, body });
   assert.strictEqual((await up('wrong', 'x')).status, 403);
   const c1 = await (await up(roomC.key, 'first')).json();

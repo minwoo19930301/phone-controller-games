@@ -157,9 +157,11 @@ socket.on('room', async (r) => {
   if (r.fresh && hadRoom && game.phase !== 'lobby') backToLobby('서버가 다시 시작돼서 대기실로 돌아왔어요');
   hadRoom = true;
   $('code').textContent = r.code;
+  $('codeLive').textContent = r.code;
   try {
     const res = await fetch(`/api/qr?room=${r.code}`).then((x) => x.json());
     $('qr').src = res.qr;
+    $('qrLive').src = res.qr;
     $('url').textContent = res.url.replace(/^https?:\/\//, '');
     $('warn').classList.toggle('hidden', Boolean(res.secure));
   } catch (e) {}
@@ -170,6 +172,7 @@ socket.on('players', (p) => {
   const before = new Set(serverPlayers.map((x) => x.slot));
   serverPlayers = p.players || [];
   for (const pl of serverPlayers) if (!before.has(pl.slot)) sfx.join();
+  if (game.phase === 'playing') joinLatePlayers();
   for (const s of [...game.ready]) if (!serverPlayers.some((x) => x.slot === s)) game.ready.delete(s);
   renderLobby();
   pushState();
@@ -1003,6 +1006,44 @@ function syncTables() {
   }
 }
 
+// A live match keeps its score. Fill a CPU seat between points; if both seats
+// on A are occupied, start B without disturbing the existing match.
+function joinLatePlayers() {
+  let changed = false;
+  for (const p of serverPlayers.filter((x) => x.connected)) {
+    const existing = humanBySlot(p.slot);
+    if (existing && !existing.pl.bot) continue;
+    let seat = null;
+    if (existing && existing.pl.bot && existing.m.state !== 'over' && existing.m.winner == null) seat = { m: existing.m, side: existing.side };
+    for (const m of game.matches) {
+      if (seat) break;
+      if (m.demo || m.state === 'over' || m.winner != null) continue;
+      const side = m.sides.findIndex((pl) => pl.kind === 'cpu' || (pl.bot && pl.slot === p.slot));
+      if (side >= 0) { seat = { m, side }; break; }
+    }
+    if (seat) {
+      // Do not switch the player while a ball is in flight.
+      if (!['intro', 'point'].includes(seat.m.state)) continue;
+      const old = seat.m.sides[seat.side];
+      const pl = human(p);
+      seat.m.sides[seat.side] = pl;
+      const oldIndex = game.humans.indexOf(old);
+      if (oldIndex >= 0) game.humans.splice(oldIndex, 1);
+      game.humans.push(pl);
+      game.humans.sort((a,b) => a.slot - b.slot);
+      changed = true;
+    } else if (!game.matches.some((m) => m.id === 'B')) {
+      const pl = human(p);
+      game.matches.push(newMatch('B', pl, cpu('cpuB'), false));
+      game.overAt = 0;
+      game.humans.push(pl);
+      game.humans.sort((a,b) => a.slot - b.slot);
+      changed = true;
+    }
+  }
+  if (changed) { syncTables(); pushState(); }
+}
+
 function startGame() {
   if (game.phase === 'playing') {
     // 경기 중 Enter·폰 시작: 남은 경기마다 칠 사람이 하나도 없으면(모두 연결 끊김) 그 경기들을 접고 결과로 넘어갑니다.
@@ -1045,6 +1086,7 @@ function startGame() {
   syncTables();
   hud.clear();
   $('lobby').classList.add('hidden');
+  $('joinLive').classList.remove('hidden');
   $('over').classList.add('hidden');
   sfx.win();
   pushState();
@@ -1062,6 +1104,7 @@ function backToLobby(why) {
   startDemo();
   hud.clear();
   $('lobby').classList.remove('hidden');
+  $('joinLive').classList.add('hidden');
   $('over').classList.add('hidden');
   if (why) lobbyMessage(why);
   renderLobby();
@@ -1070,6 +1113,7 @@ function backToLobby(why) {
 
 function endGame() {
   game.phase = 'over';
+  $('joinLive').classList.add('hidden');
   // 결과 화면에서는 다음 판 난이도·슬로우를 바꿀 수 있습니다.
   settings.lock(false);
   board.hide(false);
@@ -1276,6 +1320,7 @@ function updateMatch(m, now, dtR) {
     if (now >= m.waitReal) {
       if (m.winner != null || m.abandoned) finishMatch(m, now);
       else {
+        if (!m.demo) joinLatePlayers();
         m.state = 'intro';
         m.waitReal = now + 600;
         prepareServe(m);

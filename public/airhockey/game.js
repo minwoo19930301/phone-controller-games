@@ -118,6 +118,20 @@ socket.on('players', (p) => {
         renderTags();
       }
     }
+    // Replace a free CPU seat without recreating the simulation or score.
+    for (const p of serverPlayers.filter((x) => x.connected)) {
+      if (game.ents.some((e) => e.slot === p.slot)) continue;
+      const e = game.ents.find((x) => x.kind === 'cpu');
+      if (!e) continue; // A full singles match remains intact until next game.
+      Object.assign(e, { kind: 'human', slot: p.slot, name: p.name, color: p.color, label: String(p.slot), finger: null, manualUntil: 0 });
+      e.input.samples.length = 0;
+      e.m.assist = diffCfg().assist;
+      game.stats[p.slot] = game.stats[p.slot] || { goals: 0, hits: 0, top: 0, own: 0 };
+      game.teams = teamInfo(game.ents);
+      view.setMallets(game.ents.map((x) => ({ id: x.id, color: x.color, label: x.label })));
+      view.setTeams(game.teams[0].color, game.teams[1].color, game.teams[0].name, game.teams[1].name);
+      renderTags(); updateBoards();
+    }
   }
   renderLobby();
   pushState();

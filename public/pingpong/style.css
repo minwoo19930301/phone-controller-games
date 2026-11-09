@@ -193,6 +193,9 @@ body.dock-on #lobby, body.dock-on #over { padding-bottom: calc(var(--dock-h, 120
 .qr-card { flex: none; width: 340px; padding: 24px; border-radius: 26px; background: #f7f5ee; color: #0b1220;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); text-align: center; }
 .qr-card img { width: 100%; aspect-ratio: 1; display: block; border-radius: 10px; background: #eeeae0; }
+.join-live { position: fixed; z-index: 25; right: 8px; bottom: 8px; display: flex; align-items: center; gap: 6px; padding: 6px; background: #f7f5ee; color: #111; border-radius: 10px; font-size: 12px; font-weight: 800; }
+.join-live.hidden { display: none; }
+.join-live img { width: 90px; height: 90px; }
 .qr-code { margin-top: 16px; display: flex; align-items: baseline; justify-content: center; gap: 12px; }
 .qr-code span { font-size: 13px; font-weight: 800; color: #5d6a7c; letter-spacing: 0.1em; }
 .qr-code b { font-family: var(--display); font-weight: 400; font-size: 54px; letter-spacing: 0.2em; line-height: 1; }

@@ -155,6 +155,7 @@ function syncPlayers() {
   for (const sp of serverPlayers) {
     seen.add(sp.slot);
     const p = players.get(sp.slot) || { slot: sp.slot, inst: null, fresh: false, tut: null, act: newAct() };
+    if (p.bot && game.phase === 'playing') { p.inst = null; p.act = newAct(); }
     Object.assign(p, { name: sp.name, color: sp.color, connected: sp.connected, bot: false });
     players.set(sp.slot, p);
   }
@@ -191,7 +192,41 @@ function newAct() { return { hits: [], level: 0, m: null, raw: null, keys: new M
 function onInstrument(d) {
   const p = players.get(Number(d.slot));
   if (!p || !INSTRUMENTS[d.inst]) return;
-  if (game.phase === 'playing') return; // 연주 중에는 못 바꿈
+  if (game.phase === 'playing') {
+    const current = game.perf && game.perf.players.get(p.slot);
+    if (!game.perf || (current && !current.bot && p.inst)) return; // existing player: instrument locked
+    p.inst = d.inst;
+    p.fresh = Boolean(d.fresh);
+    p.act = newAct();
+    const diff = settings.get('difficulty', p.slot) || 'normal';
+    const part = buildPart(game.song, p.inst, diff);
+    const joinBeat = Math.max(0, heardBeat() + 0.5);
+    const remaining = part.notes.filter((n) => n.b >= joinBeat).length;
+    // A performer arriving at the very end cannot be graded 100% for zero
+    // notes. Keep their choice for the next song and explain the wait.
+    if (game.stage === 'end' || !remaining) {
+      p.waitingNext = true;
+      hall.setPlayers(playerList());
+      pushState();
+      return;
+    }
+    p.waitingNext = false;
+    const P = {
+      slot:p.slot, inst:p.inst, diff, part, bot:false, color:p.color, name:p.name,
+      stats:{ perfect:0, good:0, miss:0, combo:0, maxCombo:0, pts:0 },
+      judged:new Uint8Array(part.notes.length), next:0, botNext:0, joinBeat,
+      nCount:remaining,
+      onsets:[], segs:[], cur:null, pitches:[], recVoice:null, recKeys:new Map(), ictus:[]
+    };
+    for (const n of part.notes) if (n.b < joinBeat) P.judged[n.i] = 4;
+    game.perf.players.set(p.slot, P);
+    if (p.inst === 'conductor' && game.perf.leader == null) game.perf.leader = p.slot;
+    hall.setPlayers(playerList());
+    buildPanels(game.song);
+    toast(`${p.name} 합주에 참가했어요`);
+    pushState();
+    return;
+  }
   const changed = p.inst !== d.inst;
   p.inst = d.inst;
   p.fresh = Boolean(d.fresh);
@@ -272,7 +307,7 @@ function pushState() {
     const P = game.perf && game.perf.players.get(p.slot);
     ps[p.slot] = {
       name: p.name, color: p.color, inst: p.inst, bot: p.bot || undefined, connected: p.connected,
-      diff: P ? P.diff : settings.get('difficulty', p.slot),
+      diff: P ? P.diff : settings.get('difficulty', p.slot), waitingNext: Boolean(p.waitingNext && game.phase === 'playing'),
       acc: P ? Math.round(accOf(P) * 100) / 100 : undefined, combo: P ? P.stats.combo : undefined,
     };
   }
@@ -534,6 +569,7 @@ function startPerformance(song) {
   const perf = { players: new Map(), startAt: 0, liveAt: 0, rate: 1, dyn: 1, dynWord: 'mf', leader: null, lastIctus: null, ictusAt: 0, ens: 0.85, ensN: 0, endAt: 0, notesAuto: 0, bpm: song.bpm };
   for (const p of playerList()) {
     if (!p.inst) continue;
+    p.waitingNext = false;
     const diff = settings.get('difficulty', p.slot);
     const part = buildPart(song, p.inst, diff);
     perf.players.set(p.slot, {
@@ -621,7 +657,7 @@ function endSong(cut = false) {
   const perf = game.perf;
   const bNow = heardBeat();
   for (const P of perf.players.values()) {
-    if (cut) P.nCount = P.part.notes.filter((n) => n.b <= bNow).length;
+    if (cut) P.nCount = P.part.notes.filter((n) => n.b <= bNow && n.b >= (P.joinBeat || 0)).length;
     // 남은 음은 놓친 것으로
     for (const n of P.part.notes) if (!P.judged[n.i] && (!cut || n.b <= bNow)) judge(P, n, 'miss', true);
   }
@@ -638,12 +674,16 @@ function finishPerformance() {
   const res = [];
   for (const P of perf.players.values()) {
     const acc = accOf(P);
-    res.push({ slot: P.slot, name: P.name, color: P.color, inst: P.inst, diff: P.diff, acc, grade: gradeOf(acc), ...P.stats, notes: P.part.notes.length, steady: P.inst === 'conductor' ? steadiness(P) : null, bot: P.bot });
+    res.push({ slot: P.slot, name: P.name, color: P.color, inst: P.inst, diff: P.diff, acc, grade: gradeOf(acc), ...P.stats, notes: P.nCount ?? P.part.notes.length, late: P.joinBeat != null, steady: P.inst === 'conductor' ? steadiness(P) : null, bot: P.bot });
   }
-  const ensAcc = res.length ? res.reduce((a, r) => a + r.acc, 0) / res.length : 1;
-  const ens = { acc: ensAcc, grade: gradeOf(ensAcc) };
+  // Partial performances are shown separately; they must not change the
+  // full-song ensemble score earned by players who started from the beginning.
+  const full = res.filter((r) => !r.late);
+  const graded = full.length ? full : res;
+  const ensAcc = graded.length ? graded.reduce((a, r) => a + r.acc, 0) / graded.length : 1;
+  const ens = { acc: ensAcc, grade: gradeOf(ensAcc), partial: !full.length && Boolean(res.length) };
   game.results = { list: res, ens, song: game.song };
-  for (const r of res) if (!r.bot) send('result', { acc: Math.round(r.acc * 1000) / 1000, grade: r.grade, perfect: r.perfect, good: r.good, miss: r.miss, maxCombo: r.maxCombo, ens }, r.slot);
+  for (const r of res) if (!r.bot) send('result', { acc: Math.round(r.acc * 1000) / 1000, grade: r.grade, late:r.late, perfect: r.perfect, good: r.good, miss: r.miss, maxCombo: r.maxCombo, ens }, r.slot);
   if (tr) { tr.unload(); tr = null; }
   game.stage = null;
   setPhase('over');
@@ -1106,10 +1146,10 @@ function renderOver() {
   $('oSong').textContent = song.title;
   $('oComposer').textContent = `${song.composer} · ${song.en}`;
   $('oGrade').textContent = R.ens.grade;
-  $('oWord').textContent = R.list.length ? `${GRADE_WORD[R.ens.grade]} · 합주 정확도 ${Math.round(R.ens.acc * 100)}%` : '자동 연주';
+  $('oWord').textContent = R.list.length ? `${GRADE_WORD[R.ens.grade]} · ${R.ens.partial ? '중간 참가 구간 정확도' : '합주 정확도'} ${Math.round(R.ens.acc * 100)}%` : '자동 연주';
   $('oCards').innerHTML = R.list.map((r) => {
     const I = INSTRUMENTS[r.inst];
-    return `<div class="oc" style="--pc:${r.color}"><div class="oc-h"><b>${r.name}</b><i>${ICONS[r.inst]}</i><strong>${I.label}</strong><em>${DIFF_LABEL[r.diff]}</em></div><div class="oc-g">${r.grade}<span>${Math.round(r.acc * 100)}%</span></div><div class="oc-s"><span>PERFECT <b>${r.perfect}</b></span><span>GOOD <b>${r.good}</b></span><span>MISS <b>${r.miss}</b></span><span>콤보 <b>${r.maxCombo}</b></span>${r.steady != null ? `<span>안정감 <b>${Math.round(r.steady * 100)}%</b></span>` : ''}</div></div>`;
+    return `<div class="oc" style="--pc:${r.color}"><div class="oc-h"><b>${r.name}</b><i>${ICONS[r.inst]}</i><strong>${I.label}</strong><em>${DIFF_LABEL[r.diff]}${r.late ? ' · 중간 참가' : ''}</em></div><div class="oc-g">${r.grade}<span>${Math.round(r.acc * 100)}%</span></div><div class="oc-s"><span>PERFECT <b>${r.perfect}</b></span><span>GOOD <b>${r.good}</b></span><span>MISS <b>${r.miss}</b></span><span>콤보 <b>${r.maxCombo}</b></span>${r.steady != null ? `<span>안정감 <b>${Math.round(r.steady * 100)}%</b></span>` : ''}</div></div>`;
   }).join('');
   const btn = $('oDlBtn');
   if (localBlobUrl) {

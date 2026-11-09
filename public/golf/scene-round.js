@@ -68,5 +68,5 @@ export function createScene(canvas, firstHole, firstCourse, difficulty='normal')
   }
   function project(x,y,z){const p=V(x,y,z).project(camera);return{x:(p.x*.5+.5)*innerWidth,y:(-p.y*.5+.5)*innerHeight,on:p.z<1}}
   setHole(firstHole,firstCourse,difficulty);setGolfer(color,club);
-  return {frame,setHole,setBall,setGolfer,address,pose,resetSwing,setAim,setTrail,setMarkers,project,getPhi:()=>0};
+  return {frame,setHole,setBall,setGolfer,address,pose,resetSwing,setAim,setTrail,setMarkers,project,getPhi:()=>golfer?.swingU ?? 0};
 }

@@ -242,13 +242,21 @@ function ensureP(slot) {
 // 서버가 알려 준 자리 + 봇(?bots=N) + 마우스 시험 선수를 합칩니다.
 function syncRoster() {
   const seen = new Set();
+  let raceRosterChanged = false;
   for (const sp of serverPlayers) {
     const P = ensureP(sp.slot);
+    const newcomer = !P.present || P.bot;
     P.present = true;
     P.bot = false;
     P.connected = Boolean(sp.connected);
     P.name = sp.name || P.name;
     P.color = sp.color || P.color;
+    if (newcomer && sp.connected && game.phase === 'playing' && game.stage !== 'end') {
+      if (P.ui) { P.ui.el.remove(); P.ui = null; }
+      Object.assign(P, { play:true, hp:MAX_HP, score:0, kills:0, headshots:0, shots:0, hits:0,
+        streak:0, bestStreak:0, down:false, downs:0, ammo:MAG, reloading:false, calibrated:false });
+      raceRosterChanged = true;
+    }
     seen.add(sp.slot);
   }
   let need = BOTS;
@@ -267,15 +275,18 @@ function syncRoster() {
   }
   for (const P of roster.values()) {
     if (!seen.has(P.slot)) {
+      if (P.play && game.phase === 'playing') raceRosterChanged = true;
       P.present = false;
       P.connected = false;
       P.bot = false;
       P.local = false;
       P.calibrated = false;
+      P.play = false;
     }
   }
   // 대기실에서 새로 들어온 폰의 조준점을 바로 띄우고, 나간 폰의 조준점은 치웁니다.
   syncXh();
+  if (raceRosterChanged) buildCards();
 }
 const lobbyList = () => [...roster.values()].filter((p) => p.present).sort((a, b) => a.slot - b.slot);
 const players = () => [...roster.values()].filter((p) => p.play).sort((a, b) => a.slot - b.slot);

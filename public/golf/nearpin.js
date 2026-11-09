@@ -3,6 +3,7 @@ import { modal, grit, organ, bell } from '/common/voice.js';
 import { createScene, CLUBS } from './scene.js';
 import { PIN, TEE_H, WATER_Y, height, surface, slope, pinHeight } from './course.js';
 import { analyzeSwing, summarize, renderPanel } from './analysis.js';
+import { displayMayReceiveFollow, displayShowsFollow } from './follow-through.mjs';
 
 const ROUNDS = 3;
 const RD = Math.PI / 180;
@@ -143,7 +144,8 @@ socket.on('address', (d) => {
   renderShotInfo();
 });
 socket.on('pose', (d) => {
-  if (!isTurn(d.slot) || game.sub !== 'swing' || !Array.isArray(d.s) || !Array.isArray(d.fc)) return;
+  const follow = displayMayReceiveFollow(game.sub, game.flight, performance.now());
+  if (!isTurn(d.slot) || (game.sub !== 'swing' && !follow) || !Array.isArray(d.s) || !Array.isArray(d.fc)) return;
   view.pose(d.s, d.fc);
 });
 let lastAnalysis=null,analysisPanel=null;
@@ -652,8 +654,8 @@ function tick() {
       ball = f.pts[i];
       trailI = i;
       const inAir = ball[1] > height(ball[0], ball[2]) + 0.3;
-      mode = now - f.t0 < 350 ? 'swing' : inAir || ball[2] < 60 ? 'flight' : 'land';
-      if (now - f.t0 > 350) $('live').innerHTML = `${Math.round(Math.hypot(ball[0], ball[2]))}<small>m</small>`;
+      mode = displayShowsFollow(f, now) ? 'swing' : inAir || ball[2] < 60 ? 'flight' : 'land';
+      if (!displayShowsFollow(f, now)) $('live').innerHTML = `${Math.round(Math.hypot(ball[0], ball[2]))}<small>m</small>`;
       if (i >= f.pts.length - 1 && !f.done) {
         $('live').textContent = '';
         finishShot(now);
@@ -661,7 +663,7 @@ function tick() {
     } else if (game.sub === 'result' && game.flight) {
       const f = game.flight;
       ball = f.pts[f.pts.length - 1];
-      mode = 'land';
+      mode = displayShowsFollow(f, now) ? 'swing' : 'land';
       const pt = view.project(ball[0], ball[1] + 0.8, ball[2]);
       const tag = $('pinTag');
       tag.style.left = `${pt.x}px`;

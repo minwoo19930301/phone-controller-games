@@ -217,3 +217,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
   .steps { grid-template-columns: 1fr; }
   .qr-card { width: 280px; }
 }
+.join { position:fixed; right:12px; top:50%; transform:translateY(-50%); z-index:25; display:flex; align-items:center; gap:8px; padding:8px; border-radius:12px; color:#fff; background:rgba(4,10,20,.88); box-shadow:0 3px 18px #0006; }
+.join.hidden { display:none; }
+.join img { width:90px; height:90px; background:#fff; border-radius:5px; }
+.join span, .join b { display:block; } .join span { font-size:11px; } .join b { font-size:20px; letter-spacing:.08em; }

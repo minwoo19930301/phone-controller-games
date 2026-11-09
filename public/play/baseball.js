@@ -1106,7 +1106,9 @@ function render() {
     $('hint').textContent = duel ? `${nameOf(state.pitcher)} 투수의 공이 오면 휘두르세요. 존 밖 공은 참으면 볼이에요.` : '투수가 공을 던지면 휘두르세요.';
   } else if (duel) {
     if (!$('result').dataset.keep) $('result').textContent = state.batter ? `${nameOf(state.batter)} 타석` : '대기';
-    $('hint').textContent = state.pitcher ? `${nameOf(state.pitcher)} 투구 중 · 내 차례를 기다려요.` : '내 차례를 기다려요.';
+    $('hint').textContent = !(state.roles && Object.hasOwn(state.roles, me.slot))
+      ? '진행 중인 투타 대결을 관전해요. 다음 경기부터 참가합니다.'
+      : state.pitcher ? `${nameOf(state.pitcher)} 투구 중 · 내 차례를 기다려요.` : '내 차례를 기다려요.';
   } else {
     $('result').textContent = state.batter ? `${state.batter}P 차례` : '대기';
     $('hint').textContent = '내 차례를 기다려요.';

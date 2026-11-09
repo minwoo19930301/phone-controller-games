@@ -241,6 +241,7 @@ function onMsg(d, volatile) {
     }
     case 'sync':
       if (G.phase === 'decorate') sendDecoSync(slot);
+      else if (G.phase === 'review' && S && S.bases) send('msg', { type: 'sheets', session: S.id, sheets: S.bases, preview: true }, slot);
       return;
     default:
   }
@@ -557,7 +558,7 @@ function setPhase(p) {
   board.hide(p !== 'lobby');
   $('lobby').classList.toggle('hidden', p !== 'lobby');
   $('studio').classList.toggle('hidden', p === 'lobby');
-  $('join').classList.toggle('hidden', p === 'lobby' || p === 'shoot');
+  $('join').classList.toggle('hidden', p === 'lobby');
   const st = $('studio');
   st.classList.toggle('over', p === 'over');
   if (p === 'lobby') {
@@ -884,7 +885,7 @@ function layoutStudio(enter) {
   const top = G.phase === 'review' || G.phase === 'over' ? Math.max(m * 1.1, 80) : m * 1.1;
   if (G.phase === 'over') area = { x: m, y: top, w: W - resW - m * 2 - 60, h: H - top - m * 1.1 };
   else area = { x: m + sideW + m * 1.2, y: top, w: W - (m + sideW + m * 1.2) - m, h: H - top - m * 1.1 };
-  if (G.phase !== 'lobby' && G.phase !== 'shoot' && G.phase !== 'over') area.w -= 120; // 오른쪽 위 참가 QR 자리
+  if (G.phase !== 'lobby' && G.phase !== 'over') area.w = Math.max(200, area.w - 120); // 촬영 중에도 오른쪽 위 참가 QR 자리
   if (single) {
     // 왼쪽 띠 + 오른쪽 큰 거울(지금 컷 크게)
     const cut = S.sheets[0].cuts[(S.shots[S.idx] || S.shots[0]).cut];

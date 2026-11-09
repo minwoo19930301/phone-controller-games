@@ -137,6 +137,9 @@ socket.on('players', (p) => {
   const before = new Set(serverPlayers.map((x) => x.slot));
   serverPlayers = p.players || [];
   for (const pl of serverPlayers) if (!before.has(pl.slot)) sfx.join();
+  // If still between points, a late phone can take a free CPU seat now.
+  // During a rally it waits until prepareServe so the current point is safe.
+  if (game.phase === 'playing' && game.match && game.match.state === 'intro' && !game.match.flight && serverPlayers.some((pl) => pl.connected && !before.has(pl.slot))) prepareServe(game.match, true, true);
   for (const s of [...game.racket]) if (!serverPlayers.some((x) => x.slot === s)) game.racket.delete(s);
   renderLobby();
   pushState();
@@ -282,6 +285,7 @@ function bodyForContact(m, pl, p, type) {
 
 // ---------- 서브 준비 ----------
 function prepareServe(m, first, quiet) {
+  if (!m.demo && game.phase === 'playing') joinLatePlayers(m);
   const st = m.teams[m.serveTeam];
   m.server = st.players[m.serverIdx[m.serveTeam] % st.players.length];
   m.box = (m.points[0] + m.points[1]) % 2 === 0 ? 'deuce' : 'ad';
@@ -305,6 +309,34 @@ function prepareServe(m, first, quiet) {
     const who = sv.kind === 'cpu' ? 'CPU' : sv.name;
     prompt(`${who} ${m.serveNo === 2 ? '세컨드 서브' : '서브'}`, m.box === 'deuce' ? '듀스 코트(오른쪽)에서' : '애드 코트(왼쪽)에서');
     if (sv.kind === 'human' && !sv.bot) send('cue', { kind: 'serve', stage: 'ready', second: m.serveNo === 2 }, sv.slot);
+    pushState();
+  }
+}
+
+function joinLatePlayers(m) {
+  let changed = false;
+  for (const p of serverPlayers.filter((x) => x.connected)) {
+    if (allPlayers(m).some((pl) => pl.kind === 'human' && pl.slot === p.slot && !pl.bot)) continue;
+    let seat = null;
+    // First reclaim this player's simulated slot, then look for an empty CPU
+    // seat. Otherwise the bot and real player can both retain the same slot.
+    for (const ownBot of [true, false]) {
+      for (let team = 0; team < 2 && !seat; team++) {
+        const idx = m.teams[team].players.findIndex((pl) => ownBot ? pl.bot && pl.slot === p.slot : pl.kind === 'cpu');
+        if (idx >= 0) seat = { team, idx };
+      }
+      if (seat) break;
+    }
+    if (!seat) continue; // No vacant seat: wait for the next match.
+    const old = m.teams[seat.team].players[seat.idx];
+    const pl = makePl(p, 'human', seat.team, seat.idx);
+    pl.x = old.x; pl.z = old.z;
+    m.teams[seat.team].players[seat.idx] = pl;
+    changed = true;
+  }
+  if (changed) {
+    game.humans = allPlayers(m).filter((pl) => pl.kind === 'human');
+    syncAthletes(m);
     pushState();
   }
 }

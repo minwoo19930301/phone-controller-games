@@ -764,7 +764,7 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
       }
     } else if (phase === 'playing') {
       $('waitT').textContent = '관전 중';
-      $('waitB').textContent = '지금 경기가 끝나면 함께할 수 있습니다.';
+      $('waitB').textContent = '빈 자리가 있으면 다음 점수부터 합류해요. 자리가 모두 차면 다음 경기를 기다려요.';
       $('btnGo').style.display = 'none';
       $('setBox').classList.add('hidden');
     } else {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { nextFarthest, nextTeeOrder, skipHole } from '../public/golf/turn-order.mjs';
+import { nextFarthest, nextTeeOrder, skipHole, rankedScores } from '../public/golf/turn-order.mjs';
 
 const dist = (x, z) => Math.hypot(x, z);
 const score = (distance, strokes, holed = false) => ({ pos: [distance, 0], strokes, holed });
@@ -56,4 +56,15 @@ test('a skipped player receives only the remaining strokes up to the hole maximu
   assert.deepEqual(nextTeeOrder([1, 2], scores), [2, 1]);
   skipHole(scores[1], 3);
   assert.equal(scores[1].total, 14);
+});
+
+test('late entrants are separated from players who played every hole', () => {
+  const scores = {
+    1: { total: 15, joinedRound: 1 },
+    2: { total: 4, joinedRound: 3 },
+    3: { total: 12, joinedRound: 1 },
+    4: { total: 7, joinedRound: 2 }
+  };
+  assert.deepEqual(rankedScores([1, 2, 3, 4], scores), [3, 1, 2, 4]);
+  assert.deepEqual(rankedScores([1, 3], scores), [3, 1]);
 });

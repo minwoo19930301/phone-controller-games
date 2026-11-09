@@ -337,7 +337,8 @@ function render() {
   if (tut) tut.setLinkVisible(ph !== 'playing');
   const info = myInfo();
   if (ph === 'playing') {
-    if (!info || !info.inst) { message('지금 연주 중이에요', '이 곡이 끝나면 함께할 수 있어요. 큰 화면을 보세요.'); mode = 'app'; return; }
+    if (!info || !info.inst) { renderPick(); show('vPick'); return; }
+    if (info.waitingNext) { message('이번 곡이 거의 끝났어요', '악기를 저장했어요. 다음 곡에서 함께 연주해요.'); mode = 'app'; return; }
     if (myInst !== info.inst) { myInst = info.inst; }
     ensureInstrument();
     showStage(true);
@@ -417,9 +418,9 @@ function renderOver() {
   $('ovSong').textContent = song ? `${song.title} · ${INSTRUMENTS[myInst] ? INSTRUMENTS[myInst].label : ''}` : '';
   if (r) {
     $('ovGrade').textContent = r.grade || '–';
-    $('ovWord').textContent = GRADE_WORD[r.grade] || '';
+    $('ovWord').textContent = (r.late ? '중간 참가 · 남은 악보 기준 · ' : '') + (GRADE_WORD[r.grade] || '');
     $('ovStats').innerHTML = `<span>정확도<b>${Math.round((r.acc || 0) * 100)}%</b></span><span>PERFECT<b>${r.perfect || 0}</b></span><span>GOOD<b>${r.good || 0}</b></span><span>MISS<b>${r.miss || 0}</b></span><span>최대 콤보<b>${r.maxCombo || 0}</b></span>`;
-    $('ovEns').textContent = r.ens ? `합주 평가 ${r.ens.grade} · ${GRADE_WORD[r.ens.grade] || ''}` : '';
+    $('ovEns').textContent = r.ens ? `${r.ens.partial ? '중간 참가 구간 평가' : '합주 평가'} ${r.ens.grade} · ${GRADE_WORD[r.ens.grade] || ''}` : '';
   } else {
     $('ovGrade').textContent = '–';
     $('ovWord').textContent = '큰 화면에서 결과를 확인해요';

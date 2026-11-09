@@ -7,6 +7,7 @@
 // 시험: ?bots=N, ?keys(키보드 1P), ?autostart(봇만 있을 때), ?song=<id>, ?difficulty=, ?input=, ?lanes=  / window.__rhythm
 import { createStage } from './stage.js';
 import { createHighways, newFx, LANE_GLYPH } from './highway.js';
+import { notesForLateJoin, rankFinishers } from './late-join.mjs';
 import { createJudge } from './judge.js';
 import { SONGS, getSong, beatToSec, secToBeat } from '/common/music/songs.js';
 import { createSynth, createTransport, playPreview } from '/common/music/synth.js';
@@ -178,6 +179,26 @@ socket.on('room', async (r) => {
 socket.on('players', (p) => {
   serverPlayers = p.players || [];
   syncRoster();
+  if (game.phase === 'playing' && game.song) {
+    let changed = false;
+    for (const sp of serverPlayers) {
+      if (!sp.connected) continue;
+      const old = game.players.findIndex((x) => x.slot === sp.slot);
+      if (old >= 0 && !game.players[old].bot && !game.players[old].keys) continue;
+      const P = roster.get(sp.slot);
+      if (!P) continue;
+      const player = makeGamePlayer(P, game.song, Math.max(0, songTimeAt(performance.now()) + 1));
+      player.late = player.judge.notes.length < player.chart.notes.length;
+      if (old >= 0) game.players.splice(old, 1, player); else game.players.push(player);
+      changed = true;
+    }
+    if (changed) {
+      game.players.sort((a, b) => a.slot - b.slot);
+      stage.setPlayers(game.players.map((x) => x.color));
+      highways.layout(game.players);
+      banner('중간 참가!', '지금부터 나오는 노트부터 점수에 반영돼요', 2500);
+    }
+  }
   renderRoster();
   pushState();
   sendPickerSoon();
@@ -464,6 +485,19 @@ function buildBeats(song) {
   return out;
 }
 
+function makeGamePlayer(P, song, fromTime = 0) {
+  const c = cfgOf(P);
+  const chart = genChart(song, { difficulty: c.diff, lanes: c.lanes, input: c.input });
+  // Notes before joining never count as misses and do not affect the score.
+  const notes = notesForLateJoin(chart.notes, fromTime);
+  const judge = createJudge({ notes, difficulty: c.diff, input: c.input, lanes: c.lanes });
+  return {
+    slot: P.slot, name: P.name, color: P.color, bot: P.bot, keys: P.keys, connected: P.connected,
+    input: c.input, lanes: c.lanes, diff: c.diff, stars: chart.stars, chart, judge, fx: newFx(c.lanes), held: new Set(),
+    botNext: 0, botSd: P.bot ? BOT_CFG[P.slot].sd : 0
+  };
+}
+
 function startGame() {
   if (game.phase !== 'select') return;
   let list = presentList();
@@ -478,16 +512,7 @@ function startGame() {
   picker.setEnabled(false);
   game.song = song;
   game.lastSongId = song.id;
-  game.players = list.map((P) => {
-    const c = cfgOf(P);
-    const chart = genChart(song, { difficulty: c.diff, lanes: c.lanes, input: c.input });
-    const judge = createJudge({ notes: chart.notes, difficulty: c.diff, input: c.input, lanes: c.lanes });
-    return {
-      slot: P.slot, name: P.name, color: P.color, bot: P.bot, keys: P.keys, connected: P.connected,
-      input: c.input, lanes: c.lanes, diff: c.diff, stars: chart.stars, chart, judge, fx: newFx(c.lanes), held: new Set(),
-      botNext: 0, botSd: P.bot ? BOT_CFG[P.slot].sd : 0
-    };
-  });
+  game.players = list.map((P) => makeGamePlayer(P, song));
   game.beats = buildBeats(song);
   game.t0 = null;
   game.ended = false;
@@ -628,9 +653,7 @@ function finishGame() {
   synth.setVolume(0, 0.25);
   setTimeout(() => { transport.stop(); synth.setVolume(0.9, 0.02); }, 900);
   const rows = game.players.map((p) => ({ p, s: p.judge.summary() }));
-  rows.sort((a, b) => b.s.score - a.s.score || b.s.maxCombo - a.s.maxCombo);
-  let rank = 0, prev = null;
-  rows.forEach((r, i) => { if (!prev || r.s.score !== prev.s.score) rank = i + 1; r.rank = rank; prev = r; });
+  rankFinishers(rows);
   game.results = rows;
   settings.lock(false);
   board.hide(false);
@@ -641,7 +664,7 @@ function finishGame() {
   showScreen('over');
   for (const r of rows) {
     if (r.p.bot || r.p.keys) continue;
-    send('result', { rank: r.rank, of: rows.length, grade: r.s.grade, score: r.s.score, acc: Math.round(r.s.acc * 1000) / 10, maxCombo: r.s.maxCombo,
+    send('result', { rank: r.rank, of: rows.length, late: Boolean(r.p.late), grade: r.s.grade, score: r.s.score, acc: Math.round(r.s.acc * 1000) / 10, maxCombo: r.s.maxCombo,
       counts: r.s.counts, fc: r.s.fullCombo, pfc: r.s.perfectAll, failed: r.s.failed, song: game.song.title, overMs: OVER_MS }, r.p.slot);
   }
   pushState();
@@ -657,12 +680,13 @@ function renderResults() {
   $('ranks').innerHTML = game.results.map((r, i) => {
     const s = r.s, p = r.p;
     const tags = [];
+    if (p.late) tags.push('<span class="mode">중간 참가 · 남은 노트 기준</span>');
     if (s.perfectAll) tags.push('<span class="pfc">ALL PERFECT</span>');
     else if (s.fullCombo) tags.push('<span class="fc">FULL COMBO</span>');
     if (s.failed) tags.push('<span class="fail">클리어 실패</span>');
     tags.push(`<span class="mode">${p.input === 'motion' ? '모션' : p.lanes === 5 ? '패드 5키' : '패드'} · ${DIFF_LABEL[p.diff]}</span>`);
     return `<div class="rk${r.rank === 1 && game.results.length > 1 ? ' first' : ''}" style="--c:${p.color};--gc:${GC[s.grade]};animation-delay:${i * 0.12}s">` +
-      `<div class="rk-top"><div class="rk-rank">${r.rank}<small>위</small></div><div class="rk-badge">${p.name}</div></div>` +
+      `<div class="rk-top"><div class="rk-rank">${p.late ? '–' : `${r.rank}<small>위</small>`}</div><div class="rk-badge">${p.name}</div></div>` +
       `<div class="rk-grade">${s.grade}</div>` +
       `<div class="rk-tags">${tags.join('')}</div>` +
       `<div class="rk-score">${s.score.toLocaleString('en-US')}</div>` +

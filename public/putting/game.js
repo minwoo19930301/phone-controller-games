@@ -102,6 +102,24 @@ socket.on('players', (p) => {
   const before = new Set(serverPlayers.map((x) => x.slot));
   serverPlayers = p.players || [];
   if (serverPlayers.some((x) => !before.has(x.slot))) sfx.chime();
+  if (game.phase === 'playing') {
+    for (const pl of serverPlayers.filter((x) => x.connected)) {
+      const info = game.info[pl.slot];
+      if (info) {
+        // A real phone taking a simulated seat inherits its existing score.
+        if (info.bot || info.local) { info.bot = false; info.local = false; }
+        continue;
+      }
+      // Once the final hole has ended, a new phone waits for the next match.
+      if (game.sub === 'holeEnd' && game.holeIdx + 1 >= HOLE_COUNT) continue;
+      const joinedAt = game.holeIdx + (game.sub === 'holeEnd' ? 1 : 0);
+      game.info[pl.slot] = { slot: pl.slot, name: pl.name, color: pl.color, bot: false, local: false, joinedAt };
+      game.card[pl.slot] = new Array(HOLE_COUNT).fill(null);
+      game.order.push(pl.slot);
+      // The ball is picked at the next turn boundary, never during a putt.
+      game.balls[pl.slot] = { x: hole.start.x, z: hole.start.z, strokes: 0, holed: false, done: false, picked: false };
+    }
+  }
   renderLobby();
   renderBoard();
   pushState();
@@ -381,7 +399,7 @@ function endGame() {
   const ranked = rankList();
   const box = $('podium');
   box.innerHTML = '';
-  const tied = (r) => ranked.filter((x) => x.rank === r).length > 1;
+  const tied = (r) => r != null && ranked.filter((x) => x.rank === r).length > 1;
   ranked.forEach(({ slot, rank }, i) => {
     const p = playerInfo(slot);
     const total = totalOf(slot);
@@ -392,8 +410,8 @@ function endGame() {
     el.style.setProperty('--c', p.color);
     el.style.animationDelay = `${0.15 + i * 0.12}s`;
     const holes = game.card[slot].map((v) => `<span class="${v && v < getHole(0).par ? 'u' : ''}">${v == null ? '-' : v}</span>`).join('');
-    el.innerHTML = `<span class="rank">${rank}</span><span class="who">${p.name}</span><span class="holes">${holes}</span>` +
-      `<span class="num"><b>${total}</b><span>타 · ${diff === 0 ? '이븐' : diff > 0 ? `+${diff}` : diff}${tied(rank) ? ` · 공동 ${rank}위` : ''}</span></span>`;
+    el.innerHTML = `<span class="rank">${rank == null ? '–' : rank}</span><span class="who">${p.name}</span><span class="holes">${holes}</span>` +
+      `<span class="num"><b>${total}</b><span>${rank == null ? '타 · 중도 참가' : `타 · ${diff === 0 ? '이븐' : diff > 0 ? `+${diff}` : diff}${tied(rank) ? ` · 공동 ${rank}위` : ''}`}</span></span>`;
     box.appendChild(el);
   });
   $('over').classList.remove('hidden');
@@ -404,10 +422,11 @@ function endGame() {
 
 // 총 타수가 적은 순. 같으면 공동 순위.
 function rankList() {
-  const list = [...game.order].sort((a, b) => totalOf(a) - totalOf(b) || a - b);
+  const list = [...game.order].sort((a, b) => (game.info[a].joinedAt || 0) - (game.info[b].joinedAt || 0) || totalOf(a) - totalOf(b) || a - b);
   let rank = 0;
   let prev = null;
   return list.map((slot, i) => {
+    if (game.info[slot].joinedAt > 0) return { slot, rank: null };
     const t = totalOf(slot);
     if (t !== prev) rank = i + 1;
     prev = t;
@@ -751,7 +770,7 @@ function finishPutt(now) {
 // 시험용 봇: 같은 굴리기 함수로 라인을 읽고, 사람처럼 조금씩 틀립니다.
 // ================================================================
 function botTurn(slot, shotId) {
-  const alive = () => game.phase === 'playing' && game.turn === slot && game.shot === shotId;
+  const alive = () => game.phase === 'playing' && game.turn === slot && game.shot === shotId && playerInfo(slot).bot;
   setTimeout(() => {
     if (!alive()) return;
     const b = ballOf(slot);

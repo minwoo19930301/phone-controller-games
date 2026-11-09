@@ -26,6 +26,16 @@ export function nextTeeOrder(order, scores) {
   return [...order].sort((a, b) => scores[a].strokes - scores[b].strokes);
 }
 
+// A person joining after hole 1 has not played all previous holes. Their
+// partial total is shown separately, rather than beating complete scores.
+export function rankedScores(order, scores) {
+  return [...order].sort((a, b) => {
+    const pa = (scores[a].joinedRound || 1) > 1;
+    const pb = (scores[b].joinedRound || 1) > 1;
+    return Number(pa) - Number(pb) || scores[a].total - scores[b].total;
+  });
+}
+
 // When a disconnected or inactive player is skipped, record the hole maximum
 // only once, including any strokes they have already taken on that hole.
 export function skipHole(score, par) {

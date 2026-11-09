@@ -4,7 +4,8 @@ import { createScene, CLUBS } from './scene-round.js';
 import { COURSES } from './courses/index.js';
 import { recommendClub } from './clubs.js';
 import { analyzeSwing, summarize, renderPanel } from './analysis.js';
-import { nextFarthest, nextTeeOrder, skipHole } from './turn-order.mjs';
+import { displayMayReceiveFollow, displayShowsFollow } from './follow-through.mjs';
+import { nextFarthest, nextTeeOrder, skipHole, rankedScores } from './turn-order.mjs';
 
 const ROUNDS = 3;
 const RD = Math.PI / 180;
@@ -150,7 +151,8 @@ socket.on('address', (d) => {
   renderShotInfo();
 });
 socket.on('pose', (d) => {
-  if (!isTurn(d.slot) || game.sub !== 'swing' || !Array.isArray(d.s) || !Array.isArray(d.fc)) return;
+  const follow = displayMayReceiveFollow(game.sub, game.flight, performance.now());
+  if (!isTurn(d.slot) || (game.sub !== 'swing' && !follow) || !Array.isArray(d.s) || !Array.isArray(d.fc)) return;
   view.pose(d.s, d.fc);
 });
 let lastAnalysis=null,analysisPanel=null;
@@ -208,16 +210,16 @@ const game = {
   waitUntil: 0
 };
 
-function addToOrder(slot) {
+function addToOrder(slot, joinedRound = game.phase === 'playing' ? game.round : 1) {
   if (game.order.includes(slot)) return;
   game.order.push(slot);
   const tee=hole.teeByDifficulty[difficulty];
-  game.scores[slot] = { best: null, shots: [], strokes: 0, total: 0, pos:[tee.x,tee.z], holed:false };
+  game.scores[slot] = { best: null, shots: [], strokes: 0, total: 0, joinedRound, pos:[tee.x,tee.z], holed:false };
 }
 
 function pushState() {
   const scores = {};
-  for (const [s, v] of Object.entries(game.scores)) scores[s] = { best: v.best };
+  for (const [s, v] of Object.entries(game.scores)) scores[s] = { best: v.best, joinedRound: v.joinedRound };
   socket.emit('d2c', {
     event: 'game_state',
     data: {
@@ -249,7 +251,7 @@ function startGame() {
   game.phase = 'playing';
   game.order = [];
   game.scores = {};
-  connected.forEach(addToOrder);
+  connected.forEach((slot) => addToOrder(slot, 1));
   game.turn = 0;
   game.round = 1;
   game.shot = 0;
@@ -364,9 +366,7 @@ function endGame() {
   $('shotPanel').classList.remove('on');
   $('pinTag').classList.remove('on');
   prompt('', '');
-  const ranked = [...game.order].sort((a, b) => {
-    return game.scores[a].total - game.scores[b].total;
-  });
+  const ranked = rankedScores(game.order, game.scores);
   const box = $('podium');
   box.innerHTML = '';
   ranked.forEach((slot, i) => {
@@ -376,8 +376,9 @@ function endGame() {
     el.className = 'r';
     el.style.setProperty('--c', p.color);
     el.style.animationDelay = `${0.15 + i * 0.12}s`;
-    el.innerHTML = `<span class="rank">${i + 1}</span><span class="who">${p.name}</span>` +
-      `<span class="num"><b>${sc.total}</b><span>총 타수</span></span>`;
+    const partial = sc.joinedRound > 1;
+    el.innerHTML = `<span class="rank">${partial ? '—' : i + 1}</span><span class="who">${p.name}${partial ? ` · ${sc.joinedRound}홀부터 참가` : ''}</span>` +
+      `<span class="num"><b>${sc.total}</b><span>${partial ? '참가 홀 타수' : '총 타수'}</span></span>`;
     box.appendChild(el);
   });
   $('over').classList.remove('hidden');
@@ -640,15 +641,13 @@ function renderShotInfo() {
 function renderBoard() {
   const b = $('leader');
   b.innerHTML = '';
-  const rows = [...game.order].sort((a, c) => {
-    return game.scores[a].total - game.scores[c].total;
-  });
+  const rows = rankedScores(game.order, game.scores);
   for (const slot of rows) {
     const p = playerInfo(slot);
     const sc = game.scores[slot];
     const row = document.createElement('div');
     row.className = 'row' + (slot === game.order[game.turn] ? ' now' : '');
-    row.innerHTML = `<i style="background:${p.color}"></i><span class="n">${p.name}</span>` +
+    row.innerHTML = `<i style="background:${p.color}"></i><span class="n">${p.name}${sc.joinedRound > 1 ? ` (${sc.joinedRound}홀부터)` : ''}</span>` +
       `<b>${sc.total}</b><small>타</small>`;
     b.appendChild(row);
   }
@@ -670,8 +669,8 @@ function tick() {
       ball = f.pts[i];
       trailI = i;
       const inAir = ball[1] > height(ball[0], ball[2]) + 0.3;
-      mode = now - f.t0 < 350 ? 'swing' : inAir || ball[2] < 60 ? 'flight' : 'land';
-      if (now - f.t0 > 350) $('live').innerHTML = `${Math.round(Math.hypot(ball[0]-game.scores[game.order[game.turn]].pos[0], ball[2]-game.scores[game.order[game.turn]].pos[1]))}<small>m</small>`;
+      mode = displayShowsFollow(f, now) ? 'swing' : inAir || ball[2] < 60 ? 'flight' : 'land';
+      if (!displayShowsFollow(f, now)) $('live').innerHTML = `${Math.round(Math.hypot(ball[0]-game.scores[game.order[game.turn]].pos[0], ball[2]-game.scores[game.order[game.turn]].pos[1]))}<small>m</small>`;
       if (i >= f.pts.length - 1 && !f.done) {
         $('live').textContent = '';
         finishShot(now);
@@ -679,7 +678,7 @@ function tick() {
     } else if (game.sub === 'result' && game.flight) {
       const f = game.flight;
       ball = f.pts[f.pts.length - 1];
-      mode = 'land';
+      mode = displayShowsFollow(f, now) ? 'swing' : 'land';
       const pt = view.project(ball[0], ball[1] + 0.8, ball[2]);
       const tag = $('pinTag');
       tag.style.left = `${pt.x}px`;

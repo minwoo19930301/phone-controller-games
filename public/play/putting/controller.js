@@ -518,7 +518,7 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
     if (!inGame) {
       mode = 'wait';
       $('waitT').textContent = '구경 중';
-      $('waitB').textContent = '이번 경기가 끝나면 함께해요.';
+      $('waitB').textContent = '다음 차례부터 함께해요. 마지막 홀이 끝났다면 다음 경기를 기다려요.';
       show('vWait');
       return;
     }

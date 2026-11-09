@@ -1,6 +1,7 @@
 import { CLUBS as BAG } from '/golf/clubs.js';
 import { createSwingCapture, synthSwing, feedSwing } from './swing-capture.js';
 import { resolveSwingSpeed } from './swing-speed.mjs';
+import { phoneMaySendFollow } from '/golf/follow-through.mjs';
 import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
 // 골프 컨트롤러. 폰의 방향을 계속 큰 화면으로 흘려보내고, 임팩트는 폰에서 직접 잡습니다.
 // 좌표는 어드레스 때 정한 기준축으로 보냅니다: r = 목표 오른쪽(공 쪽), u = 위, f = 목표 쪽.
@@ -114,7 +115,13 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
     const s = toBasis(v.top);
     const fc = toBasis(v.face);
     capture.sample(t,s,fc);
-    if (mode !== 'swing') return;
+    // impact() changes the phone UI to result immediately, but the player is
+    // still extending their arms. Continue live pose messages during the
+    // bounded follow-through window; do not run impact detection a second time.
+    if (mode !== 'swing') {
+      if (phoneMaySendFollow(mode, t, impactAt, state.phase, state.turn, me?.slot)) send('pose', { s, fc }, true);
+      return;
+    }
     send('pose', { s, fc }, true);
     drawMeter(s);
 

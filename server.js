@@ -166,7 +166,14 @@ function clipBytes() {
   for (const c of clips.values()) n += c.buf.length;
   return n;
 }
-app.post('/api/clip', express.raw({ type: () => true, limit: CLIP_MAX_BYTES }), (req, res) => {
+// Reject an invalid room/key before the raw parser buffers a potentially large
+// body. Recheck after upload too, in case the display was replaced meanwhile.
+function authorizeClipUpload(req, res, next) {
+  const room = rooms.get(cleanCode(req.query.room));
+  if (!room || !room.displayKey || req.get('x-display-key') !== room.displayKey) return res.status(403).json({ error: 'forbidden' });
+  next();
+}
+app.post('/api/clip', authorizeClipUpload, express.raw({ type: () => true, limit: CLIP_MAX_BYTES }), (req, res) => {
   const room = rooms.get(cleanCode(req.query.room));
   if (!room || !room.displayKey || req.get('x-display-key') !== room.displayKey) return res.status(403).json({ error: 'forbidden' });
   const buf = req.body;
@@ -252,12 +259,33 @@ function broadcastPlayers(room) {
   }
 }
 
+// Most games call an active match "playing". The photo booth has several
+// consecutive phases for the same session; reserved phone slots must survive
+// the entire session so a reconnect cannot inherit another person's photos.
+function hasReservedActiveSession(room) {
+  const phase = room.lastState && room.lastState.phase;
+  return phase === 'playing' || (room.game === 'photobooth' && ['shoot', 'review', 'decorate'].includes(phase));
+}
+
+// Unlike shoot/decorate, the photo booth's review phase intentionally uses
+// everybody's next ready vote to start decoration. Keep slots reserved in
+// review, but do not suppress the normal ready gate in that phase.
+function blocksReadyVotes(room) {
+  const phase = room.lastState && room.lastState.phase;
+  return phase === 'playing' || (room.game === 'photobooth' && ['shoot', 'decorate'].includes(phase));
+}
+
 // 모두 준비: 폰의 start_game 은 바로 넘기지 않고, 들어온 사람이 모두 누르면 그때 화면에 한 번 넘깁니다.
 // 들어온 사람 = 자리를 가진 사람. 화면이 꺼지거나 잠깐 끊겨 자리를 잡아 둔 사람도 셉니다(RESERVE_MS 뒤 자리가 빠지면 그때 빠짐).
 // gate:false 인 종목(늘 열린 낚시)은 예전처럼 바로 넘깁니다.
 function readyState(room) {
   const held = [...room.slots.values()].sort((a, b) => a.slot - b.slot);
-  const players = held.map((e) => e.slot);
+  // During photo review, keep the original slot for reconnection without
+  // making disconnected guests block "go decorate" forever. Other lobbies
+  // retain the existing grace-period behaviour.
+  const voters = room.game === 'photobooth' && room.lastState?.phase === 'review'
+    ? held.filter((e) => e.connected) : held;
+  const players = voters.map((e) => e.slot);
   const away = held.filter((e) => !e.connected).map((e) => e.slot);
   const ready = players.filter((s) => room.ready.has(s));
   return { ready, players, away, need: players.length };
@@ -269,6 +297,13 @@ function emitReady(room) {
   return st;
 }
 function checkReady(room, data) {
+  // A phone joining an existing match joins the roster, not a new match.
+  // Never let a leftover readiness vote restart a match on roster changes.
+  if (blocksReadyVotes(room)) {
+    room.ready.clear();
+    emitReady(room);
+    return;
+  }
   const st = emitReady(room);
   if (!st.need || st.ready.length < st.need) return;
   room.ready.clear();
@@ -403,6 +438,10 @@ io.on('connection', (socket) => {
     const data = msg.data && typeof msg.data === 'object' ? { ...msg.data } : {};
     data.slot = slot;
     if (msg.event === 'start_game' && GAMES[room.game].gate !== false) {
+      if (blocksReadyVotes(room)) {
+        socket.emit('game_state', room.lastState);
+        return;
+      }
       room.ready.add(slot);
       checkReady(room, data);
       return;
@@ -420,7 +459,7 @@ io.on('connection', (socket) => {
     if (msg.event === 'game_state' && msg.data && typeof msg.data.phase === 'string') {
       room.lastState = { ...msg.data };
       // 경기가 시작되면 준비 표시는 지웁니다(다음 판도 다시 모두 준비).
-      if (msg.data.phase === 'playing' && room.ready.size) {
+      if (blocksReadyVotes(room) && room.ready.size) {
         room.ready.clear();
         emitReady(room);
       }
@@ -448,7 +487,7 @@ io.on('connection', (socket) => {
     // 경기 중에는 자리를 지우지 않고 계속 잡아 둡니다(화면이 그 차례를 건너뜀). 경기가 끝난 뒤에 비웁니다.
     const release = () => {
       if (entry.connected || room.slots.get(slot) !== entry) return;
-      if (room.lastState.phase === 'playing') {
+      if (hasReservedActiveSession(room)) {
         entry.timer = setTimeout(release, RESERVE_MS);
         return;
       }

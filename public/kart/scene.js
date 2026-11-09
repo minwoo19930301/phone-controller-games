@@ -50,6 +50,40 @@ export function createScene(cv, track) {
     });
   }
 
+  // Refresh only the CPU car taken over by a late player. Rebuilding every
+  // car on each join leaves GPU resources behind and can interrupt animations.
+  function refreshRacer(k) {
+    const old = models.get(k.id);
+    if (!old) return;
+    const group = makeKart(k.color, k.num);
+    const cockpit = makeCockpit(k.color);
+    cockpit.visible = false;
+    group.rotation.order = cockpit.rotation.order = 'YXZ';
+    scene.remove(old.group, old.cockpit);
+    scene.add(group, cockpit);
+    models.set(k.id, { group, cockpit, k });
+
+    // Materials and geometries such as wheels are shared. Dispose only assets
+    // no longer referenced by anything in the live scene, including textures.
+    const keepG = new Set(), keepM = new Set(), keepT = new Set();
+    const materials = (o) => o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+    const textures = (m) => Object.values(m).filter((v) => v && v.isTexture);
+    scene.traverse((o) => {
+      if (o.geometry) keepG.add(o.geometry);
+      for (const m of materials(o)) { keepM.add(m); for (const t of textures(m)) keepT.add(t); }
+    });
+    const doneG = new Set(), doneM = new Set(), doneT = new Set();
+    for (const root of [old.group, old.cockpit]) root.traverse((o) => {
+      if (o.geometry && !keepG.has(o.geometry) && !doneG.has(o.geometry)) { doneG.add(o.geometry); o.geometry.dispose(); }
+      for (const m of materials(o)) {
+        if (keepM.has(m) || doneM.has(m)) continue;
+        doneM.add(m);
+        for (const t of textures(m)) if (!keepT.has(t) && !doneT.has(t)) { doneT.add(t); t.dispose(); }
+        m.dispose();
+      }
+    });
+  }
+
   // 미끄러져 도는 각도(처음엔 빠르게, 끝엔 천천히 한 바퀴)
   const spinAngle = (k) => {
     if (!(k.spinT > 0)) return 0;
@@ -256,5 +290,5 @@ export function createScene(cv, track) {
   }
 
   warm(cams[0]);
-  return { render, update, setRoster, puffs, renderer, scene, THREE };
+  return { render, update, setRoster, refreshRacer, puffs, renderer, scene, THREE };
 }
