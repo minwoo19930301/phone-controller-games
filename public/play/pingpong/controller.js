@@ -6,7 +6,7 @@
 import { haptics } from '/common/haptics.js';
 import { createPhoneSettings } from '/common/phone-settings.js';
 import { createTutorial } from '/common/tutorial.js';
-import { yawOffset, deltaAngle, validRange, positionFromAngle } from './steering.mjs';
+import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steering.mjs';
 
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -567,18 +567,18 @@ import { yawOffset, deltaAngle, validRange, positionFromAngle } from './steering
     return true;
   }
 
-  // Rotate the phone gently left/right while facing the display. A browser IMU
+  // Tilt the phone gently left/right while facing the display. A browser IMU
   // cannot measure absolute body position; this is deliberately a steering
   // control, with touch and existing automatic correction as alternatives.
-  function currentYaw() {
-    return basis && ori ? yawOffset(inBasis(basis, ori.face)) : null;
+  function currentTilt() {
+    return basis && ori ? tiltOffset(inBasis(basis, ori.top)) : null;
   }
   function paintSteering() {
     const text = [
-      '화면을 TV 쪽으로 향하고 편한 가운데 자세에서 확인을 눌러요.',
-      '폰을 왼쪽으로 편하게 돌린 뒤 확인을 눌러요.',
-      '폰을 오른쪽으로 편하게 돌린 뒤 확인을 눌러요.',
-      '좌우로 돌려 보고 움직임을 확인해요. 괜찮으면 적용을 눌러요.'
+      '폰을 세로로 세우고 화면을 TV 쪽으로 향한 가운데 자세에서 확인을 눌러요.',
+      '폰 윗부분을 왼쪽으로 편하게 기울인 뒤 확인을 눌러요.',
+      '폰 윗부분을 오른쪽으로 편하게 기울인 뒤 확인을 눌러요.',
+      '좌우로 기울여 보고 움직임을 확인해요. 괜찮으면 적용을 눌러요.'
     ];
     const labels = ['가운데 확인', '왼쪽 확인', '오른쪽 확인', '적용'];
     $('steerTitle').textContent = `좌우 조작 맞추기 ${Math.min(steering.stage + 1, 4)}/4`;
@@ -591,9 +591,9 @@ import { yawOffset, deltaAngle, validRange, positionFromAngle } from './steering
     $('steerDot').style.left = `${50 + 46 * value}%`;
   }
   function updateSteering(t) {
-    const yaw = currentYaw();
-    if (yaw == null) return;
-    steering.raw = deltaAngle(yaw, steering.center);
+    const tilt = currentTilt();
+    if (tilt == null) return;
+    steering.raw = deltaAngle(tilt, steering.center);
     if ((steering.mode === 'tilt' || (mode === 'steer' && steering.stage === 3)) && validRange(steering.left, steering.right)) {
       const dt = steering.lastT ? Math.min(0.1, Math.max(0, (t - steering.lastT) / 1000)) : 0.025;
       const target = positionFromAngle(steering.raw, steering.left, steering.right);
@@ -607,7 +607,7 @@ import { yawOffset, deltaAngle, validRange, positionFromAngle } from './steering
   }
   function openSteering() {
     mode = 'steer'; steering.stage = 0; steering.raw = null;
-    $('steerNotice').textContent = '폰을 돌린 각도로 조작해요. 몸의 실제 위치는 측정하지 않아요.';
+    $('steerNotice').textContent = '폰을 좌우로 기울여 조작해요. 몸의 실제 위치는 측정하지 않아요.';
     paintSteering(); show('vSteer');
   }
   function emitPosition() {
@@ -1334,19 +1334,19 @@ import { yawOffset, deltaAngle, validRange, positionFromAngle } from './steering
   $('btnSteerLobby').addEventListener('click', () => { pendingReady = false; openSteering(); });
   $('steerNext').addEventListener('click', () => {
     if (steering.stage === 3) { finishSteering('tilt'); return; }
-    const yaw = currentYaw();
-    if (yaw == null) { $('steerNotice').textContent = '먼저 자세를 맞추거나, 터치 조작 또는 자동 보정을 선택해 주세요.'; return; }
-    if (steering.stage === 0) { steering.center = yaw; steering.left = steering.right = null; steering.stage = 1; }
+    const tilt = currentTilt();
+    if (tilt == null) { $('steerNotice').textContent = '폰을 세워 쥐고 다시 시도하거나, 터치 조작 또는 자동 보정을 선택해 주세요.'; return; }
+    if (steering.stage === 0) { steering.center = tilt; steering.left = steering.right = null; steering.stage = 1; }
     else if (steering.stage === 1) {
-      const left = deltaAngle(yaw, steering.center);
-      if (Math.abs(left) < 6) { $('steerNotice').textContent = '폰을 조금 더 왼쪽으로 돌리고 다시 확인해 주세요.'; return; }
+      const left = deltaAngle(tilt, steering.center);
+      if (Math.abs(left) < 6) { $('steerNotice').textContent = '폰을 조금 더 왼쪽으로 기울이고 다시 확인해 주세요.'; return; }
       steering.left = left; steering.stage = 2;
     } else {
-      const right = deltaAngle(yaw, steering.center);
-      if (!validRange(steering.left, right)) { $('steerNotice').textContent = '가운데를 지나 반대쪽으로 조금 더 돌려 주세요.'; return; }
+      const right = deltaAngle(tilt, steering.center);
+      if (!validRange(steering.left, right)) { $('steerNotice').textContent = '가운데를 지나 반대쪽으로 조금 더 기울여 주세요.'; return; }
       steering.right = right; steering.value = 0; steering.stage = 3;
     }
-    $('steerNotice').textContent = '폰을 돌린 각도로 조작해요. 몸의 실제 위치는 측정하지 않아요.';
+    $('steerNotice').textContent = '폰을 좌우로 기울여 조작해요. 몸의 실제 위치는 측정하지 않아요.';
     paintSteering();
   });
   $('steerTouch').addEventListener('click', () => finishSteering('touch'));

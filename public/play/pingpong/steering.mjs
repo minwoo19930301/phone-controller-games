@@ -1,8 +1,11 @@
-// Phone rotation is a steering input, not a measurement of the player's location.
-export function yawOffset(face) {
-  if (!face || Math.hypot(face[0], face[2]) < 0.15) return null;
-  let a = Math.atan2(face[0], face[2]) * 180 / Math.PI;
-  // A flipped paddle can use either face. Both faces represent the same axis.
+// Sideways tilt is a steering input, not a measurement of the player's location.
+// top is the phone's physical long axis in the player's calibrated right/up/
+// forward basis. A yaw about world-up leaves a vertical phone unchanged.
+export function tiltOffset(top) {
+  if (!top || !Number.isFinite(top[0]) || !Number.isFinite(top[1]) || Math.hypot(top[0], top[1]) < 0.15) return null;
+  let a = Math.atan2(top[0], top[1]) * 180 / Math.PI;
+  // The long axis has the same tilt if its endpoints are reversed; folding
+  // also prevents a discontinuity if the phone is turned upside down.
   if (a > 90) a -= 180;
   if (a < -90) a += 180;
   return a;
