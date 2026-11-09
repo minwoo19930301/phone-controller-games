@@ -7,6 +7,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { INSTRUMENTS, patternOf } from './parts.js';
 
 const STAGE_Y = 1.0;
@@ -41,6 +42,7 @@ export function createHall(canvas) {
   const M = {
     suit: new THREE.MeshStandardMaterial({ color: 0x17151b, roughness: 0.72 }),
     suit2: new THREE.MeshStandardMaterial({ color: 0x1f1a22, roughness: 0.78 }),
+    lapel: new THREE.MeshStandardMaterial({ color: 0x35323a, roughness: 0.45 }),
     shirt: new THREE.MeshStandardMaterial({ color: 0xc4beb2, roughness: 0.75 }),
     dressR: new THREE.MeshStandardMaterial({ color: 0x6d1023, roughness: 0.55 }),
     dressB: new THREE.MeshStandardMaterial({ color: 0x14243f, roughness: 0.55 }),
@@ -56,6 +58,7 @@ export function createHall(canvas) {
     stand: new THREE.MeshStandardMaterial({ color: 0x0f0f12, metalness: 0.6, roughness: 0.4 }),
     paper: new THREE.MeshStandardMaterial({ color: 0xa79d88, roughness: 0.95 }),
     eye: new THREE.MeshStandardMaterial({ color: 0x1a1210, roughness: 0.3 }),
+    eyeWhite: new THREE.MeshStandardMaterial({ color: 0xe9dfd3, roughness: 0.55 }),
     brow: new THREE.MeshStandardMaterial({ color: 0x2a1c14, roughness: 0.9 }),
     tails: new THREE.MeshStandardMaterial({ color: 0x0d0c10, roughness: 0.55 }),
     string: new THREE.MeshBasicMaterial({ color: 0xe8e2cf }),
@@ -294,25 +297,59 @@ export function createHall(canvas) {
   }
 
   // ───────── 사람 ─────────
+  // All musicians reuse these geometries. The articulated pivots remain the
+  // same so instrument and conductor animation stays attached to the hands.
+  const shaped = (points, segments = 16) => new THREE.LatheGeometry(points.map(([r, y]) => new THREE.Vector2(r, y)), segments);
+  const palmGeometry = (() => {
+    const palm = new THREE.SphereGeometry(.039, 10, 8);
+    palm.scale(1, 1.12, .65);
+    const parts = [palm];
+    for (let i = 0; i < 4; i++) {
+      const finger = new THREE.CapsuleGeometry(.0075, .028 + (1 - Math.abs(i - 1.5) / 2) * .012, 2, 6);
+      finger.translate((i - 1.5) * .017, -.052, .001);
+      parts.push(finger);
+    }
+    const thumb = new THREE.CapsuleGeometry(.010, .027, 2, 6);
+    thumb.rotateZ(-.65); thumb.translate(.045, -.019, .002); parts.push(thumb);
+    const out = mergeGeometries(parts); parts.forEach((g) => g.dispose()); return out;
+  })();
+  const combine = (parts) => { const out = mergeGeometries(parts); parts.forEach((p) => p.dispose()); return out; };
+  const paired = (factory, x, y, z) => combine([-1, 1].map((side) => {
+    const g = factory(); g.translate(side*x, y, z); return g;
+  }));
   const G = {
-    torso: new THREE.CapsuleGeometry(0.17, 0.34, 4, 12),
-    head: new THREE.SphereGeometry(0.115, 18, 14),
-    hair: new THREE.SphereGeometry(0.123, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
+    torso: shaped([[0, -.02], [.13, -.02], [.155, .03], [.145, .2], [.16, .39], [.183, .48], [.17, .53], [.10, .58], [0, .58]]),
+    head: (() => {
+      const h = shaped([[0,-.122],[.043,-.118],[.075,-.09],[.095,-.035],[.106,.018],[.099,.071],[.073,.111],[0,.128]], 20);
+      h.scale(.95,1.1,1);
+      const nose = new THREE.SphereGeometry(.013,10,8); nose.scale(.8,1.05,1.1); nose.translate(0,-.014,.112);
+      const ears = [-1,1].map((side) => { const e = new THREE.SphereGeometry(.020,10,8); e.scale(.45,1,.8); e.translate(side*.108,0,-.005); return e; });
+      return combine([h,nose,...ears]);
+    })(),
+    hair: shaped([[.104,.053],[.106,.07],[.099,.1],[.079,.13],[.045,.149],[0,.151]], 20),
     neck: new THREE.CylinderGeometry(0.048, 0.055, 0.12, 10),
-    upper: new THREE.CapsuleGeometry(0.052, 0.22, 4, 8),
-    fore: new THREE.CapsuleGeometry(0.045, 0.2, 4, 8),
-    hand: new THREE.SphereGeometry(0.048, 10, 8),
-    thigh: new THREE.CapsuleGeometry(0.068, 0.3, 4, 8),
-    shin: new THREE.CapsuleGeometry(0.058, 0.32, 4, 8),
-    shoe: new THREE.BoxGeometry(0.1, 0.07, 0.22),
+    upper: (() => { const sleeve=new THREE.CylinderGeometry(.052,.046,.30,12);sleeve.translate(0,-.15,0); const shoulder=new THREE.SphereGeometry(.046,10,8);shoulder.scale(1.05,1,1);return combine([sleeve,shoulder]); })(),
+    fore: new THREE.CylinderGeometry(.046, .033, .26, 12),
+    hand: palmGeometry,
+    joint: new THREE.SphereGeometry(.046, 10, 8),
+    thigh: new THREE.CylinderGeometry(.073, .057, .43, 12),
+    shin: (() => { const g=new THREE.CylinderGeometry(.057,.039,.43,12);g.translate(0,-.22,0);return combine([g,new THREE.SphereGeometry(.056,10,8)]); })(),
+    shoe: (() => { const g = new THREE.SphereGeometry(.1, 14, 10); g.scale(.55,.34,1.12); return g; })(),
     // 연미복 앞 V자 셔츠(사각형이면 가슴에 흰 판이 붙은 것처럼 보임)
-    shirt: (() => { const sh = new THREE.Shape(); sh.moveTo(-0.07, 0.1); sh.lineTo(0.07, 0.1); sh.lineTo(0.012, -0.12); sh.lineTo(-0.012, -0.12); sh.closePath(); return new THREE.ShapeGeometry(sh); })(),
-    tie: new THREE.BoxGeometry(0.09, 0.035, 0.03),
-    mouth: new THREE.CircleGeometry(0.022, 12),
-    eye: new THREE.SphereGeometry(0.0135, 10, 8),
-    brow: new THREE.BoxGeometry(0.034, 0.0075, 0.01),
-    nose: new THREE.SphereGeometry(0.016, 10, 8),
-    ear: new THREE.SphereGeometry(0.026, 10, 8),
+    shirt: (() => { const sh = new THREE.Shape(); sh.moveTo(-.052, .105); sh.lineTo(.052, .105); sh.lineTo(.014, -.10); sh.lineTo(-.014, -.10); sh.closePath(); return new THREE.ShapeGeometry(sh); })(),
+    lapels: (() => {
+      const parts = [-1, 1].map((side) => {
+        const sh = new THREE.Shape();
+        sh.moveTo(side*.051, .105); sh.lineTo(side*.115, .06); sh.lineTo(side*.08, .005); sh.lineTo(side*.096, -.018); sh.lineTo(side*.018, -.105); sh.closePath();
+        return new THREE.ShapeGeometry(sh);
+      });
+      const g = mergeGeometries(parts); parts.forEach((p) => p.dispose()); return g;
+    })(),
+    tie: (() => { const parts = [-1,1].map((side)=>{ const s=new THREE.Shape();s.moveTo(0,0);s.lineTo(side*.036,.016);s.lineTo(side*.036,-.016);s.closePath();return new THREE.ShapeGeometry(s);});const g=mergeGeometries(parts);parts.forEach((p)=>p.dispose());return g; })(),
+    mouth: new THREE.CircleGeometry(0.016, 12),
+    eyes: paired(() => new THREE.SphereGeometry(.009,10,8), .037,.016,.098),
+    pupils: paired(() => new THREE.SphereGeometry(.0048,8,6), .037,.016,.106),
+    brows: combine([-1,1].map((side) => {const g=new THREE.BoxGeometry(.028,.0045,.008);g.rotateZ(side*-.12);g.translate(side*.038,.041,.096);return g;})),
     tail: new THREE.BoxGeometry(0.11, 0.44, 0.022),
     skirt: new THREE.LatheGeometry([new THREE.Vector2(0.16, 0), new THREE.Vector2(0.2, -0.25), new THREE.Vector2(0.3, -0.6), new THREE.Vector2(0.42, -0.92), new THREE.Vector2(0.44, -0.95)], 24),
   };
@@ -325,15 +362,16 @@ export function createHall(canvas) {
     const torso = new THREE.Group();
     hips.add(torso);
     const body = new THREE.Mesh(G.torso, dress || suit);
-    body.position.y = 0.3;
     body.scale.set(1, 1, 0.72);
     torso.add(body);
     if (!dress) {
       const sh = new THREE.Mesh(G.shirt, M.shirt);
-      sh.position.set(0, 0.43, 0.124);
+      sh.position.set(0, 0.43, 0.125);
       const tie = new THREE.Mesh(G.tie, M.suit);
-      tie.position.set(0, 0.52, 0.13);
-      torso.add(sh, tie);
+      tie.position.set(0, 0.51, 0.135);
+      const lapels = new THREE.Mesh(G.lapels, M.lapel);
+      lapels.position.set(0, 0.43, 0.13);
+      torso.add(sh, tie, lapels);
     }
     const neck = new THREE.Mesh(G.neck, SKIN[skin]);
     neck.position.y = 0.6;
@@ -342,10 +380,8 @@ export function createHall(canvas) {
     head.position.y = 0.73;
     torso.add(head);
     const hm = new THREE.Mesh(G.head, SKIN[skin]);
-    hm.scale.set(0.95, 1.1, 1);
     const hr = new THREE.Mesh(G.hair, HAIR[hair]);
-    hr.position.set(0, 0.018, -0.012);
-    hr.rotation.x = -0.25;
+    hr.position.set(0, 0, -.004);
     head.add(hm, hr);
     if (long) {
       const back = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.18, 4, 8), HAIR[hair]);
@@ -353,43 +389,32 @@ export function createHall(canvas) {
       head.add(back);
     }
     const mouth = new THREE.Mesh(G.mouth, M.mouth);
-    mouth.position.set(0, -0.055, 0.112);
-    mouth.scale.set(1, 0.2, 1);
+    mouth.position.set(0, -0.060, 0.093);
+    mouth.scale.set(1, 0.16, 1);
     head.add(mouth);
-    // 얼굴: 눈·눈썹·코·귀(인사할 때 가까이 보이는 지휘자·독창자를 위해)
-    for (const sx of [-1, 1]) {
-      const eye = new THREE.Mesh(G.eye, M.eye);
-      eye.position.set(sx * 0.037, 0.016, 0.1);
-      const brow = new THREE.Mesh(G.brow, hair === 4 ? M.brow : HAIR[hair]);
-      brow.position.set(sx * 0.038, 0.044, 0.103);
-      brow.rotation.z = sx * -0.12;
-      const ear = new THREE.Mesh(G.ear, SKIN[skin]);
-      ear.position.set(sx * 0.108, 0.0, -0.005);
-      ear.scale.set(0.45, 1, 0.8);
-      head.add(eye, brow, ear);
-    }
-    const nose = new THREE.Mesh(G.nose, SKIN[skin]);
-    nose.position.set(0, -0.014, 0.112);
-    nose.scale.set(0.8, 1.05, 1.1);
-    head.add(nose);
+    // Merge facial details of the same material to keep dozens of players light.
+    head.add(new THREE.Mesh(G.eyes, M.eyeWhite), new THREE.Mesh(G.pupils, M.eye), new THREE.Mesh(G.brows, hair === 4 ? M.brow : HAIR[hair]));
     const arm = (side) => {
       const sh = new THREE.Group();
       sh.position.set(side * 0.21, 0.5, 0);
       torso.add(sh);
       const up = new THREE.Mesh(G.upper, dress && dress !== M.suit ? SKIN[skin] : suit);
       if (dress) up.material = dress;
-      up.position.y = -0.15;
       sh.add(up);
       const el = new THREE.Group();
       el.position.y = -0.3;
       sh.add(el);
       const fo = new THREE.Mesh(G.fore, dress ? SKIN[skin] : suit);
       fo.position.y = -0.13;
+      const elbow = new THREE.Mesh(G.joint, dress || suit);
+      elbow.scale.setScalar(.98);
+      el.add(elbow);
       el.add(fo);
       const hand = new THREE.Group();
       hand.position.y = -0.27;
       el.add(hand);
       const hm2 = new THREE.Mesh(G.hand, SKIN[skin]);
+      if (side < 0) hm2.scale.x = -1;
       hand.add(hm2);
       return { sh, el, hand };
     };
@@ -411,9 +436,8 @@ export function createHall(canvas) {
         else { th.rotation.x = Math.PI / 2; th.position.z = 0.2; knee.position.set(0, 0, 0.42); }
         leg.add(th, knee);
         const shin = new THREE.Mesh(G.shin, suit);
-        shin.position.y = -0.22;
         const shoe = new THREE.Mesh(G.shoe, M.suit);
-        shoe.position.set(0, -0.47, 0.05);
+        shoe.position.set(0, -0.46, 0.06);
         knee.add(shin, shoe);
         legs.push({ leg, knee });
       }
@@ -422,6 +446,30 @@ export function createHall(canvas) {
     return { root, hips, torso, head, hairMesh: hr, mouth, armR, armL, legs, stand };
   }
   const setArm = (a, x = 0, y = 0, z = 0, ex = 0) => { a.sh.rotation.set(x, y, z); a.el.rotation.set(ex, 0, 0); };
+  // Two-bone reach in torso coordinates. The elbow bends toward a stable pole,
+  // so the instrument stays connected to the moving hands during bow strokes.
+  const ik = { axis: new THREE.Vector3(), pole: new THREE.Vector3(), elbow: new THREE.Vector3(), fore: new THREE.Vector3(), q: new THREE.Quaternion() };
+  const down = new THREE.Vector3(0,-1,0);
+  const violinPose = {
+    neck: new THREE.Vector3(), contact: new THREE.Vector3(), across: new THREE.Vector3(), grip: new THREE.Vector3(),
+    leftPole: new THREE.Vector3(.5,-1,.6), rightPole: new THREE.Vector3(-.6,-1,.5), xAxis: new THREE.Vector3(1,0,0),
+    parent: new THREE.Quaternion(), inv: new THREE.Quaternion(), bow: new THREE.Quaternion()
+  };
+  function reachArm(arm, target, pole) {
+    const a = .30, b = .27;
+    ik.axis.subVectors(target, arm.sh.position);
+    const distance = Math.max(Math.abs(a-b)+.0001, Math.min(a+b-.0001, ik.axis.length()));
+    ik.axis.normalize();
+    const along = (a*a-b*b+distance*distance)/(2*distance);
+    const bend = Math.sqrt(Math.max(0, a*a-along*along));
+    ik.pole.copy(pole).addScaledVector(ik.axis, -pole.dot(ik.axis)).normalize();
+    ik.elbow.copy(ik.axis).multiplyScalar(along).addScaledVector(ik.pole, bend);
+    arm.sh.quaternion.setFromUnitVectors(down, ik.fore.copy(ik.elbow).normalize());
+    ik.fore.copy(target).sub(arm.sh.position).sub(ik.elbow).normalize();
+    ik.q.copy(arm.sh.quaternion).invert();
+    ik.fore.applyQuaternion(ik.q).normalize();
+    arm.el.quaternion.setFromUnitVectors(down, ik.fore);
+  }
 
   function makeChair() {
     const g = new THREE.Group();
@@ -679,6 +727,8 @@ export function createHall(canvas) {
       v.position.set(0.17, 0.5, 0.2);
       v.rotation.set(-1.1, 0.25, 0.9);
       p.torso.add(v);
+      v.updateMatrix();
+      m.extra.violin = v;
       const bow = makeBow();
       bow.position.set(0, -0.02, 0.05);
       p.armR.hand.add(bow);
@@ -1130,10 +1180,22 @@ export function createHall(canvas) {
       case 'violin': case 'viola': {
         m.bowPh += dt * (1.2 + a * 3.2) * m.bowDir;
         const b = Math.sin(m.bowPh);
-        setArm(p.armL, -1.1, 0, 0.75, -1.9);
-        setArm(p.armR, -0.95 - b * 0.1, 0.2, -0.55 - b * 0.35 * (0.25 + a), -1.0 + b * 0.35 * (0.25 + a));
+        const violin = m.extra.violin;
+        const V = violinPose;
+        V.neck.set(0,.23,.025).applyMatrix4(violin.matrix);
+        reachArm(p.armL, V.neck, V.leftPole);
+        V.contact.set(0,.10+b*.035,.045).applyMatrix4(violin.matrix);
+        V.across.copy(V.xAxis).applyQuaternion(violin.quaternion).normalize();
+        V.grip.copy(V.contact).addScaledVector(V.across,-.30);
+        reachArm(p.armR, V.grip, V.rightPole);
         p.head.rotation.set(0.15, 0.3, 0.25);
-        if (m.extra.bow) m.extra.bow.rotation.set(0, 0.4, 0);
+        if (m.extra.bow) {
+          V.parent.copy(p.armR.sh.quaternion).multiply(p.armR.el.quaternion);
+          V.inv.copy(V.parent).invert();
+          V.bow.setFromUnitVectors(V.xAxis, V.across);
+          m.extra.bow.quaternion.copy(V.inv).multiply(V.bow);
+          m.extra.bow.position.copy(V.across).applyQuaternion(V.inv).multiplyScalar(.30);
+        }
         break;
       }
       case 'cello': {
@@ -1197,6 +1259,11 @@ export function createHall(canvas) {
   // 연주 화면: 위 막대와 아래 악보 칸 사이에 악단이 꽉 차게(객석 가운데 높은 자리에서)
   const WIDE = { pos: new THREE.Vector3(0, 6.0, 16.2), look: new THREE.Vector3(0, 1.55, -3.2) };
   const _p = new THREE.Vector3(), _l = new THREE.Vector3();
+  function closePlayerFor(t) {
+    if (mode !== 'perform' || intro || outro || t % 28 < 14 || t % 28 >= 22) return null;
+    const players = [...playersBySlot.values()].filter((m) => m && m.g.visible);
+    return players.length ? players[Math.floor(t / 28) % players.length] : null;
+  }
   function cameraFor(t) {
     if (intro) {
       const e = (performance.now() - intro.t0) / 1000;
@@ -1215,6 +1282,17 @@ export function createHall(canvas) {
     if (mode === 'perform') {
       _p.set(WIDE.pos.x + Math.sin(t * 0.07) * 1.6, WIDE.pos.y + Math.sin(t * 0.05) * 0.3, WIDE.pos.z - 0.8);
       _l.copy(WIDE.look);
+      // Brief, gentle cutaways show the active player's performance; the score
+      // HUD stays in its fixed screen-space position and keeps animating.
+      const m = closePlayerFor(t);
+      if (m) {
+        const facing = m.g.rotation.y;
+        const side = 1.6, front = 3.25;
+        _p.set(m.g.position.x + side*Math.cos(facing) + front*Math.sin(facing),
+          m.g.position.y + (m.p.stand ? 1.75 : 1.45),
+          m.g.position.z - side*Math.sin(facing) + front*Math.cos(facing));
+        _l.set(m.g.position.x, m.g.position.y + (m.p.stand ? 1.25 : .95), m.g.position.z);
+      }
       return;
     }
     if (mode === 'over') {
@@ -1254,20 +1332,21 @@ export function createHall(canvas) {
       animMusician(m, t, dt);
     }
     // 사람 자리 조명·고리
+    const closePlayer = closePlayerFor(t);
     for (let i = 0; i < 4; i++) {
       const m = playersBySlot.get(i + 1);
       const sp = pSpots[i], ring = rings[i];
       if (!m) continue;
       const lv = clamp(m.act || 0, 0, 1);
       const show = mode === 'lobby' || mode === 'practice' || mode === 'select' || (m.g.visible && (!intro || ready > 0.3));
-      sp.intensity = show ? 14 + 22 * lv : 0;
+      sp.intensity = show ? (m === closePlayer ? 4 + 8 * lv : 14 + 22 * lv) : 0;
       ring.material.opacity = show ? 0.45 + 0.45 * lv : 0;
       ring.scale.setScalar(1 + lv * 0.25);
       // 이름표는 줌아웃이 거의 끝난 뒤에(가까이 지나갈 때 화면을 가리지 않게)
       const introLeft = intro ? INTRO_T - (performance.now() - intro.t0) / 1000 : 0;
-      tags[i].sp.visible = show && m.g.visible && introLeft < 0.7;
+      tags[i].sp.visible = show && m.g.visible && introLeft < 0.7 && !closePlayer;
       beams[i].material.opacity = show && m.g.visible ? 0.1 + 0.2 * lv : 0;
-      beams[i].visible = beams[i].material.opacity > 0.001;
+      beams[i].visible = beams[i].material.opacity > 0.001 && m !== closePlayer;
       if (m.kind === 'conductor') { const wp = m.g.position; ring.position.set(wp.x, wp.y + 0.03, wp.z); tags[i].sp.position.set(wp.x, wp.y + 2.55, wp.z); sp.target.position.copy(wp); beams[i].position.set(wp.x, wp.y + BEAM_H / 2, wp.z); }
     }
     // 반짝

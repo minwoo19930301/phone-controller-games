@@ -860,10 +860,10 @@ function headLocal(th, ph) {
   if (z < 0) z -= 0.006 * gauss(y - 0.02, 0.045) * -dz;
   // 아래턱: 앞 아래쪽을 좁히고, 턱 밑을 목 쪽으로 올립니다
   const low = smooth(0.0, -0.1, y);
-  x *= 1 - 0.27 * low * smooth(-0.02, 0.07, z) - 0.12 * low * smooth(0.0, -0.06, z);
+  x *= 1 - 0.18 * low * smooth(-0.02, 0.07, z) - 0.10 * low * smooth(0.0, -0.06, z);
   if (y < -0.045) {
     const jaw = lerp(-0.108, -0.075, smooth(0.07, 0.0, z)) + 0.022 * smooth(0.0, -0.03, z) + 0.008 * smooth(0.03, 0.065, Math.abs(x)) * smooth(0.06, 0.0, z);
-    const k = 0.006;
+    const k = 0.012;
     y = 0.5 * (y + jaw + Math.sqrt((y - jaw) * (y - jaw) + k * k)); // 부드러운 max
   }
   // 얼굴 앞면을 평평하게
@@ -927,7 +927,7 @@ function buildHead(B) {
   grid(B, 96, 72, (u, v) => headPoint(v * Math.PI, u * Math.PI * 2), { closed: true, mat: 'face', weight: headW, center: HC, uv: (u, v) => [u, 1 - v] });
   // 귀
   for (const s of [1, -1]) {
-    const c = HC.clone().add(V(s * 0.0738, -0.001, -0.008));
+    const c = HC.clone().add(V(s * 0.071, -0.001, -0.008));
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.2, s * 0.32, s * 0.06, 'YXZ'));
     grid(B, 28, 20, (u, v) => {
       const th = v * Math.PI;
@@ -935,8 +935,8 @@ function buildHead(B) {
       const dy = Math.cos(th);
       const dz = Math.sin(th) * Math.cos(ph);
       const dx = Math.sin(th) * Math.sin(ph);
-      let y = dy * 0.031;
-      let zz = dz * 0.0185 * (1 - 0.35 * smooth(0, -1, dy)) * (1 + 0.1 * smooth(0, 1, dy));
+      let y = dy * 0.027;
+      let zz = dz * 0.0165 * (1 - 0.35 * smooth(0, -1, dy)) * (1 + 0.1 * smooth(0, 1, dy));
       let x = dx * 0.0085;
       const r2 = (y / 0.025) ** 2 + (zz / 0.0145) ** 2;
       if (dx > 0) x -= 0.0092 * Math.max(0, 1 - r2) * (dx > 0 ? 1 : 0);
@@ -945,29 +945,33 @@ function buildHead(B) {
   }
   // 눈
   for (const s of [1, -1]) {
-    const c = HC.clone().add(V(s * 0.031, 0.0135, 0.0655));
+    const c = HC.clone().add(V(s * 0.031, 0.0135, 0.0695));
+    // An eye is a shallow almond-shaped opening in the face, not a protruding
+    // sphere. Keep the same centre and skin weights so facial animation stays
+    // attached to the existing head rig.
+    const eyeShape = V(0.0110, 0.0083, 0.0070);
     grid(B, 24, 16, (u, v) => {
       const th = v * Math.PI;
       const ph = u * Math.PI * 2;
-      return c.clone().add(V(Math.sin(th) * Math.cos(ph), Math.sin(th) * Math.sin(ph), Math.cos(th)).multiplyScalar(0.0118));
+      return c.clone().add(V(Math.sin(th) * Math.cos(ph), Math.sin(th) * Math.sin(ph), Math.cos(th)).multiply(eyeShape));
     }, { closed: true, mat: 'eye', weight: () => ({ head: 1 }), center: c, uv: (u, v) => [u, 1 - v] });
     // 눈꺼풀(위·아래)
-    const rl = 0.0128;
+    const lidShape = V(0.0120, 0.0093, 0.0079);
     const lid = (upper) => {
       const pts = grid(B, 18, 7, (u, v) => {
         const b = (u - 0.5) * 2 * 1.92;
         const edge = (upper ? 60 : 70) + (upper ? 16 : 10) * (b / 1.92) ** 2;
         const a = v * edge * RD;
-        const r = v > 0.99 ? rl - 0.0008 : rl;
+        const r = v > 0.99 ? 0.94 : 1;
         const yy = Math.cos(a) * (upper ? 1 : -1);
-        return c.clone().add(V(Math.sin(a) * Math.sin(b), yy, Math.sin(a) * Math.cos(b)).multiplyScalar(r));
+        return c.clone().add(V(Math.sin(a) * Math.sin(b), yy, Math.sin(a) * Math.cos(b)).multiply(lidShape).multiplyScalar(r));
       }, { mat: 'skin', weight: () => ({ head: 1 }), center: c });
       return pts[pts.length - 1];
     };
     const edgeU = lid(true);
     lid(false);
     // 속눈썹 선
-    tube(B, 'lash', edgeU.filter((_, i) => i % 2 === 0).map((p) => p.clone().addScaledVector(V().subVectors(p, c).normalize(), 0.0005)), () => 0.00075, { N: 5, weight: () => ({ head: 1 }), roundEnd: false });
+    tube(B, 'lash', edgeU.filter((_, i) => i % 2 === 0).map((p) => p.clone().addScaledVector(V().subVectors(p, c).normalize(), 0.0003)), () => 0.00035, { N: 5, weight: () => ({ head: 1 }), roundEnd: false });
     // 눈썹
     const brow = [];
     for (let k = 0; k <= 6; k++) {
@@ -978,7 +982,7 @@ function buildHead(B) {
       const ph = Math.asin(clamp(xx / (0.0745 * Math.sin(th)), -1, 1));
       brow.push(headPoint(th, ph, 0.0015));
     }
-    tube(B, 'brow', brow, (t) => lerp(0.0036, 0.0016, t), { N: 6, flat: 0.45, up: V(0, 0, 1), weight: () => ({ head: 1 }), roundStart: true });
+    tube(B, 'brow', brow, (t) => lerp(0.0019, 0.0008, t), { N: 6, flat: 0.42, up: V(0, 0, 1), weight: () => ({ head: 1 }), roundStart: true });
   }
   // 머리카락(모자 밑 옆·뒤)
   {
@@ -1273,20 +1277,20 @@ function sharedTextures() {
           // 입술: 경계가 또렷한 붉은 입술(윗입술은 큐피드 활 모양), 입술 사이는 어두운 선
           const yy = p.y + 0.0537;
           const bow = 0.0016 * gauss(ax - 0.006, 0.004) - 0.0012 * gauss(ax, 0.0025);
-          const halfW = 0.0245;
+          const halfW = 0.0205;
           const sideU = smooth(halfW, halfW - 0.006, ax);
-          const upTop = 0.0072 * sideU + bow;
-          const lowBot = 0.0095 * smooth(halfW - 0.002, halfW - 0.01, ax);
+          const upTop = 0.0037 * sideU + bow * 0.35;
+          const lowBot = 0.0045 * smooth(halfW - 0.002, halfW - 0.01, ax);
           const upper = smooth(upTop + 0.0007, upTop - 0.0007, yy) * smooth(-0.0004, 0.0006, yy) * smooth(halfW + 0.0005, halfW - 0.001, ax);
           const lower = smooth(-lowBot - 0.0008, -lowBot + 0.0008, yy) * smooth(0.0004, -0.0006, yy) * smooth(halfW + 0.0005, halfW - 0.001, ax);
           const lip = Math.min(1, upper * 0.9 + lower);
-          r -= 0.07 * lip;
-          gg -= 0.24 * lip;
-          b -= 0.2 * lip;
-          const line = gauss(yy, 0.00065) * smooth(halfW + 0.002, halfW - 0.004, ax);
-          r -= 0.32 * line;
-          gg -= 0.36 * line;
-          b -= 0.34 * line;
+          r -= 0.018 * lip;
+          gg -= 0.065 * lip;
+          b -= 0.05 * lip;
+          const line = gauss(yy, 0.00045) * smooth(halfW + 0.002, halfW - 0.005, ax);
+          r -= 0.11 * line;
+          gg -= 0.12 * line;
+          b -= 0.105 * line;
           // 볼 홍조, 코끝
           const blush = gauss(p.y + 0.012, 0.022) * gauss(ax - 0.047, 0.022) + 0.6 * gauss(p.y + 0.028, 0.01) * gauss(p.x, 0.012);
           gg -= 0.06 * blush;
@@ -1418,7 +1422,7 @@ function makeMaterials(o) {
   const lighten = (c, k) => new THREE.Color(c).lerp(new THREE.Color('#ffffff'), k);
   const darken = (c, k) => new THREE.Color(c).multiplyScalar(k);
   const N2 = (k) => new THREE.Vector2(k, k);
-  const skinP = { color: o.skin, roughness: 0.5, sheen: 0.35, sheenColor: new THREE.Color('#ff8a6c'), sheenRoughness: 0.5, clearcoat: 0.04, clearcoatRoughness: 0.6 };
+  const skinP = { color: o.skin, roughness: 0.78, sheen: 0.12, sheenColor: new THREE.Color('#ffb49c'), sheenRoughness: 0.8, clearcoat: 0.01, clearcoatRoughness: 0.8 };
   const capTex = capTexture(o.color);
   const M = {
     skin: new THREE.MeshPhysicalMaterial(skinP),
@@ -1439,7 +1443,7 @@ function makeMaterials(o) {
     hair: new THREE.MeshStandardMaterial({ color: o.hair, roughness: 0.72, normalMap: T.hairN, normalScale: N2(0.6) }),
     brow: new THREE.MeshStandardMaterial({ color: darken(o.hair, 0.85), roughness: 0.85 }),
     lash: new THREE.MeshStandardMaterial({ color: '#16100c', roughness: 0.9 }),
-    eye: new THREE.MeshPhysicalMaterial({ map: T.eye, roughness: 0.08, clearcoat: 1, clearcoatRoughness: 0.05 }),
+    eye: new THREE.MeshPhysicalMaterial({ map: T.eye, roughness: 0.3, clearcoat: 0.35, clearcoatRoughness: 0.2 }),
     cap: new THREE.MeshPhysicalMaterial({ map: capTex, roughness: 0.82, sheen: 0.5, sheenColor: lighten(pc, 0.4), sheenRoughness: 0.5, normalMap: T.twill, normalScale: N2(0.25) }),
     capUnder: new THREE.MeshStandardMaterial({ color: darken(pc, 0.35), roughness: 0.85 })
   };

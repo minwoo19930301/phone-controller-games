@@ -17,7 +17,7 @@ export function createScene(canvas, firstHole, firstCourse, difficulty='normal')
   sphere.castShadow=true;scene.add(sphere);
   const line=new THREE.Line(new THREE.BufferGeometry(),new THREE.LineDashedMaterial({color:0xffffff,dashSize:1,gapSize:.8,transparent:true,opacity:.8}));scene.add(line);
   let golfer=null,color='#ff5a5f',club='7i',shaft=V(.06,-.78,.62).normalize(),face=V(1,0,0),align=new THREE.Quaternion();
-  const focus=V(),cam=V(),look=V();let previous=performance.now();
+  const focus=V(),cam=V(),look=V();let previous=performance.now(),lastMode='';
   function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()}
   addEventListener('resize',resize);resize();
   function setHole(h,c,d='normal'){
@@ -52,10 +52,18 @@ export function createScene(canvas, firstHole, firstCourse, difficulty='normal')
     const b=sphere.position,at=ballAt,behind=V(-target.x,0,-target.z),side=V(-target.z,0,target.x);
     let dest,poi;
     if(v.mode==='flight'||v.mode==='land'){const d=Math.max(10,Math.min(36,b.distanceTo(at)*.28));dest=b.clone().addScaledVector(behind,d).add(V(0,Math.max(5,d*.4),0));poi=b.clone();}
-    else if(v.mode==='swing'){dest=at.clone().addScaledVector(side,-4).add(V(0,1.5,0));poi=at.clone().addScaledVector(side,.4).add(V(0,1,0));}
+    // Face the golfer from the ball side, at a slight down-the-line angle.
+    // The previous opposite side looked into the golfer's back and hid the
+    // hands, club and address posture throughout the swing.
+    else if(v.mode==='swing'){dest=at.clone().addScaledVector(side,3.8).addScaledVector(behind,1.2).add(V(0,1.75,0));poi=at.clone().addScaledVector(side,-.2).add(V(0,.9,0));}
     else if(v.mode==='green'){dest=V(hole.pin.x+15,hole.pinHeight()+20,hole.pin.z-25);poi=V(hole.pin.x,hole.pinHeight(),hole.pin.z)}
     else {dest=at.clone().addScaledVector(behind,8).addScaledVector(side,-1.5).add(V(0,3.4,0));poi=at.clone().addScaledVector(target,Math.min(90,hole.distToPin(at.x,at.z))).add(V(0,1,0));}
-    dest.y=Math.max(dest.y,hole.height(dest.x,dest.z)+1.2);if(v.cut||!cam.lengthSq()){cam.copy(dest);look.copy(poi)}else{cam.lerp(dest,1-Math.exp(-dt*4));look.lerp(poi,1-Math.exp(-dt*4))}
+    dest.y=Math.max(dest.y,hole.height(dest.x,dest.z)+1.2);
+    // Aim looks far down the fairway; carrying that target into the close-up
+    // puts the golfer outside the frame on slower phones. Cut to the address
+    // view when starting the swing, then continue smoothing within each view.
+    if(v.cut||!cam.lengthSq()||(v.mode==='swing'&&lastMode!=='swing')){cam.copy(dest);look.copy(poi)}else{cam.lerp(dest,1-Math.exp(-dt*4));look.lerp(poi,1-Math.exp(-dt*4))}
+    lastMode=v.mode;
     camera.position.copy(cam);camera.lookAt(look);camera.updateProjectionMatrix();renderer.render(scene,camera);
   }
   function project(x,y,z){const p=V(x,y,z).project(camera);return{x:(p.x*.5+.5)*innerWidth,y:(-p.y*.5+.5)*innerHeight,on:p.z<1}}

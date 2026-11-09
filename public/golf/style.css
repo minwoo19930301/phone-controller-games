@@ -66,8 +66,15 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
   align-items: center; gap: 4px; padding: 16px 28px; border-radius: 18px; background: var(--glass); backdrop-filter: blur(12px);
   border: 1px solid var(--line); opacity: 0; transition: opacity 0.3s, transform 0.4s cubic-bezier(.2, 1.2, .4, 1); pointer-events: none; }
 .prompt.on { opacity: 1; transform: translate(-50%, 0); }
+.swing-view .prompt { left: 24px; max-width: min(290px, 38vw); transform: translate(0, 16px); }
+.swing-view .prompt.on { transform: translate(0, 0); }
 .prompt b { font-size: 24px; }
 .prompt span { color: var(--dim); font-size: 15px; font-weight: 600; }
+@media (max-width: 600px) {
+  .swing-view .prompt { left: 12px; bottom: 16px; padding: 10px 12px; }
+  .swing-view .prompt b { font-size: 16px; }
+  .swing-view .prompt span { font-size: 11px; }
+}
 
 /* ---------- 판정 ---------- */
 .call { position: fixed; left: 0; right: 0; top: 22%; text-align: center; pointer-events: none; opacity: 0;

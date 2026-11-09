@@ -692,6 +692,7 @@ function tick() {
   } else if (game.phase === 'over') {
     mode = 'green';
   }
+  document.body.classList.toggle('swing-view', mode === 'swing');
   view.frame(now, { mode, ball, trailI, cut: cutNext, waggle: game.phase !== 'playing' || game.sub === 'aim' });
   cutNext = false;
   requestAnimationFrame(tick);
