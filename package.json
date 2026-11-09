@@ -7,7 +7,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test": "node scripts/test-rooms.js && node --test scripts/test-golf-turns.mjs scripts/test-golf-putting.mjs scripts/test-golf-swing-speed.mjs"
+    "test": "node scripts/test-rooms.js && node --test scripts/test-golf-turns.mjs scripts/test-golf-putting.mjs scripts/test-golf-swing-speed.mjs scripts/test-pingpong-controls.mjs scripts/test-pingpong-steering.mjs"
   },
   "dependencies": {
     "@fontsource/anton": "^5.3.0",

@@ -107,6 +107,15 @@
   .setbox:empty { display: none; }
   .wait .practice { text-align: center; }
   .wait .practice:empty { display: none; }
+  .player-controls { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; align-items:center; color:var(--dim); font-size:14px; }
+  .player-controls select { background:#172337; color:var(--fg); border:1px solid var(--line); border-radius:10px; padding:8px; font:inherit; }
+  .steer-track { position:relative; width:min(90%,340px); height:18px; border-radius:20px; background:#2c3e55; }
+  .steer-track::after { content:''; position:absolute; left:50%; height:100%; border-left:2px solid #fff8; }
+  .steer-dot { position:absolute; left:50%; top:-6px; width:30px; height:30px; border-radius:50%; background:var(--c); transform:translateX(-50%); z-index:1; }
+  .steer-scale { display:flex; justify-content:space-between; width:min(90%,340px); font-size:13px; color:var(--dim); }
+  .steer-btns { display:flex; width:100%; gap:8px; } .steer-btns button { flex:1; }
+  .steer-play { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--dim); } .steer-play input { flex:1; min-width:0; accent-color:var(--c); }
+  .hand-buttons { display:flex; justify-content:center; gap:5px; } .hand-buttons button { padding:7px 9px; border-radius:10px; background:#ffffff12; color:var(--fg); font-size:12px; } .hand-buttons button.on { background:var(--c); color:#0b0f17; }
   .wait-bottom { display: flex; flex-direction: column; align-items: stretch; gap: 10px; margin-top: auto; }
   .readyrow { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; font-size: 13px; font-weight: 700; color: var(--dim); }
   .readyrow .rp { display: inline-flex; align-items: center; gap: 3px; padding: 4px 10px; border-radius: 999px; font-family: Anton, Impact, sans-serif;
@@ -185,13 +194,25 @@
       <div class="chips" id="waitChips"></div>
     </div>
     <div class="setbox" id="setBox"></div>
+    <div class="player-controls"><label for="dominantHand">잡는 손</label><select id="dominantHand"><option value="right">오른손</option><option value="left">왼손</option></select></div>
     <div class="practice" id="practice"></div>
     <div class="wait-bottom">
       <div class="readyrow hidden" id="readyRow"></div>
       <button class="primary go" id="btnGo">준비</button>
       <button class="ghost" id="btnCalLobby">탁구채 자세 맞추기</button>
+      <button class="ghost" id="btnSteerLobby">좌우 조작 맞추기</button>
       <div class="tutlink" id="tutLink"></div>
     </div>
+  </section>
+
+  <section class="view center" id="vSteer">
+    <h1 id="steerTitle">좌우 조작 맞추기</h1>
+    <p id="steerText"></p>
+    <div class="steer-scale"><span>← 왼쪽</span><span>오른쪽 →</span></div>
+    <div class="steer-track"><span class="steer-dot" id="steerDot"></span></div>
+    <p class="note" id="steerNotice"></p>
+    <button class="primary" id="steerNext">가운데 확인</button>
+    <div class="steer-btns"><button class="ghost" id="steerTouch">터치로 조작</button><button class="ghost" id="steerAuto">자동 보정 사용</button></div>
   </section>
 
   <!-- 자세 맞추기 -->
@@ -222,6 +243,8 @@
 
   <!-- 경기 중 -->
   <section class="view" id="vPlay">
+    <div class="steer-play hidden" id="touchSteer"><span>왼쪽</span><input id="touchPosition" type="range" min="-100" max="100" value="0" aria-label="라켓 좌우 위치"><span>오른쪽</span></div>
+    <div class="hand-buttons" id="handButtons" aria-label="포핸드 백핸드 선택"><button type="button" class="on" data-hand="auto">자동 판별</button><button type="button" data-hand="fore">포핸드</button><button type="button" data-hand="back">백핸드</button></div>
     <div class="score">
       <div class="side mine"><span class="who"><i class="srv" id="srvMe"></i>나</span><b id="scMe">0</b></div>
       <div class="mid"><span id="tableL">A 테이블</span><span class="colon">:</span><span id="ruleL"></span></div>

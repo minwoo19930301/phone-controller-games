@@ -9,6 +9,7 @@ import { sfx, audio } from './sfx.js';
 import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
 import { createTutorialBoard } from '/common/tutorial-board.js';
 import { sendHaptic } from '/common/haptics.js';
+import { positionMetres, handAt, handZoneAt, reachQuality } from './controls.mjs';
 
 const WIN_POINTS = 7;
 const SLOW = 0.22; // 슬로우 배율
@@ -19,7 +20,7 @@ const GRACE_MS = 230; // 판정 창이 닫힌 뒤, 늦게 도착하는 스윙을
 //   assist: physics.aimShot 보정(nudge = 조준이 옮기는 비율, risk/pressure = 네트·아웃 확률 배율, powerK = 세기 모으기)
 //   earlyFree: 창보다 이른 스윙은 헛스윙 대신 연습 스윙, replace: 공에 닿기 전 더 잘 맞춘 스윙으로 바꿈,
 //   rescue: 늦게 휘둘러 공이 지나갔어도 칠 수 있던 마지막 순간에 맞힘,
-//   hand: 반대 손(포핸드 공을 백핸드로)일 때 — auto 자동으로 맞춤, soft 조금 약해짐, strict 많이 약해짐
+//   hand: 반대 손(포핸드 공을 백핸드로)일 때 — soft 조금 약해짐, strict 많이 약해짐
 //   cpu: CPU 실수 확률·세기·회전
 //   rally: 긴 랠리(쉬움·보통) — 한 점 안에서 from 번째 타구부터 한 번 칠 때마다 실수 확률이 per 씩 붙습니다(CPU 포함).
 //     보정 덕에 둘 다 거의 다 넣으면 한 점이 끝나지 않아(봇끼리 90초에 158타·1점) 경기가 늘어지기 때문입니다. 어려움은 예전 그대로.
@@ -27,7 +28,7 @@ const TUNE = {
   easy: {
     window: 0.3, perfect: 0.07, good: 0.16, lead: 0.44,
     assist: { nudge: 0.1, risk: 0.12, pressure: 0.15, powerK: 0.35 },
-    earlyFree: true, replace: true, rescue: true, hand: 'auto', handQ: 1, rally: { from: 8, per: 0.025 },
+    earlyFree: true, replace: true, rescue: true, hand: 'soft', handQ: 0.95, rally: { from: 8, per: 0.025 },
     cpu: { miss: 0.2, smashMiss: 0.4, heavyMiss: 0.16, smash: 0.2, q: [0.35, 0.8], power: [0.25, 0.65], spinAmt: [0.15, 0.5] }
   },
   normal: {
@@ -329,8 +330,8 @@ function setPlan(m, side, plan, kind, info) {
     human: pl.kind === 'human', bot: pl.bot, cpu: pl.kind === 'cpu', slot: pl.slot, botAt: null, botSwing: null, cpuSwing: null, cpuMiss: false
   };
   // 칠 손: 탁구채가 기다리는 쪽(공이 몸 왼쪽이면 백핸드). 가운데 근처 공은 어느 손이든 됩니다.
-  p.hand = handFor(side, p.p);
-  p.zone = handZone(side, p.p);
+  p.hand = handFor(side, p.p, pl);
+  p.zone = handZone(side, p.p, pl);
   if (p.bot) {
     // 봇: 좋은 타이밍(가끔 실수)과 무작위 스핀으로 폰과 같은 길(onSwing)을 탑니다.
     // ?botwrong=0.3 이면 그 비율만큼 반대 손으로 칩니다(손 판정 시험용).
@@ -379,22 +380,36 @@ function cpuSwing(m, p, C) {
   };
 }
 // 타점이 몸 왼쪽이면 백핸드
-function handFor(side, pos) {
-  return pos[0] * rightOf(side) < -0.1 ? 'back' : 'fore';
+function controlFor(pl) {
+  return pl && pl.kind === 'human' && !pl.bot ? game.poses[pl.slot] || {} : {};
+}
+function handFor(side, pos, pl) {
+  const control = controlFor(pl);
+  return handAt(pos[0] * rightOf(side), control.position, control.dominantHand);
 }
 // 포핸드·백핸드를 따질 공인지: 몸 가운데(경계 −0.1m 둘레 ±0.14m)로 오는 공은 어느 손으로 쳐도 됩니다.
-function handZone(side, pos) {
-  const xr = pos[0] * rightOf(side);
-  return xr < -0.24 ? 'back' : xr > 0.04 ? 'fore' : 'any';
+function handZone(side, pos, pl) {
+  const control = controlFor(pl);
+  return handZoneAt(pos[0] * rightOf(side), control.position, control.dominantHand);
 }
 
 function updatePlan(m, p, now) {
   const gt = m.clock.gt;
   const T = game.tune;
+  const player = m.sides[p.side];
+  p.hand = handFor(p.side, p.p, player);
+  p.zone = handZone(p.side, p.p, player);
+  if (p.cued && p.human && !p.bot && p.zone !== p.cueZone && now - p.cueAt >= 150 && p.t - gt > 0.04) {
+    send('cue', { kind: p.kind === 'serve' ? 'serve' : 'incoming', hand: p.hand, zone: p.zone }, p.slot);
+    p.cueZone = p.zone;
+    p.cueAt = now;
+  }
   if (p.human && !p.cued && p.t - gt < cueLead()) {
     p.cued = true;
     // 폰에 '지금!'과 칠 손(포핸드/백핸드)을 알려 줍니다. 가운데 공은 아무 손이나(any).
     if (!p.bot) send('cue', { kind: p.kind === 'serve' ? 'serve' : 'incoming', hand: p.hand, zone: p.zone }, p.slot);
+    p.cueZone = p.zone;
+    p.cueAt = now;
     sfx.slow();
   }
   if (p.botAt != null && gt >= p.botAt) {
@@ -432,7 +447,9 @@ function readSwing(d) {
     spinSide: num(d.side, 1) < 0 ? -1 : 1,
     aim: clamp(num(d.aim, 0), -45, 45),
     // auto = 손을 가릴 수 없는 스윙(폰 버튼 모드·키보드). 공 쪽 손으로 칩니다.
-    hand: d.hand === 'back' ? 'back' : d.hand === 'auto' ? 'auto' : 'fore'
+    hand: d.hand === 'back' ? 'back' : d.hand === 'auto' ? 'auto' : 'fore',
+    position: Object.hasOwn(d, 'position') ? (Number.isFinite(d.position) ? clamp(d.position, -1, 1) : null) : undefined,
+    dominantHand: d.dominantHand === 'left' || d.dominantHand === 'right' ? d.dominantHand : null
   };
 }
 const statOf = (slot) => (game.stats[slot] = game.stats[slot] || { hits: 0, perfect: 0, miss: 0, wrong: 0, assisted: 0 });
@@ -553,16 +570,22 @@ function doHit(m, side, sw, th, p) {
   const pl = m.sides[side];
   const human = pl.kind === 'human' && !m.demo;
   // 큰 동작 판정: 포핸드 공을 백핸드로(또는 반대로) 쳤는지. 가운데 공(any)과 손을 가릴 수 없는 스윙(auto)은 따지지 않습니다.
-  // 탁구채는 언제나 공 쪽 손으로 그려지고, 반대 손이면 난이도만큼 타구가 약해집니다(쉬움은 자동으로 맞춤).
-  const zone = handZone(side, st.p);
-  const want = handFor(side, st.p);
+  // 직접 감지하거나 선택한 포·백핸드를 유지하고, 반대편이면 난이도만큼 타구가 약해집니다.
+  const control = controlFor(pl);
+  const position = sw.position !== undefined ? sw.position : control.position;
+  const dominantHand = sw.dominantHand || control.dominantHand;
+  const ballRight = st.p[0] * rightOf(side);
+  const zone = handZoneAt(ballRight, position, dominantHand);
+  const want = handAt(ballRight, position, dominantHand);
   let q = sw.q;
+  const reach = human ? reachQuality(ballRight, position, game.diff) : 1;
+  q *= reach;
   let wrong = null;
   if (human && zone !== 'any' && sw.hand !== 'auto' && sw.hand !== zone) {
     wrong = zone;
     q *= T.handQ;
   }
-  const hand = sw.hand === 'auto' || wrong || !human ? want : sw.hand;
+  const hand = sw.hand === 'auto' || !human ? want : sw.hand;
   const smash = !serve && sw.power > 0.85 && q > 0.7 && (p.apexH || 0) >= 0.24;
   // 긴 랠리(쉬움·보통): 타구가 쌓일수록 실수 확률이 조금씩 붙습니다. 시연 경기는 빼고 봅니다.
   m.rallyHits = (m.rallyHits || 0) + 1;
@@ -579,7 +602,7 @@ function doHit(m, side, sw, th, p) {
   m.state = 'rally';
   m.plan = null;
   if (serve) m.retoss = 0;
-  m.lastShot = { side, kind: shot.kind, outcome: shot.outcome, w: shot.w, q, wrong, rescued: Boolean(sw.rescued), rally: m.rallyHits };
+  m.lastShot = { side, kind: shot.kind, outcome: shot.outcome, w: shot.w, q, hand, wrong, rescued: Boolean(sw.rescued), rally: m.rallyHits };
   // 받는 쪽의 타점을 미리 계산합니다(비행이 정해져 있어 예측과 실제가 같습니다).
   const recv = 1 - side;
   const evs = m.flight.events;
@@ -590,28 +613,32 @@ function doHit(m, side, sw, th, p) {
     plan = planContact(m.flight, recv, 0);
   }
   if (plan) setPlan(m, recv, plan, 'incoming', { smash, w: shot.w });
-  startStroke(m, side, th, shot.kind, hand, st.p);
+  const contact = st.p.slice();
+  if (human && Number.isFinite(position)) {
+    const bodyX = positionMetres(position) * rightOf(side);
+    contact[0] = clamp(contact[0], bodyX - 0.45, bodyX + 0.45);
+  }
+  startStroke(m, side, th, shot.kind, hand, contact, dominantHand);
   view.flash(m.id, [st.p[0] + m.tx, st.p[1], st.p[2]], smash || q > 0.88);
   if (!m.demo) sfx.hit(q, m.clock.scale < 0.6, smash);
   if (human) {
     pl.shake = smash ? 1 : 0.55;
     const e = Math.abs(sw.err);
-    const perfect = e <= T.perfect && !wrong;
+    const perfect = e <= T.perfect && !wrong && reach >= 0.75;
     const good = e <= T.good;
-    const qLabel = perfect ? 'PERFECT' : good ? 'GOOD' : sw.err < 0 ? '빨라요' : '늦어요';
+    const qLabel = reach < 0.75 ? '공과 멀어요' : perfect ? 'PERFECT' : good ? 'GOOD' : sw.err < 0 ? '빨라요' : '늦어요';
     const spinLabel = SPIN_LABEL[shot.kind] || '';
     const cls = perfect ? 'perfect' : good ? 'good' : 'meh';
-    // 반대 손: 쉬움은 '자동으로 맞췄어요', 보통·어려움은 '백핸드 쪽 공이었어요'
-    const handNote = wrong ? (T.hand === 'auto' ? `${HAND_KO[wrong]}로 맞췄어요` : `${HAND_KO[wrong]} 쪽 공이었어요`) : '';
-    hudCall(pl.slot, qLabel, spinLabel || handNote, `${cls} ${shot.kind}${wrong && !spinLabel ? ' hand' : ''}`, 1300);
-    if (wrong && spinLabel) hudNote(pl.slot, handNote, 1100);
+    // 내가 친 손과 공이 온 위치를 함께 보여 줍니다.
+    const handNote = wrong ? `${HAND_KO[hand]} · ${HAND_KO[wrong]} 쪽 공` : HAND_KO[hand];
+    hudCall(pl.slot, qLabel, [handNote, spinLabel].filter(Boolean).join(' · '), `${cls} ${shot.kind}${wrong && !spinLabel ? ' hand' : ''}`, 1300);
     const S = statOf(pl.slot);
     S.hits += 1;
     if (perfect) S.perfect += 1;
     if (wrong) S.wrong += 1;
     if (sw.rescued || (wrong && T.hand === 'auto')) S.assisted += 1;
     if (!pl.bot) {
-      const data = { text: [qLabel, spinLabel, handNote].filter(Boolean).join(' · '), good: good && !wrong, kind: 'hit' };
+      const data = { text: [qLabel, handNote, spinLabel].filter(Boolean).join(' · '), good: good && !wrong && reach >= 0.75, kind: 'hit', hand };
       if (shot.kind !== 'none') data.spin = shot.kind;
       if (wrong) data.wrong = wrong;
       send('result', data, pl.slot);
@@ -821,13 +848,13 @@ function mix(a, b, t) {
 }
 const ease = (t) => t * t * (3 - 2 * t);
 
-function startStroke(m, side, t0, kind, hand, base) {
+function startStroke(m, side, t0, kind, hand, base, dominantHand = 'right') {
   const pad = m.pad[side];
-  pad.stroke = { t0, kind: STROKES[kind] ? kind : 'none', hand: hand || 'fore', base: base ? base.slice() : null, from: pad.pos.slice(), qFrom: pad.q.clone() };
+  pad.stroke = { t0, kind: STROKES[kind] ? kind : 'none', hand: hand || 'fore', dominantHand, base: base ? base.slice() : null, from: pad.pos.slice(), qFrom: pad.q.clone() };
 }
 function strokeOffset(st, a, side) {
   const S = STROKES[st.kind];
-  const flip = st.hand === 'back' ? -1 : 1;
+  const flip = (st.hand === 'back' ? -1 : 1) * (st.dominantHand === 'left' ? -1 : 1);
   const back = [S.back[0] * flip, S.back[1], S.back[2]];
   const end = [S.end[0] * flip, S.end[1], S.end[2]];
   // 2차 베지어: 백스윙(a=−1) → 타점(a=0) → 끝(a=1)
@@ -844,13 +871,19 @@ function updatePaddles(m, dtG, dtR, now) {
   for (const side of [0, 1]) {
     const pad = m.pad[side];
     const pl = m.sides[side];
+    const control = controlFor(pl);
+    const manual = Number.isFinite(control.position);
     const p = m.plan;
     let target = readyPos(side);
+    if (manual) target[0] = positionMetres(control.position) * rightOf(side);
     if (p && p.side === side && !p.decided) {
       // 들어오는 공: 타점 옆(포핸드면 오른쪽, 백핸드면 왼쪽)에서 기다립니다.
-      pad.hand = handFor(side, p.p);
-      const off = toWorld(side, [pad.hand === 'back' ? -0.17 : 0.17, 0.01, 0.0]);
-      target = [p.p[0] + off[0], p.p[1] + off[1], p.p[2] + off[2]];
+      pad.hand = handFor(side, p.p, pl);
+      const handSide = control.dominantHand === 'left' ? -1 : 1;
+      const off = toWorld(side, [(pad.hand === 'back' ? -0.17 : 0.17) * handSide, 0.01, 0.0]);
+      const desiredX = p.p[0] + off[0];
+      const bodyX = positionMetres(control.position) * rightOf(side);
+      target = [manual ? clamp(desiredX, bodyX - 0.4, bodyX + 0.4) : desiredX, p.p[1] + off[1], p.p[2] + off[2]];
       // 미리 아는 스윙(CPU·봇)은 백스윙부터 보여 줍니다.
       const known = p.cpu ? (p.cpuMiss ? 'none' : p.cpuSwing.spin) : p.botSwing && p.botAt != null ? p.botSwing.spin : null;
       const at = p.cpu ? p.t : p.botAt;
@@ -916,16 +949,26 @@ function updatePaddles(m, dtG, dtR, now) {
 // 폰 자세·준비
 // ================================================================
 function onPose(d) {
-  if (!d || !Array.isArray(d.s) || !Array.isArray(d.fc) || d.s.length < 3 || d.fc.length < 3) return;
-  const s = d.s.map((x) => num(x, 0));
-  const fc = d.fc.map((x) => num(x, 0));
-  if (Math.hypot(...s) < 1e-3 || Math.hypot(...fc) < 1e-3) return;
-  game.poses[d.slot] = { s, fc, at: performance.now() };
+  const slot = Number(d && d.slot);
+  if (!SLOT_INFO[slot]) return;
+  const prev = game.poses[slot] || {};
+  const pose = { ...prev };
+  if (Object.hasOwn(d, 'position')) pose.position = Number.isFinite(d.position) ? clamp(d.position, -1, 1) : null;
+  if (d.dominantHand === 'left' || d.dominantHand === 'right') pose.dominantHand = d.dominantHand;
+  if (Array.isArray(d.s) && Array.isArray(d.fc) && d.s.length >= 3 && d.fc.length >= 3) {
+    const s = d.s.slice(0, 3).map((x) => num(x, 0));
+    const fc = d.fc.slice(0, 3).map((x) => num(x, 0));
+    if (Math.hypot(...s) >= 1e-3 && Math.hypot(...fc) >= 1e-3) Object.assign(pose, { s, fc, at: performance.now() });
+  }
+  game.poses[slot] = pose;
 }
 function onCalibrate(d) {
   const slot = Number(d && d.slot);
   if (!SLOT_INFO[slot]) return;
-  delete game.poses[slot];
+  // Reset orientation only. A player's independently calibrated movement and
+  // handedness must survive re-centering the racket during play.
+  const current = game.poses[slot];
+  if (current) game.poses[slot] = { position: current.position, dominantHand: current.dominantHand };
   const ent = humanBySlot(slot);
   if (ent) ent.m.pad[ent.side].qInit = false;
   game.ready.add(slot);
@@ -1180,7 +1223,9 @@ function playerCam(m, side, pl, dtR, aspect) {
   const F = fwdOf(side);
   const pad = m.pad[side];
   // 라켓을 따라 옆으로 움직입니다. 넓게 빠지는 공도 라켓이 화면에 남도록 테이블 밖까지 따라갑니다.
-  pl.camX += (clamp(pad.pos[0], -CAM.maxX, CAM.maxX) - pl.camX) * (1 - Math.exp(-dtR / 0.25));
+  const control = controlFor(pl);
+  const followX = Number.isFinite(control.position) ? positionMetres(control.position) * rightOf(side) : pad.pos[0];
+  pl.camX += (clamp(followX, -CAM.maxX, CAM.maxX) - pl.camX) * (1 - Math.exp(-dtR / 0.25));
   pl.shake = Math.max(0, pl.shake - dtR * 3);
   const j = pl.shake * 0.006;
   const sx = (Math.random() - 0.5) * j;

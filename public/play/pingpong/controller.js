@@ -6,6 +6,7 @@
 import { haptics } from '/common/haptics.js';
 import { createPhoneSettings } from '/common/phone-settings.js';
 import { createTutorial } from '/common/tutorial.js';
+import { yawOffset, deltaAngle, validRange, positionFromAngle } from './steering.mjs';
 
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -71,6 +72,13 @@ import { createTutorial } from '/common/tutorial.js';
   let fallback = false;
   let permDenied = false;
   let pendingCal = false;
+  let sensorDiscoveryDone = false;
+  let initialSetupDone = false;
+  let setupPreReady = false;
+  let dominantHand = 'right';
+  let handOverride = 'auto';
+  // Each phone keeps its own calibration. Automatic correction remains available.
+  const steering = { mode: 'auto', configured: false, stage: 0, center: 0, left: null, right: null, value: 0, raw: null, lastT: 0, freezeUntil: 0, awaitCenter: false };
 
   function show(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('on', v.id === id);
@@ -163,11 +171,12 @@ import { createTutorial } from '/common/tutorial.js';
       gotOri = true;
       sensorsChanged();
     }
+    updateSteering(t);
     // 약 40Hz 로 줄여 보냅니다. 다음 보낼 시각을 정해 두는 방식이라 60Hz 이벤트에서도 40Hz 가 나옵니다.
     if (basis && t >= nextPoseAt) {
       nextPoseAt = Math.max(nextPoseAt + POSE_MS, t + POSE_MS * 0.4);
       if (socket.connected) {
-        socket.volatile.emit('c2d', { event: 'pose', data: { s: r3(inBasis(basis, ori.top)), fc: r3(inBasis(basis, ori.face)) } });
+        socket.volatile.emit('c2d', { event: 'pose', data: { s: r3(inBasis(basis, ori.top)), fc: r3(inBasis(basis, ori.face)), position: steering.mode === 'auto' ? null : round(steering.value, 3), dominantHand } });
       }
     }
   }
@@ -186,6 +195,7 @@ import { createTutorial } from '/common/tutorial.js';
     // alpha = x축, beta = y축, gamma = z축(화면에 수직) 회전 속도입니다(deviceorientation 의 각도 이름과 다름).
     const rg = rr.beta || 0;
     const rot = Math.hypot(rr.alpha || 0, rg, rr.gamma || 0);
+    if (mode === 'play' && rot > 160) steering.freezeUntil = t + 400;
     const ag = e.accelerationIncludingGravity;
     const hasAg = ag && ag.x != null;
     const agDev = hasAg ? [ag.x || 0, ag.y || 0, ag.z || 0] : null;
@@ -223,7 +233,7 @@ import { createTutorial } from '/common/tutorial.js';
       return;
     }
     if (rot > TRIGGER_DPS && t - lastTrig > ps.pick(COOLDOWN) && canSwing(t)) {
-      swingWin = { t0: t, prevTrig: lastTrig };
+      swingWin = { t0: t, prevTrig: lastTrig, position: steering.mode === 'auto' ? null : round(steering.value, 3) };
       lastTrig = t;
       setTimeout(finishSwing, WINDOW_MS);
     }
@@ -237,7 +247,7 @@ import { createTutorial } from '/common/tutorial.js';
 
   function canSwing(t) {
     if (!me) return false;
-    if (mode === 'start' || mode === 'connecting' || mode === 'count') return false;
+    if (mode === 'start' || mode === 'connecting' || mode === 'count' || mode === 'cal' || mode === 'steer') return false;
     return t - calAt > CAL_GUARD_MS;
   }
 
@@ -358,7 +368,7 @@ import { createTutorial } from '/common/tutorial.js';
       spinAmt: round(spinAmt, 2),
       side,
       aim: round(aim, 1),
-      hand
+      hand, position: w.position
     };
     debug(`swing ${JSON.stringify(data)}\nrot ${rotPeak.toFixed(0)} acc ${accPeak.toFixed(1)} vUp ${vUp.toFixed(2)} vH ${vH.toFixed(2)} ` +
       `roll ${rollFrac.toFixed(2)} gPk ${gPeak.toFixed(0)} lat ${latAvg.toFixed(2)} sign ${accSign} n ${all.length}`);
@@ -367,6 +377,9 @@ import { createTutorial } from '/common/tutorial.js';
 
   // 센서 스윙과 버튼 스윙이 같은 길로 나갑니다.
   function deliverSwing(data) {
+    data = { ...data, hand: handOverride === 'auto' ? data.hand : handOverride, dominantHand, position: 'position' in data ? data.position : steering.mode === 'auto' ? null : round(steering.value, 3) };
+    steering.freezeUntil = performance.now() + 550;
+    if (steering.mode === 'tilt') steering.awaitCenter = true;
     lastSwing = { data, at: performance.now() };
     swish(data.power);
     const label = swingLabel(data);
@@ -487,7 +500,8 @@ import { createTutorial } from '/common/tutorial.js';
     // 돌아갈 곳이 있을 때만 취소할 수 있습니다(경기 중인데 기준이 없으면 꼭 맞춰야 합니다).
     $('btnCalCancel').classList.toggle('hidden', !(basis || state.phase !== 'playing' || !myInfo()));
     $('calT').textContent = basis ? '다시 맞춥니다' : '탁구채처럼 쥡니다';
-    $('calB').textContent = '폰 아래쪽을 탁구채 손잡이처럼 쥐고,\n화면이 TV를 보게 한 뒤 준비를 누릅니다.';
+    $('btnReady').textContent = '자세 확인';
+    $('calB').textContent = '폰 아래쪽을 탁구채 손잡이처럼 쥐고,\n화면이 TV를 보게 한 뒤 자세 확인을 누릅니다.';
     show('vCal');
   }
   function startCountdown() {
@@ -543,13 +557,69 @@ import { createTutorial } from '/common/tutorial.js';
     if (quiet) return true;
     buzz([30, 40, 30]);
     mode = 'idle';
-    // 준비를 눌렀는데 자세가 없어서 맞춘 것이면, 맞추자마자 준비 완료로 넘어갑니다.
+    if (setupPreReady) { setupPreReady = false; openSteering(); return true; }
+    // Ready first calibrates the paddle, then each player chooses lateral control.
     if (pendingReady) {
-      pendingReady = false;
-      sendReady();
+      if (!steering.configured) { openSteering(); return true; }
+      pendingReady = false; sendReady();
     }
     render();
     return true;
+  }
+
+  // Rotate the phone gently left/right while facing the display. A browser IMU
+  // cannot measure absolute body position; this is deliberately a steering
+  // control, with touch and existing automatic correction as alternatives.
+  function currentYaw() {
+    return basis && ori ? yawOffset(inBasis(basis, ori.face)) : null;
+  }
+  function paintSteering() {
+    const text = [
+      '화면을 TV 쪽으로 향하고 편한 가운데 자세에서 확인을 눌러요.',
+      '폰을 왼쪽으로 편하게 돌린 뒤 확인을 눌러요.',
+      '폰을 오른쪽으로 편하게 돌린 뒤 확인을 눌러요.',
+      '좌우로 돌려 보고 움직임을 확인해요. 괜찮으면 적용을 눌러요.'
+    ];
+    const labels = ['가운데 확인', '왼쪽 확인', '오른쪽 확인', '적용'];
+    $('steerTitle').textContent = `좌우 조작 맞추기 ${Math.min(steering.stage + 1, 4)}/4`;
+    $('steerText').textContent = text[steering.stage];
+    $('steerNext').textContent = labels[steering.stage];
+    let value = 0;
+    if (steering.stage === 3) value = steering.value;
+    else if (steering.raw != null && steering.stage === 1) value = -Math.min(1, Math.abs(steering.raw) / 45);
+    else if (steering.raw != null && steering.stage === 2) value = Math.max(-1, Math.min(1, -Math.sign(steering.left) * steering.raw / 45));
+    $('steerDot').style.left = `${50 + 46 * value}%`;
+  }
+  function updateSteering(t) {
+    const yaw = currentYaw();
+    if (yaw == null) return;
+    steering.raw = deltaAngle(yaw, steering.center);
+    if ((steering.mode === 'tilt' || (mode === 'steer' && steering.stage === 3)) && validRange(steering.left, steering.right)) {
+      const dt = steering.lastT ? Math.min(0.1, Math.max(0, (t - steering.lastT) / 1000)) : 0.025;
+      const target = positionFromAngle(steering.raw, steering.left, steering.right);
+      if (steering.awaitCenter && t >= steering.freezeUntil && (Math.abs(target) < 0.12 || Math.abs(target - steering.value) < 0.12)) steering.awaitCenter = false;
+      if (mode !== 'play' || (t >= steering.freezeUntil && !steering.awaitCenter)) {
+        steering.value += (target - steering.value) * (1 - Math.exp(-dt / 0.16));
+      }
+      steering.lastT = t;
+    }
+    if (mode === 'steer') paintSteering();
+  }
+  function openSteering() {
+    mode = 'steer'; steering.stage = 0; steering.raw = null;
+    $('steerNotice').textContent = '폰을 돌린 각도로 조작해요. 몸의 실제 위치는 측정하지 않아요.';
+    paintSteering(); show('vSteer');
+  }
+  function emitPosition() {
+    if (socket.connected && me) socket.volatile.emit('c2d', { event: 'pose', data: { position: steering.mode === 'auto' ? null : round(steering.value, 3), dominantHand } });
+  }
+  function finishSteering(kind) {
+    steering.mode = kind; steering.configured = true; steering.value = 0; steering.lastT = 0; steering.awaitCenter = false;
+    $('touchPosition').value = 0;
+    emitPosition();
+    mode = 'idle';
+    if (pendingReady) { pendingReady = false; sendReady(); }
+    render();
   }
 
   // ---------- 화면 상태 ----------
@@ -625,6 +695,7 @@ import { createTutorial } from '/common/tutorial.js';
     mode = 'play';
     $('fallback').classList.toggle('hidden', !fallback);
     $('fallbackHint').textContent = fallbackReason();
+    $('touchSteer').classList.toggle('hidden', steering.mode !== 'touch');
     idleOrb();
     show('vPlay');
   }
@@ -707,6 +778,8 @@ import { createTutorial } from '/common/tutorial.js';
     const canCal = gotOri && !fallback;
     $('btnCalLobby').classList.toggle('hidden', !canCal || phase === 'playing');
     $('btnCalLobby').textContent = basis ? '탁구채 자세 다시 맞추기' : '탁구채 자세 맞추기';
+    $('btnSteerLobby').classList.toggle('hidden', phase === 'playing');
+    $('btnSteerLobby').textContent = steering.configured ? '좌우 조작 다시 맞추기' : '좌우 조작 맞추기';
     const p = $('practice');
     const recent = lastSwing && performance.now() - lastSwing.at < 4000;
     if (!recent) p.textContent = basis && gotMotion && phase !== 'playing' ? '휘둘러 보면 감지한 스윙이 여기 뜹니다.' : '';
@@ -718,7 +791,7 @@ import { createTutorial } from '/common/tutorial.js';
     if (mode === 'start' || mode === 'connecting' || mode === 'msg') return;
     const info = myInfo();
     drawScore(info);
-    if (mode === 'cal' || mode === 'count') return;
+    if (mode === 'cal' || mode === 'count' || mode === 'steer') return;
     if (state.phase === 'playing' && info && !matchDone(info)) {
       if (!basis && gotOri && !fallback) {
         openCal();
@@ -739,8 +812,9 @@ import { createTutorial } from '/common/tutorial.js';
 
   function sensorsChanged() {
     if (mode === 'play') $('fallback').classList.toggle('hidden', !fallback);
-    render();
     maybeTutorial();
+    maybeInitialSetup();
+    render();
   }
 
   // ---------- 난이도·슬로우(큰 화면이 정하고, 아무 폰이나 바꿀 수 있음) ----------
@@ -984,7 +1058,7 @@ import { createTutorial } from '/common/tutorial.js';
       },
       {
         title: '포핸드',
-        body: '오른쪽 공은 화면 쪽 면으로 앞으로 휘둘러요.',
+        body: '화면 쪽 면으로 앞으로 휘둘러 포핸드를 연습해요.',
         svg: () => strokeArt('fore'),
         waitFor: 'swing',
         hint: '포핸드로 휘둘러 보세요',
@@ -997,7 +1071,7 @@ import { createTutorial } from '/common/tutorial.js';
       },
       {
         title: '백핸드',
-        body: '왼쪽 공은 폰을 뒤집어 뒷면으로 밀어 쳐요.',
+        body: '폰을 뒤집어 뒷면으로 밀어 백핸드를 연습해요.',
         svg: () => strokeArt('back'),
         waitFor: 'swing',
         hint: '백핸드로 휘둘러 보세요',
@@ -1042,9 +1116,10 @@ import { createTutorial } from '/common/tutorial.js';
         }
       }
     ],
-    finish: { title: '연습 끝!', body: '이제 준비를 누르면 돼요.\n경기 중 공이 오면 폰에 "지금!"과 칠 손이 떠요.', button: '좋아요' },
+    finish: { title: '연습 끝!', body: '이제 좌우 조작을 맞춘 뒤 준비해요.\n경기 중 공이 오면 폰에 "지금!"과 칠 손이 떠요.', button: '좋아요' },
     onDone: () => {
       tutLive = null;
+      maybeInitialSetup();
       render();
     }
   });
@@ -1062,6 +1137,16 @@ import { createTutorial } from '/common/tutorial.js';
     if (state.phase === 'playing' && myInfo() && !matchDone(myInfo())) return;
     clearCue();
     tut.run();
+  }
+  // Finish each player's setup before showing the lobby and its Ready button.
+  function maybeInitialSetup() {
+    if (!me || initialSetupDone || tut.isRunning() || mode === 'start' || mode === 'connecting' || mode === 'msg') return;
+    if (state.phase === 'playing') { initialSetupDone = true; return; }
+    if (!gotMotion && !sensorDiscoveryDone) return;
+    if (!gotOri && !sensorDiscoveryDone) return;
+    initialSetupDone = true;
+    if (gotOri && !fallback && !basis) { setupPreReady = true; openCal(); }
+    else openSteering();
   }
 
   // ---------- 소켓 ----------
@@ -1088,9 +1173,11 @@ import { createTutorial } from '/common/tutorial.js';
       pendingCal = false;
       socket.emit('c2d', { event: 'calibrate', data: {} });
     }
+    emitPosition();
     if (mode === 'connecting' || mode === 'msg') mode = 'idle';
-    render();
     maybeTutorial();
+    maybeInitialSetup();
+    render();
   });
   socket.on('players', (payload) => {
     roster = payload && Array.isArray(payload.players) ? payload.players : [];
@@ -1128,6 +1215,7 @@ import { createTutorial } from '/common/tutorial.js';
       cueOn = false;
       clearTimeout(cueTimer);
       pendingReady = false;
+      if (mode === 'steer') mode = 'idle';
       // 내가 치는 경기가 시작됐는데 연습 화면이 떠 있으면 닫습니다(스윙이 경기로 가야 함).
       if (myInfo() && tut.isRunning()) tut.cancel();
     }
@@ -1214,9 +1302,11 @@ import { createTutorial } from '/common/tutorial.js';
     show('vMsg');
     socket.connect();
     setTimeout(() => {
-      if (gotMotion) return;
-      fallback = true;
-      debug('동작 센서 값이 들어오지 않아 버튼으로 칩니다');
+      sensorDiscoveryDone = true;
+      if (!gotMotion) {
+        fallback = true;
+        debug('동작 센서 값이 들어오지 않아 버튼으로 칩니다');
+      }
       sensorsChanged();
     }, SENSOR_WAIT_MS);
   });
@@ -1233,7 +1323,38 @@ import { createTutorial } from '/common/tutorial.js';
       openCal();
       return;
     }
+    if (!steering.configured && state.phase !== 'playing') {
+      pendingReady = true;
+      openSteering();
+      return;
+    }
     sendReady();
+  });
+  $('dominantHand').addEventListener('change', (e) => { dominantHand = e.target.value === 'left' ? 'left' : 'right'; emitPosition(); });
+  $('btnSteerLobby').addEventListener('click', () => { pendingReady = false; openSteering(); });
+  $('steerNext').addEventListener('click', () => {
+    if (steering.stage === 3) { finishSteering('tilt'); return; }
+    const yaw = currentYaw();
+    if (yaw == null) { $('steerNotice').textContent = '먼저 자세를 맞추거나, 터치 조작 또는 자동 보정을 선택해 주세요.'; return; }
+    if (steering.stage === 0) { steering.center = yaw; steering.left = steering.right = null; steering.stage = 1; }
+    else if (steering.stage === 1) {
+      const left = deltaAngle(yaw, steering.center);
+      if (Math.abs(left) < 6) { $('steerNotice').textContent = '폰을 조금 더 왼쪽으로 돌리고 다시 확인해 주세요.'; return; }
+      steering.left = left; steering.stage = 2;
+    } else {
+      const right = deltaAngle(yaw, steering.center);
+      if (!validRange(steering.left, right)) { $('steerNotice').textContent = '가운데를 지나 반대쪽으로 조금 더 돌려 주세요.'; return; }
+      steering.right = right; steering.value = 0; steering.stage = 3;
+    }
+    $('steerNotice').textContent = '폰을 돌린 각도로 조작해요. 몸의 실제 위치는 측정하지 않아요.';
+    paintSteering();
+  });
+  $('steerTouch').addEventListener('click', () => finishSteering('touch'));
+  $('steerAuto').addEventListener('click', () => finishSteering('auto'));
+  $('touchPosition').addEventListener('input', (e) => { steering.value = Number(e.target.value) / 100; emitPosition(); });
+  for (const button of $('handButtons').querySelectorAll('button')) button.addEventListener('click', () => {
+    handOverride = button.dataset.hand;
+    for (const b of $('handButtons').querySelectorAll('button')) b.classList.toggle('on', b === button);
   });
   $('btnCalLobby').addEventListener('click', () => {
     audio();
@@ -1251,6 +1372,7 @@ import { createTutorial } from '/common/tutorial.js';
   $('btnCalCancel').addEventListener('click', () => {
     clearInterval(countTimer);
     pendingReady = false;
+    if (setupPreReady) { setupPreReady = false; openSteering(); return; }
     mode = 'idle';
     render();
   });
@@ -1284,9 +1406,10 @@ import { createTutorial } from '/common/tutorial.js';
   // 시험용: 콘솔·헤드리스에서 상태 보기와 스윙 넣기
   window.__ppc = {
     tut, ps, haptics, timing,
-    state: () => ({ mode, phase: state.phase, me: me && me.slot, basis: Boolean(basis), fallback, ready: iAmReady(), cue: cueOn, tut: tut.isRunning() ? tut.current() && tut.current().title : null }),
+    state: () => ({ mode, phase: state.phase, me: me && me.slot, basis: Boolean(basis), fallback, ready: iAmReady(), cue: cueOn, tut: tut.isRunning() ? tut.current() && tut.current().title : null, steering: { ...steering }, dominantHand, handOverride }),
     swing: (o = {}) => deliverSwing({ power: 0.7, ago: 0, rtt: Math.round(rtt()), spin: 'none', spinAmt: 0, side: 1, aim: 0, hand: 'fore', ...o })
   };
+  if (DEBUG) window.__ppc.debugOrientation = (alpha, beta, gamma) => onOrientation({ alpha, beta, gamma });
   if (DEBUG) {
     let lastO = 0;
     let lastM = 0;
