@@ -36,22 +36,60 @@ test('single server remains usable and bad HTTP responses are ignored', async ()
   assert.deepEqual(await chooseServer([servers[0]], { fetcher: async () => ({ ok: false }) }), { server: servers[0], fallback: true });
 });
 
-test('a normal game click navigates to the chosen origin with its game path', async () => {
-  let click;
-  let navigated;
-  let prevented = false;
+function makePage(fetcher) {
+  let click, navigated;
+  let nextTimer = 0;
+  const timers = new Map();
+  const fakeSetTimeout = (handler, ms) => { const id = ++nextTimer; timers.set(id, { handler, ms }); return id; };
+  const fakeClearTimeout = (id) => timers.delete(id);
   const card = { href: `${servers[0]}/golf/`, addEventListener: (_, handler) => { click = handler; } };
-  const status = { setAttribute() {}, style: {} };
+  const elements = [];
+  function makeElement(tag) {
+    const element = { tag, style: {}, children: [], events: {}, setAttribute() {},
+      append(...children) { this.children.push(...children); },
+      addEventListener(name, handler) { this.events[name] = handler; },
+      focus() { this.focused = true; }
+    };
+    elements.push(element);
+    return element;
+  }
   const window = {
     PCG_RENDER_SERVERS: servers,
-    document: { createElement: () => status, querySelector: () => ({ after() {} }), querySelectorAll: () => [card] },
-    location: { assign: (url) => { navigated = url; } }
+    document: { createElement: makeElement, body: { append() {} }, querySelectorAll: () => [card] },
+    location: { assign: (url) => { navigated = url; } },
+    addEventListener() {}
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('./selector-router'), 'utf8'), {
-    window, URL, AbortController, setTimeout, clearTimeout,
-    fetch: async (url) => response(url.includes('second') ? 0 : 2)
+    window, URL, AbortController, setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout,
+    fetch: fetcher
   });
-  await click({ button: 0, preventDefault() { prevented = true; } });
+  return { click: (event) => click(event), elements, timers, get navigated() { return navigated; } };
+}
+
+test('notice lets the user confirm and enter the chosen game server', async () => {
+  let prevented = false;
+  const page = makePage(async (url) => response(url.includes('second') ? 0 : 2));
+  const pending = page.click({ button: 0, preventDefault() { prevented = true; } });
+  const dialog = page.elements[0];
+  const button = page.elements.find((element) => element.tag === 'button');
   assert.equal(prevented, true);
-  assert.equal(navigated, `${servers[1]}/golf/`);
+  assert.equal(dialog.hidden, false);
+  assert.equal(button.focused, true);
+  assert.match(page.elements.find((element) => element.id === 'server-wait-description').textContent, /시간이 걸릴 수/);
+  assert.equal(page.navigated, undefined);
+  button.events.click();
+  await pending;
+  assert.equal(page.navigated, `${servers[1]}/golf/`);
+  assert.equal([...page.timers.values()].some((timer) => timer.ms === 2000), false);
+});
+
+test('notice automatically enters the fallback server after two seconds', async () => {
+  const page = makePage(async () => { throw Error('offline'); });
+  const pending = page.click({ button: 0, preventDefault() {} });
+  const timer = [...page.timers.values()].find((entry) => entry.ms === 2000);
+  assert.ok(timer);
+  assert.equal(page.navigated, undefined);
+  timer.handler();
+  await pending;
+  assert.equal(page.navigated, `${servers[0]}/golf/`);
 });

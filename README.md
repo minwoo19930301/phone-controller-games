@@ -168,23 +168,28 @@ main 에 푸시하면 자동으로 다시 배포됩니다(Auto-Deploy: On Commit
 무료 플랜은 15분 동안 접속이 없으면 잠들어서, 첫 접속에 30초쯤 걸립니다.
 방 정보는 서버 메모리에만 있어서 서버가 다시 뜨면 큰 화면을 새로고침해 새 방을 만듭니다.
 
-## Cloudflare Workers 게임 선택창
+## Cloudflare 게임 선택창
 
 `npm run build:selector`는 선택 화면과 미리보기, 글꼴만 정적 파일로 만듭니다.
-`wrangler.jsonc`는 이 결과를 Cloudflare Workers Static Assets로 제공하도록 설정합니다.
-Workers Builds에서 빌드 명령은 `npm run build:selector`, 배포 명령은
-`npx wrangler deploy`입니다. 게임 화면과 실시간 서버는 Render에서 계속 실행됩니다.
+선택창은 Cloudflare Pages의 https://phone-controller-games.pages.dev/ 에 배포합니다.
+기존 Workers 주소도 같은 파일로 배포해 이전 링크를 유지합니다. 게임 화면과 실시간
+서버는 Render에서 계속 실행됩니다.
+Pages 프로젝트는 직접 업로드 방식이라 Git 푸시만으로 자동 갱신되지 않습니다.
+선택창 변경 후 `npm run build:selector`를 실행한 다음 `wrangler pages deploy
+dist-selector --project-name phone-controller-games --branch main`으로 배포합니다.
+기존 Workers 주소도 갱신할 때는 `wrangler deploy`를 실행합니다.
 기본 설정은 `phone-controller-games`와 `phone-controller-games-2` 무료 Render 서버 두 대입니다.
 
-서버 목록을 변경하려면 Workers Builds의 빌드 환경 변수 `RENDER_GAME_SERVERS`에
-HTTPS 서버 주소를 쉼표로 구분해 지정하고 다시 배포합니다.
+서버 목록을 변경하려면 빌드 환경 변수 `RENDER_GAME_SERVERS`에 HTTPS 서버 주소를
+쉼표로 구분해 지정하고 선택창을 다시 빌드·배포합니다.
 예: `https://phone-controller-games.onrender.com,https://another-server.onrender.com`
 주소에는 경로나 쿼리를 넣지 않습니다. 설정을 바꾼 뒤에는 새 빌드가 필요합니다.
 
 모든 Render 서버에 이 버전의 `/api/load`를 먼저 배포해야 합니다. 사용자가 게임을 고르면
 브라우저에서 각 서버의 익명 활성 화면 수를 동시에 조회해 가장 적은 서버를 선택합니다.
-동률이면 무작위로 선택하고, 3초 안에 응답하지 않거나 잘못 응답한 서버는 제외합니다.
-모두 응답하지 않으면 안내 후 목록의 첫 번째 서버로 이동합니다. 서버가 잠들어 있다면
+동률이면 무작위로 선택하고, 1.8초 안에 응답하지 않거나 잘못 응답한 서버는 제외합니다.
+서버가 켜지는 데 시간이 걸릴 수 있다는 안내는 확인을 누르거나 2초가 지나면 닫힙니다.
+모두 응답하지 않으면 목록의 첫 번째 서버로 이동합니다. 서버가 잠들어 있다면
 기동을 기다려야 하며 장애 중이면 연결이 실패할 수 있습니다. 조회는 절전 서버를 깨울 수
 있고, 기존 서버에 새 endpoint가 아직 없다면 폴백으로 연결됩니다. 서버들이 동시에 선택되면
 같은 시점의 방 수를 보고 같은 서버를 고를 수 있습니다.
