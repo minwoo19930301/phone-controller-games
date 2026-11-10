@@ -6,7 +6,7 @@
 | 파일 | 하는 일 |
 | --- | --- |
 | `music/songs.js` | 퍼블릭 도메인 27곡의 악보 데이터(파트 6개)와 박↔초 변환 |
-| `music/synth.js` | 샘플 없는 WebAudio 악기 14종, 박자 스케줄러(Transport), 미리듣기, 녹화용 믹스 |
+| `music/synth.js` | 녹음 샘플(VSCO 2 CE)과 WebAudio 합성 악기 14종, 박자 스케줄러(Transport), 미리듣기, 녹화용 믹스 |
 | `music/charts.js` | 곡에서 리듬 게임 채보를 결정적으로 생성 |
 | `../disc-picker.js` | CD 케이스 선반 모양의 곡 고르기 화면(끌기·튕기기·원격 조작) |
 
@@ -54,7 +54,8 @@ synth.instrument('drums').play(38, { vel: 0.9 });          // 타악기는 GM �
 - 악기 `INSTRUMENTS`: `piano`, `strings`, `violin`, `cello`, `trumpet`, `horn`, `flute`, `choir`, `bass`, `drums`, `castanets`, `glock`, `celesta`, `timpani`. `INSTRUMENT_INFO[이름]`에 한국어 이름·음역·지속음 여부가 있습니다.
   - 지속음 악기(현·관·합창·베이스)는 `setLevel`로 활 세기·숨 세기를 따라가게 할 수 있습니다. 금관은 세기에 따라 밝기도 바뀝니다.
   - `choir`는 'ah' 모음 포먼트입니다. 성악가 보정 음(목소리 크기로 `setLevel`, 보정한 음높이로 `setPitch`)에 쓰면 됩니다.
-- 소리 길: 악기 → 버스 → 컴프레서 → 리미터 → 스피커, 잔향은 보내기로 섞입니다.
+- 소리 길: 악기 → (패닝) → 버스 → 저역 정리·고역 다듬기 → 부드러운 컴프레서 → 리미터 → 스피커. 잔향은 패닝 앞에서 스테레오 홀 잔향(초기 반사 + 고역이 먼저 줄어드는 약 2.3초 꼬리)으로 보냅니다.
+  - `inst.ready`: 녹음 샘플을 다 불러오면(실패하면 합성 음색으로 정해지면) 풀리는 약속입니다.
   - `synth.instrument(name, { recordOnly: true })`는 스피커로 나가지 않고 녹화 믹스에만 섞입니다(큰 화면이 폰 연주를 녹화에만 넣을 때).
   - `const unplug = synth.renderTo(mediaStreamDest)`: 스피커 길과 녹화 전용 길을 모두 그 노드로도 보냅니다.
 - `createTransport(synth, { lookahead: 0.12, interval: 25 })`
@@ -64,8 +65,10 @@ synth.instrument('drums').play(38, { vel: 0.9 });          // 타악기는 GM �
   - `tr.setRate(1.1)`: 지휘 빠르기 배율(0.5~2). 지금 박을 기준으로 이어 붙이므로 끊기지 않습니다.
   - `tr.beat`, `tr.bpm`, `tr.timeAt(beat)`, `tr.beatAt(audioTime)`, `tr.setMute(part)`, `tr.setGain(part, g)`
   - `tr.on('beat', ({ beat, time }) => {})`, `tr.on('note', ({ track, note, time, dur }) => {})`, `tr.on('end', fn)`. `time`은 오디오 시계라 판정·화면 동기에 그대로 씁니다.
+  - 사람 손맛: 반주 소리에는 박 위치·4마디 프레이즈에 따른 세기, 화음 굴림, 레가토, 반주 파트(harmony·chords·bass)의 ±약 10ms 흔들림을 입힙니다(같은 곡이면 늘 같음). 판정에 쓰는 melody·drums·perc 는 시각을 건드리지 않고, `note` 이벤트의 `time`도 악보 그대로입니다.
+  - 반주 악기는 오케스트라 자리(`SEAT`: 바이올린 왼쪽, 첼로·베이스 오른쪽, 금관 가운데 뒤)에 앉힙니다. 폰의 내 악기 소리는 가운데 그대로입니다.
 - `const stop = playPreview(synth, song, { seconds: 12, fromBeat })`: 미리듣기(끝에서 부드럽게 줄임).
-- `await renderOffline(song, { fromBeat, seconds, parts, orch })`: 오프라인 렌더(AudioBuffer). 검사·내려받기용입니다.
+- `await renderOffline(song, { fromBeat, seconds, parts, orch, noSamples })`: 오프라인 렌더(AudioBuffer). 검사·내려받기용입니다. 녹음 샘플을 다 불러온 뒤 게임과 같은 손맛·자리로 렌더합니다(`noSamples: true`면 합성 대체 음색).
 
 ## charts.js
 

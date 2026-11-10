@@ -464,12 +464,12 @@ const TORSO = [
   [1.395, 0.173, 0.099, 0.096, 2.8, -0.016],
   [1.43, 0.167, 0.083, 0.088, 2.7, -0.02],
   [1.452, 0.148, 0.07, 0.078, 2.5, -0.024],
-  [1.468, 0.114, 0.062, 0.07, 2.3, -0.026],
-  [1.48, 0.078, 0.056, 0.063, 2.1, -0.027],
-  [1.505, 0.059, 0.053, 0.058, 2.0, -0.025],
-  [1.545, 0.055, 0.051, 0.056, 2.0, -0.021],
-  [1.585, 0.055, 0.047, 0.061, 2.1, -0.017],
-  [1.625, 0.054, 0.036, 0.07, 2.1, -0.014]
+  [1.468, 0.122, 0.064, 0.074, 2.3, -0.026],
+  [1.48, 0.092, 0.059, 0.068, 2.1, -0.027],
+  [1.505, 0.07, 0.058, 0.066, 2.0, -0.025],
+  [1.545, 0.065, 0.056, 0.063, 2.0, -0.021],
+  [1.585, 0.062, 0.051, 0.066, 2.1, -0.017],
+  [1.625, 0.056, 0.038, 0.07, 2.1, -0.014]
 ];
 function torsoAt(y) {
   const T = TORSO;
@@ -503,6 +503,14 @@ function torsoPt(y, th, extra = 0) {
   if (c < 0) d -= 0.005 * gauss(y - 1.2, 0.17) * gauss(x, 0.02) * -c; // 등골
   if (c < 0) d += 0.022 * gauss(y - 0.905, 0.05) * gauss(ax - 0.07, 0.06) * -c; // 엉덩이
   d += 0.004 * gauss(y - 1.05, 0.02) * (y > 1.01 ? 1 : 0); // 셔츠가 벨트 위로 살짝 부풂
+  // 천 주름: 벨트 위로 넣어 입은 셔츠가 출렁이는 잔물결(각도에 따라 위상이 달라 줄무늬로 보이지 않게)
+  const tuck = gauss(y - 1.075, 0.045) * (y > 1.01 ? 1 : 0);
+  d += 0.0045 * tuck * Math.sin(th * 7 + Math.sin(th * 3) * 1.6 + y * 60);
+  // 옆구리: 겨드랑이에서 허리로 내려오는 사선 당김 주름
+  const flank = gauss(Math.abs(s) - 0.93, 0.12) * smooth(1.08, 1.16, y) * smooth(1.37, 1.27, y);
+  d += 0.002 * flank * Math.sin((y + c * 0.25) * 52 + (s > 0 ? 0 : 1.7)) * (0.6 + 0.4 * Math.sin(y * 23 + th));
+  // 가슴 아래 처지는 결(가슴 볼록 아래로 살짝 들어감)
+  if (c > 0) d -= 0.0035 * gauss(y - 1.235, 0.03) * gauss(ax - 0.06, 0.07) * c;
   void r;
   return V(x + (nx / nl) * d, y, z + (nz / nl) * d + cz);
 }
@@ -559,7 +567,7 @@ function torsoSurface(y, th, off = 0) {
 function buildShirtBits(B) {
   // 깃 세움(목둘레 띠)
   const N = 40;
-  const gap = 0.36; // 앞쪽 벌어진 각(라디안, 반)
+  const gap = 0.26; // 앞쪽 벌어진 각(라디안, 반)
   const angs = [];
   for (let j = 0; j <= N; j++) angs.push(gap + (j / N) * (Math.PI * 2 - gap * 2));
   const collarW = (p) => ({ chest: 0.6, neck: 0.4 });
@@ -568,7 +576,7 @@ function buildShirtBits(B) {
     return p;
   };
   const standRows = [];
-  for (const [y, off] of [[1.468, 0.004], [1.476, 0.009], [1.502, 0.0095], [1.506, 0.006]]) {
+  for (const [y, off] of [[1.468, 0.004], [1.476, 0.009], [1.514, 0.0095], [1.519, 0.006]]) {
     standRows.push(angs.map((th) => {
       const p = neckR(y, th);
       const c = V(0, y, torsoAt(y)[4]);
@@ -583,9 +591,9 @@ function buildShirtBits(B) {
       const a = Math.abs(((th + Math.PI) % (Math.PI * 2)) - Math.PI); // 앞에서 떨어진 각
       const front = smooth(1.3, 0.38, a);
       // 목에서 어깨 비탈을 따라 내려오며 셔츠 위에 눕습니다(접힌 쪽은 도톰하게).
-      const y = lerp(1.508, 1.472 - 0.034 * front, Math.pow(f, 0.85));
+      const y = lerp(1.52, 1.476 - 0.024 * front, Math.pow(f, 0.85));
       const off = lerp(0.0115, 0.0042, Math.pow(f, 0.6));
-      return torsoPt(Math.min(1.505, y), th, off).add(V(0, lerp(0.002, 0.0035, f), 0));
+      return torsoPt(Math.min(1.517, y), th, off).add(V(0, lerp(0.002, 0.0035, f), 0));
     }));
   }
   const toRows = (arr, mat) => arr.map((pts) => ({ pts, v: 0, mat }));
@@ -724,7 +732,10 @@ function buildArm(B, sd) {
       // e2 의 음수 쪽이 어깨 꼭대기(삼각근)입니다: 어깨에 가까울수록 눌러 둥근 어깨선으로
       const top = Math.max(0, -s * Math.sin(a));
       const squash = 1 - 0.42 * smooth(0.15, -0.02, ss) * top * top;
-      pts.push(c.clone().addScaledVector(e1, Math.cos(a) * (rf + bump)).addScaledVector(e2, Math.sin(a) * (rs + bump) * squash));
+      // 소매 천이 겨드랑이 쪽으로 몰려 생기는 잔주름(소매 안쪽)
+      const under = Math.max(0, s * Math.sin(a));
+      const fold = ss < 0.165 && ss > 0.02 ? 0.0022 * under * Math.sin(ss * 120 + a * 2) : 0;
+      pts.push(c.clone().addScaledVector(e1, Math.cos(a) * (rf + bump + fold)).addScaledVector(e2, Math.sin(a) * (rs + bump + fold) * squash));
     }
     return pts;
   };
@@ -743,22 +754,27 @@ function buildArm(B, sd) {
 }
 
 // ---------- 다리 ----------
+// 바지: 엉덩이·허벅지는 넉넉하게, 무릎에서 좁아졌다가 종아리 뒤로 살짝 불룩, 밑단은 신발 위에서 한 번 접힙니다(브레이크).
 const LEG_RINGS = [
   [-0.06, 0.07, 0.07, 'pants'],
-  [-0.02, 0.087, 0.089, 'pants'],
-  [0.04, 0.092, 0.093, 'pants'],
-  [0.12, 0.086, 0.087, 'pants'],
-  [0.22, 0.075, 0.077, 'pants'],
-  [0.33, 0.064, 0.066, 'pants'],
-  [0.4, 0.06, 0.061, 'pants'],
-  [0.455, 0.0585, 0.06, 'pants'],
-  [0.52, 0.0592, 0.058, 'pants'],
-  [0.6, 0.0572, 0.0552, 'pants'],
-  [0.69, 0.0535, 0.0525, 'pants'],
-  [0.76, 0.053, 0.0522, 'pants'],
-  [0.792, 0.0545, 0.0538, 'pants', true],
-  [0.797, 0.051, 0.05, 'pantsIn', true],
-  [0.797, 0.033, 0.031, 'pantsIn']
+  [-0.02, 0.088, 0.091, 'pants'],
+  [0.04, 0.093, 0.095, 'pants'],
+  [0.12, 0.087, 0.088, 'pants'],
+  [0.22, 0.076, 0.077, 'pants'],
+  [0.31, 0.066, 0.067, 'pants'],
+  [0.37, 0.0605, 0.0615, 'pants'],
+  [0.42, 0.058, 0.0595, 'pants'],
+  [0.47, 0.0575, 0.0585, 'pants'],
+  [0.53, 0.0585, 0.0578, 'pants'],
+  [0.6, 0.057, 0.0556, 'pants'],
+  [0.66, 0.0552, 0.0542, 'pants'],
+  [0.71, 0.0545, 0.0538, 'pants'],
+  [0.74, 0.0562, 0.0552, 'pants'],
+  [0.765, 0.0566, 0.0558, 'pants'],
+  [0.79, 0.0578, 0.057, 'pants'],
+  [0.806, 0.0585, 0.0578, 'pants', true],
+  [0.811, 0.0555, 0.0548, 'pantsIn', true],
+  [0.811, 0.036, 0.034, 'pantsIn']
 ];
 function legW(s, sd) {
   const h = 1 - smooth(-0.07, 0.11, s);
@@ -780,7 +796,18 @@ function buildLeg(B, sd) {
       const crease = 0.0035 * gauss(Math.atan2(Math.sin(a), Math.cos(a)), 0.22) * smooth(0.1, 0.25, ss) * (ss < 0.79 ? 1 : 0);
       // 허벅지 안쪽은 살짝 납작하게
       const inner = Math.max(0, -Math.sin(a) * s) * 0.006 * smooth(0.25, 0.0, ss);
-      pts.push(H.clone().addScaledVector(d, ss).addScaledVector(e1, Math.cos(a) * (rf + crease)).addScaledVector(e2, Math.sin(a) * (rs - inner)));
+      const ca = Math.cos(a);
+      let bulge = 0;
+      bulge += 0.0045 * gauss(ss - 0.43, 0.035) * Math.pow(Math.max(0, ca), 4); // 무릎뼈
+      bulge -= 0.003 * gauss(ss - 0.43, 0.02) * Math.pow(Math.max(0, -ca), 2); // 오금 오목
+      bulge += 0.006 * gauss(ss - 0.54, 0.06) * Math.pow(Math.max(0, -ca), 2); // 종아리
+      bulge += 0.0035 * gauss(ss - 0.06, 0.08) * Math.pow(Math.max(0, -ca), 2) * (1 - inner * 100); // 엉덩이 아래 허벅지 뒤
+      // 브레이크: 밑단 위에 천이 쌓여 생기는 가로 주름(앞쪽이 더 깊게)
+      const brk = gauss(ss - 0.755, 0.03) * (0.6 + 0.4 * Math.max(0, ca));
+      bulge += 0.0028 * brk * Math.sin(a * 2 + ss * 210 + s);
+      // 밑단: 앞은 신발 등에 얹히고 뒤는 조금 더 내려옵니다
+      const hem = smooth(0.72, 0.8, ss) * (0.011 * Math.max(0, -ca) - 0.004 * Math.max(0, ca));
+      pts.push(H.clone().addScaledVector(d, ss + hem).addScaledVector(e1, ca * (rf + crease + bulge)).addScaledVector(e2, Math.sin(a) * (rs - inner + bulge * 0.6)));
     }
     return { pts, v: ss, mat, split, s: ss };
   });
@@ -916,7 +943,7 @@ const headW = (p) => {
 const azim = (ph) => Math.abs(((((ph + Math.PI) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) - Math.PI); // 앞에서 떨어진 각
 const capBand = (ph) => {
   const a = azim(ph);
-  return (0.33 + 0.13 * (1 - Math.cos(a)) * 0.5) * Math.PI;
+  return (0.305 + 0.15 * (1 - Math.cos(a)) * 0.5) * Math.PI;
 };
 const hairLine = (ph) => {
   const a = azim(ph);
@@ -1020,11 +1047,11 @@ function buildHead(B) {
     const inner = [];
     const outer = [];
     for (let i = 0; i <= NB; i++) {
-      const ph = (-1 + (2 * i) / NB) * 1.04;
+      const ph = (-1 + (2 * i) / NB) * 0.98;
       const I = headPoint(capBand(ph) + 0.01, ph, 0.006);
       const rad = V(I.x - HC.x, 0, I.z - HC.z).normalize();
-      const len = 0.07 * Math.pow(Math.cos(ph * 0.95), 0.75) + 0.005;
-      const droop = 0.009 + 0.022 * Math.sin(ph) ** 2;
+      const len = 0.06 * Math.pow(Math.cos(ph * 0.98), 0.7) + 0.004;
+      const droop = -0.004 + 0.02 * Math.sin(ph) ** 2;
       inner.push(I);
       outer.push(I.clone().addScaledVector(rad, len).add(V(0, -droop, 0)));
     }
@@ -1099,9 +1126,10 @@ const FINGERS = [
   { k: V(-0.01, 0.09, -0.001), len: 0.096, r: 0.0096 },
   { k: V(-0.026, 0.08, -0.002), len: 0.076, r: 0.0086 }
 ];
+const HAND_K = 1.1; // 손 굵기 배율(멀리서도 손과 그립이 읽히게). 손가락이 그립을 감는 반지름은 굵기에 맞춰 따라갑니다.
 function palmRing(y, N, s, cuff) {
-  const wx = pl([[-0.03, 0.03], [-0.005, 0.0275], [0, 0.025], [0.02, 0.033], [0.045, 0.0375], [0.07, 0.0398], [0.09, 0.0405]], y) + (cuff ? 0.004 : 0);
-  const tz = pl([[-0.03, 0.024], [-0.005, 0.0215], [0, 0.0195], [0.02, 0.0172], [0.045, 0.0148], [0.07, 0.0136], [0.09, 0.0128]], y) + (cuff ? 0.0035 : 0);
+  const wx = HAND_K * pl([[-0.03, 0.03], [-0.005, 0.0275], [0, 0.025], [0.02, 0.033], [0.045, 0.0375], [0.07, 0.0398], [0.09, 0.0405]], y) + (cuff ? 0.004 : 0);
+  const tz = HAND_K * pl([[-0.03, 0.024], [-0.005, 0.0215], [0, 0.0195], [0.02, 0.0172], [0.045, 0.0148], [0.07, 0.0136], [0.09, 0.0128]], y) + (cuff ? 0.0035 : 0);
   const sq = smooth(0.0, 0.025, y); // 손목은 타원, 손바닥은 둥근 사각
   const pts = [];
   for (let j = 0; j < N; j++) {
@@ -1151,7 +1179,8 @@ function buildHand(B, sd, gloved) {
     const r0 = V().subVectors(K, C);
     const rho0 = r0.length();
     r0.normalize();
-    const R = GRIP_R + f.r * 0.92;
+    const fr0 = f.r * HAND_K;
+    const R = GRIP_R + fr0 * 0.92;
     // 감는 방향: 처음에 손가락 끝 쪽(+Y)으로 나아가야 합니다
     const t0 = V().crossVectors(sH, r0);
     const sign = t0.y > 0 ? 1 : -1;
@@ -1161,7 +1190,7 @@ function buildHand(B, sd, gloved) {
     const step = 0.08;
     let prev = K.clone();
     pts.push(K.clone());
-    while (acc < f.len) {
+    while (acc < f.len * 1.05) {
       ang += step;
       const rho = lerp(rho0, R, smooth(0, 1.1, ang));
       const p = C.clone().add(r0.clone().applyAxisAngle(sH, sign * ang).multiplyScalar(rho));
@@ -1170,24 +1199,24 @@ function buildHand(B, sd, gloved) {
       if (Math.round(ang / step) % 3 === 0) pts.push(p);
     }
     pts.push(prev);
-    const fr = f.r * (gloved ? 1.06 : 1);
+    const fr = fr0 * (gloved ? 1.06 : 1);
     tube(B, mat, pts.map(toBind), (t) => fr * lerp(1, 0.8, t) * (1 + 0.06 * gauss(t - 0.42, 0.06) + 0.05 * gauss(t - 0.7, 0.05)), { N: 12, weight: () => ({ ['hand' + sd]: 1 }) });
   }
   // 엄지: 그립 윗면을 따라 헤드 쪽으로
   {
     const top = V(s * 0.62, -0.78, 0).normalize();
     const qt = top.clone().multiplyScalar(Math.cos(25 * RD)).add(V(0, 0, -Math.sin(25 * RD))).normalize();
-    const line = (tau) => g0.clone().addScaledVector(sH, tau).addScaledVector(qt, GRIP_R + 0.0098);
+    const line = (tau) => g0.clone().addScaledVector(sH, tau).addScaledVector(qt, GRIP_R + 0.0098 * HAND_K);
     const T0 = V(s * 0.022, 0.006, -0.008);
     const T1 = V(s * 0.04, 0.036, -0.018);
     const pts = [T0, T1, line(0.03), line(0.045), line(0.056)];
-    tube(B, mat, pts.map(toBind), (t) => (gloved ? 1.06 : 1) * lerp(0.0135, 0.0088, t) * (1 + 0.05 * gauss(t - 0.55, 0.08)), { N: 12, weight: () => ({ ['hand' + sd]: 1 }), roundStart: true });
+    tube(B, mat, pts.map(toBind), (t) => (gloved ? 1.06 : 1) * HAND_K * lerp(0.0135, 0.0088, t) * (1 + 0.05 * gauss(t - 0.55, 0.08)), { N: 12, weight: () => ({ ['hand' + sd]: 1 }), roundStart: true });
     if (!gloved) {
       // 엄지 손톱
       const tip = line(0.05);
       const nrm = qt.clone();
       const q = new THREE.Quaternion().setFromUnitVectors(Y, nrm.clone().applyQuaternion(H.Qb));
-      disc(B, 'nail', toBind(tip.clone().addScaledVector(nrm, 0.0082)), 0.0052, 0.0008, q, { ['hand' + sd]: 1 });
+      disc(B, 'nail', toBind(tip.clone().addScaledVector(nrm, 0.0082 * HAND_K)), 0.0052, 0.0008, q, { ['hand' + sd]: 1 });
     }
   }
   if (gloved) {
@@ -1428,10 +1457,10 @@ function makeMaterials(o) {
     skin: new THREE.MeshPhysicalMaterial(skinP),
     face: new THREE.MeshPhysicalMaterial({ ...skinP, map: T.face }),
     nail: new THREE.MeshStandardMaterial({ color: lighten(o.skin, 0.35), roughness: 0.3 }),
-    shirt: new THREE.MeshPhysicalMaterial({ color: pc, roughness: 0.78, sheen: 0.7, sheenColor: lighten(pc, 0.5), sheenRoughness: 0.45, normalMap: T.knit, normalScale: N2(0.55) }),
+    shirt: new THREE.MeshPhysicalMaterial({ color: pc, roughness: 0.92, sheen: 0.35, sheenColor: lighten(pc, 0.3), sheenRoughness: 0.75, normalMap: T.knit, normalScale: N2(0.7) }),
     shirtIn: new THREE.MeshStandardMaterial({ color: darken(pc, 0.55), roughness: 0.9 }),
-    collar: new THREE.MeshPhysicalMaterial({ color: pc, roughness: 0.78, sheen: 0.7, sheenColor: lighten(pc, 0.5), sheenRoughness: 0.45, normalMap: T.knit, normalScale: N2(0.4), side: THREE.DoubleSide }),
-    pants: new THREE.MeshPhysicalMaterial({ color: o.pants, roughness: 0.72, sheen: 0.45, sheenColor: lighten(o.pants, 0.35), sheenRoughness: 0.5, normalMap: T.twill, normalScale: N2(0.35) }),
+    collar: new THREE.MeshPhysicalMaterial({ color: pc, roughness: 0.92, sheen: 0.35, sheenColor: lighten(pc, 0.3), sheenRoughness: 0.75, normalMap: T.knit, normalScale: N2(0.4), side: THREE.DoubleSide }),
+    pants: new THREE.MeshPhysicalMaterial({ color: o.pants, roughness: 0.82, sheen: 0.4, sheenColor: lighten(o.pants, 0.3), sheenRoughness: 0.65, normalMap: T.twill, normalScale: N2(0.35) }),
     pantsIn: new THREE.MeshStandardMaterial({ color: darken(o.pants, 0.5), roughness: 0.9 }),
     belt: new THREE.MeshStandardMaterial({ color: '#17181b', roughness: 0.38, normalMap: T.leather, normalScale: N2(0.3) }),
     metal: new THREE.MeshStandardMaterial({ color: '#dfe2e6', roughness: 0.2, metalness: 1 }),
@@ -1775,7 +1804,7 @@ const KEYS_BASE = [
   { u: 0.0, lb: 9, hip: 0, sh: 0, tilt: 34, side: 12, ptilt: 20, pside: 0, hx: 0, hy: -0.052, hz: -0.075, clavL: [3, -2], clavR: [10, -6], hands: [0.03, 0.79, 0.33], shaft: [0, -1, 0.5], face: [1, 0, 0], poleL: [0.25, -0.2, -1], poleR: [-0.3, -0.45, -1], kneeL: [-0.08, 0, 1], kneeR: [0.08, 0, 1], look: 0, tHeel: 0, tYaw: 0, lHeel: 0, lRoll: 0 },
   { u: 0.33, lb: 4, hip: -13, sh: -40, tilt: 34, side: 10, ptilt: 20, pside: -2, hx: -0.012, hy: -0.052, hz: -0.072, clavL: [8, 0], clavR: [4, -2], hands: [-0.28, 0.94, 0.33], shaft: [-0.98, 0.08, 0.14], face: [0, 0.1, 1], poleL: [0.1, -0.6, -0.8], poleR: [-0.3, -1, -0.4], kneeL: [-0.2, 0, 1], kneeR: [0.05, 0, 1], look: 0, tHeel: 0, tYaw: 0, lHeel: 0, lRoll: 0 },
   { u: 0.67, lb: 5, hip: -32, sh: -74, tilt: 33, side: 6, ptilt: 19, pside: -4, hx: -0.015, hy: -0.053, hz: -0.07, clavL: [15, 4], clavR: [-2, 2], hands: [-0.4, 1.3, 0.17], shaft: [-0.25, 0.86, -0.44], face: [0.35, 0.45, 0.8], poleL: [0, -1, -0.3], poleR: [-0.1, -1, -0.1], kneeL: [-0.35, 0, 1], kneeR: [0.05, 0, 1], look: 0, tHeel: 0, tYaw: 0, lHeel: 2, lRoll: 0 },
-  { u: 1.0, lb: 10, rb: 92, hip: -45, sh: -92, tilt: 33, side: 2, ptilt: 19, pside: -5, hx: -0.012, hy: -0.054, hz: -0.068, clavL: [18, 8], clavR: [-6, 6], hands: [-0.24, 1.58, -0.02], shaft: [0.97, -0.15, -0.1], face: [-0.05, 0.7, 0.7], poleL: [0, -1, 0.2], poleR: [0.1, -1, 0.2], kneeL: [-0.45, 0, 1], kneeR: [0.05, 0, 1], look: 0, tHeel: 0, tYaw: 0, lHeel: 4, lRoll: 0 },
+  { u: 1.0, lb: 10, rb: 92, hip: -46, sh: -98, tilt: 33, side: 4, ptilt: 19, pside: -5, hx: -0.012, hy: -0.058, hz: -0.068, clavL: [22, 8], clavR: [-6, 6], hands: [-0.24, 1.58, -0.02], shaft: [0.97, -0.15, -0.1], face: [-0.05, 0.7, 0.7], poleL: [0, -1, 0.2], poleR: [0.1, -1, 0.2], kneeL: [-0.45, 0, 1], kneeR: [0.05, 0, 1], look: 0, tHeel: 0, tYaw: 0, lHeel: 4, lRoll: 0 },
   { u: 1.3, lb: 7, hip: -18, sh: -62, tilt: 34, side: 14, ptilt: 19, pside: -1, hx: 0.05, hy: -0.06, hz: -0.07, clavL: [12, 4], clavR: [2, -2], hands: [-0.36, 1.24, 0.14], shaft: [-0.08, 0.8, -0.6], face: [0.3, 0.35, 0.85], poleL: [0, -1, -0.2], poleR: [0, -1, -0.1], kneeL: [-0.15, 0, 1], kneeR: [0.2, 0, 1], look: 0, tHeel: 0, tYaw: 0, lHeel: 0, lRoll: 0 },
   { u: 1.6, lb: 5, hip: 12, sh: -28, tilt: 34, side: 20, ptilt: 18, pside: 3, hx: 0.08, hy: -0.058, hz: -0.07, clavL: [6, 0], clavR: [8, -4], hands: [-0.2, 0.94, 0.3], shaft: [-0.96, 0.2, 0.06], face: [0.1, 0.15, 1], poleL: [0.2, -0.5, -0.9], poleR: [0, -1, -0.3], kneeL: [0.05, 0, 1], kneeR: [0.35, 0, 1], look: 0, tHeel: 4, tYaw: 0, lHeel: 0, lRoll: 0 },
   { u: 2.0, lb: 3, hip: 40, sh: 14, tilt: 33, side: 23, ptilt: 17, pside: 8, hx: 0.1, hy: -0.044, hz: -0.065, clavL: [2, 0], clavR: [2, -1], hands: [0.09, 0.82, 0.35], shaft: [0, -1, 0.5], face: [1, 0, 0], poleL: [0.4, -0.2, -1], poleR: [-0.2, -0.6, -1], kneeL: [0.15, 0, 1], kneeR: [0.55, 0, 1], look: 0, tHeel: 14, tYaw: 4, lHeel: 0, lRoll: -3 },
@@ -1846,7 +1875,20 @@ export function makeGolfer(opts = {}) {
   buildLeg(B, 'R');
   buildShoe(B, 'L');
   buildShoe(B, 'R');
+  // 머리는 턱 아래를 축으로 조금 키우고 내립니다(목이 짧고 굵어 보이게, 멀리서도 얼굴이 읽히게).
+  const h0 = B.pos.length;
   buildHead(B);
+  {
+    const k = 1.07;
+    const px = 0;
+    const py = HC.y - 0.095;
+    const pz = HC.z;
+    for (let i = h0; i < B.pos.length; i += 3) {
+      B.pos[i] = px + (B.pos[i] - px) * k;
+      B.pos[i + 1] = py + (B.pos[i + 1] - py) * k - 0.018;
+      B.pos[i + 2] = pz + (B.pos[i + 2] - pz) * k;
+    }
+  }
   const { geo, mats } = B.build();
   const { M, own } = makeMaterials(o);
   const skin = new THREE.SkinnedMesh(geo, mats.map((m) => M[m]));
@@ -2172,7 +2214,7 @@ export function makeGolfer(opts = {}) {
     const upRef = V(0, 1, 0).applyQuaternion(cq).lerp(Y, 0.55).normalize();
     const ax = V().crossVectors(g, upRef);
     let f = g.clone();
-    if (ax.lengthSq() > 1e-6) f.applyAxisAngle(ax.normalize(), 20 * RD * smooth(0, -0.9, g.y));
+    if (ax.lengthSq() > 1e-6) f.applyAxisAngle(ax.normalize(), 34 * RD * smooth(0, -0.9, g.y));
     if (extraYaw) f.applyAxisAngle(Y, extraYaw * RD);
     if (extraPitch) f.applyAxisAngle(V().crossVectors(f, Y).normalize(), extraPitch * RD);
     let qHead = aimQ(Z, Y, f, upRef);
