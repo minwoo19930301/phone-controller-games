@@ -7,7 +7,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test": "node scripts/test-rooms.js && node --test scripts/test-golf-turns.mjs scripts/test-golf-putting.mjs scripts/test-golf-swing-speed.mjs scripts/test-golf-follow-through.mjs scripts/test-pingpong-controls.mjs scripts/test-pingpong-steering.mjs scripts/test-rhythm-late.mjs"
+    "build:selector": "node scripts/build-selector.js",
+    "test": "node scripts/test-rooms.js && node --test scripts/test-selector.cjs scripts/test-golf-turns.mjs scripts/test-golf-putting.mjs scripts/test-golf-swing-speed.mjs scripts/test-golf-follow-through.mjs scripts/test-pingpong-controls.mjs scripts/test-pingpong-steering.mjs scripts/test-rhythm-late.mjs"
   },
   "dependencies": {
     "@fontsource/anton": "^5.3.0",

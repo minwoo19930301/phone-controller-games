@@ -203,6 +203,15 @@ app.get('/api/clip/:id', (req, res) => {
 // 방 코드는 헷갈리는 글자(0/O, 1/I)를 뺀 4글자입니다.
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const rooms = new Map();
+// Anonymous aggregate only: usable by the static selector on a different origin.
+// A disconnected display is not counted, even while its room is reserved.
+app.get('/api/load', (req, res) => {
+  let activeRooms = 0;
+  for (const room of rooms.values()) if (room.displayId) activeRooms++;
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Cache-Control', 'no-store');
+  res.json({ activeRooms });
+});
 
 function newCode() {
   for (;;) {

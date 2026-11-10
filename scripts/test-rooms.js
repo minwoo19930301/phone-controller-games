@@ -17,6 +17,11 @@ async function main() {
   const sockets = [];
   const mk = () => { const s = client(url, { transports: ['websocket'], forceNew: true }); sockets.push(s); return s; };
 
+  const load0 = await fetch(url + '/api/load', { headers: { Origin: 'https://example.org' } });
+  assert.strictEqual(load0.headers.get('access-control-allow-origin'), '*');
+  assert.strictEqual(load0.headers.get('cache-control'), 'no-store');
+  assert.deepStrictEqual(await load0.json(), { activeRooms: 0 });
+
   // 기존 퍼팅 주소는 골프 입구로 안내하고, 챌린지는 골프 안에서 계속 실행됩니다.
   for (const oldPath of ['/putting', '/putting/', '/putting/index.html']) {
     const old = await fetch(url + oldPath, { redirect: 'manual' });
@@ -40,11 +45,13 @@ async function main() {
   const roomB = await once(dB, 'room');
   assert.notStrictEqual(roomA.code, roomB.code);
   assert.match(roomA.code, /^[A-HJ-NP-Z2-9]{4}$/);
+  assert.deepStrictEqual(await (await fetch(url + '/api/load')).json(), { activeRooms: 2 });
 
   // QR 엔드포인트
   const qr = await fetch(`${url}/api/qr?room=${roomA.code}`).then((r) => r.json());
   assert.ok(qr.qr.startsWith('data:image/png'));
   assert.ok(qr.url.endsWith(`/play/?room=${roomA.code}`));
+  assert.strictEqual(new URL(qr.url).origin, url);
   assert.strictEqual((await fetch(`${url}/api/qr?room=ZZZZ`)).status, 404);
 
   // 4명까지 들어오고 5번째는 거절

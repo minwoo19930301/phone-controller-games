@@ -1,0 +1,5 @@
+{
+  "name": "phone-controller-game-selector",
+  "compatibility_date": "2026-11-10",
+  "assets": { "directory": "./dist-selector" }
+}
