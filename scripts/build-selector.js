@@ -4,8 +4,8 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 const output = path.join(root, 'dist-selector');
-const defaultServer = 'https://phone-controller-games.onrender.com';
-const configured = process.env.RENDER_GAME_SERVERS || defaultServer;
+const defaultServers = 'https://phone-controller-games.onrender.com,https://phone-controller-games-2.onrender.com';
+const configured = process.env.RENDER_GAME_SERVERS || defaultServers;
 const servers = [...new Set(configured.split(',').map((s) => {
   const value = s.trim();
   let url;

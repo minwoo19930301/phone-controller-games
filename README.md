@@ -174,10 +174,10 @@ main 에 푸시하면 자동으로 다시 배포됩니다(Auto-Deploy: On Commit
 `wrangler.jsonc`는 이 결과를 Cloudflare Workers Static Assets로 제공하도록 설정합니다.
 Workers Builds에서 빌드 명령은 `npm run build:selector`, 배포 명령은
 `npx wrangler deploy`입니다. 게임 화면과 실시간 서버는 Render에서 계속 실행됩니다.
-기본 설정은 위의 기존 Render 서버 **한 대**입니다.
+기본 설정은 `phone-controller-games`와 `phone-controller-games-2` 무료 Render 서버 두 대입니다.
 
-추가 Render 서버를 실제로 배포한 후 Workers Builds의 빌드 환경 변수
-`RENDER_GAME_SERVERS`에 HTTPS 서버 주소를 쉼표로 구분해 지정하고 다시 배포합니다.
+서버 목록을 변경하려면 Workers Builds의 빌드 환경 변수 `RENDER_GAME_SERVERS`에
+HTTPS 서버 주소를 쉼표로 구분해 지정하고 다시 배포합니다.
 예: `https://phone-controller-games.onrender.com,https://another-server.onrender.com`
 주소에는 경로나 쿼리를 넣지 않습니다. 설정을 바꾼 뒤에는 새 빌드가 필요합니다.
 
