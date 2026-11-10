@@ -178,7 +178,9 @@ Pages 프로젝트는 직접 업로드 방식이라 Git 푸시만으로 자동 �
 선택창 변경 후 `npm run build:selector`를 실행한 다음 `wrangler pages deploy
 dist-selector --project-name phone-controller-games --branch main`으로 배포합니다.
 기존 Workers 주소도 갱신할 때는 `wrangler deploy`를 실행합니다.
-기본 설정은 `phone-controller-games`와 `phone-controller-games-2` 무료 Render 서버 두 대입니다.
+기본 설정은 `phone-controller-games`, `phone-controller-games-2`,
+`phone-controller-games-replica` 무료 Render 서버 세 대입니다. 추가 워크스페이스에
+서버 하나를 만들 때는 `render-replica.yaml` Blueprint를 사용할 수 있습니다.
 
 서버 목록을 변경하려면 빌드 환경 변수 `RENDER_GAME_SERVERS`에 HTTPS 서버 주소를
 쉼표로 구분해 지정하고 선택창을 다시 빌드·배포합니다.
