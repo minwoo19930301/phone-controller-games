@@ -1,0 +1,13 @@
+# One independent game server for an additional Render workspace.
+services:
+  - type: web
+    name: phone-controller-games-replica
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
