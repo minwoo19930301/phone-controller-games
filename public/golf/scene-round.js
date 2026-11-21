@@ -5,7 +5,7 @@ import { CLUBS as BAG } from './clubs.js';
 import { makeGolfBag, makeGolfCart, makeHoleSign, makeTeePeg, TEE_PEG_H } from './tee-props.js';
 // 코스 품질: 기본은 PC 에서 high(지형 결·그림자·나무 밀도 최대, 환경 조명), 느린 기기는 medium. ?q=low|medium|high 로 고정할 수 있습니다.
 const QS=new URLSearchParams(location.search);
-const LEVEL=['high','medium','low'].includes(QS.get('q'))?QS.get('q'):((navigator.hardwareConcurrency||4)>=8&&!/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)?'high':'medium');
+const LEVEL=['high','medium','low'].includes(QS.get('q'))?QS.get('q'):((navigator.hardwareConcurrency||4)>=8&&(navigator.deviceMemory===undefined||navigator.deviceMemory>=8)&&!/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)?'high':'medium');
 export const CLUBS = Object.fromEntries(BAG.map(c => [c.id.toLowerCase(), {...c, len:c.lengthM}]));
 const RD=Math.PI/180;
 const V=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);

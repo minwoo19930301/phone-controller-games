@@ -283,15 +283,15 @@ function buildStringInstrument(kind) {
   K.add(M.back, ribStrip(ol, -zr, zr));
   // 가장자리 테두리와 퍼플링(검은 줄)
   const loop = [...ol, ...ol.slice(1, -1).reverse().map((p) => V2(-p.x, p.y))];
-  K.add(M.varnish, tube(loop.map((p) => V3(p.x * 1.025, p.y * 1.015, zt + 0.0006)), 0.0019, 6, true, 2));
-  K.add(M.varnish, tube(loop.map((p) => V3(p.x * 1.025, p.y * 1.015, -zt - 0.0006)), 0.0019, 6, true, 2));
-  K.add(M.dark, tube(loop.map((p) => V3(p.x * 0.955, p.y * 0.972, zt + 0.0016)), 0.0007, 4, true, 2));
+  K.add(M.back, tube(loop.map((p) => V3(p.x * 1.025, p.y * 1.015, zt + 0.0006)), 0.0019, 4, true, 1));
+  K.add(M.back, tube(loop.map((p) => V3(p.x * 1.025, p.y * 1.015, -zt - 0.0006)), 0.0019, 4, true, 1));
+  K.add(M.ebony, tube(loop.map((p) => V3(p.x * 0.955, p.y * 0.972, zt + 0.0016)), 0.0007, 3, true, 1));
   // f홀: S자로 흐르는 얇은 구멍과 양 끝 동그란 눈
   for (const sd of [-1, 1]) {
     const pts = [[0.043, 0.03], [0.036, 0.022], [0.0345, 0.006], [0.0385, -0.012], [0.043, -0.03], [0.041, -0.045], [0.0335, -0.05]].map(([x, y]) => V3(sd * x, y, archAt(ol, x, y, zt, archH) + 0.0008));
     const f = tube(pts, 0.0026, 6, false, 6);
-    K.add(M.dark, f, { s: [1, 1, 1] });
-    for (const [x, y, r] of [[0.0445, 0.031, 0.0034], [0.0322, -0.0505, 0.0043]]) K.add(M.dark, sph(r, 10, 8), { p: [sd * x, y, archAt(ol, x, y, zt, archH) + 0.0004], s: [1, 1, 0.3] });
+    K.add(M.ebony, f);
+    for (const [x, y, r] of [[0.0445, 0.031, 0.0034], [0.0322, -0.0505, 0.0043]]) K.add(M.ebony, sph(r, 8, 6), { p: [sd * x, y, archAt(ol, x, y, zt, archH) + 0.0004], s: [1, 1, 0.3] });
   }
   // 브리지: 단풍나무 얇은 판(가운데가 높은 아치)
   const zb = archAt(ol, 0, -0.015, zt, archH) - 0.0005, hb = c.bridge;
@@ -323,7 +323,7 @@ function buildStringInstrument(kind) {
     g.translate(0, yNut - len / 2, 0);
     g.computeVertexNormals();
     K.add(M.ebony, g);
-    K.add(M.ivory, box(0.0245, 0.004, 0.0045), { p: [0, yNut + 0.002, zNut + 0.0005] }); // 너트
+    K.add(M.maple, box(0.0245, 0.004, 0.0045), { p: [0, yNut + 0.002, zNut + 0.0005] }); // 너트
   }
   // 줄감개집: 뒤로 살짝 젖혀진 홈통
   const pegY0 = yNut + 0.006, pegY1 = yNut + 0.07;
@@ -354,7 +354,7 @@ function buildStringInstrument(kind) {
     s.moveTo(-0.0195, 0); s.quadraticCurveTo(0, 0.008, 0.0195, 0); s.lineTo(0.0085, -0.105); s.quadraticCurveTo(0, -0.112, -0.0085, -0.105); s.closePath();
     const g = new THREE.ExtrudeGeometry(s, { depth: 0.005, bevelEnabled: true, bevelThickness: 0.0018, bevelSize: 0.0018, bevelSegments: 2, curveSegments: 6 });
     K.add(M.ebony, g, { p: [0, -0.082, zb + hb * 0.5], r: [-0.06, 0, 0] });
-    K.add(M.gut, rod([0, -0.187, zb + hb * 0.5 - 0.004], [0, -0.196, zt * 0.2], 0.0012));
+    K.add(M.ebony, rod([0, -0.187, zb + hb * 0.5 - 0.004], [0, -0.196, zt * 0.2], 0.0012, 0.0012, 5));
     K.add(M.ebony, cyl(0.006, 0.004, 0.012, 10), { p: [0, -0.197, 0] });
     if (!c.gears) for (let i = 0; i < 4; i++) K.add(M.steel, cyl(0.0016, 0.0016, 0.007, 6), { p: [(i - 1.5) * 0.0088, -0.09, zb + hb * 0.5 + 0.0085], r: [Math.PI / 2, 0, 0] });
   }
@@ -370,11 +370,11 @@ function buildStringInstrument(kind) {
   for (let i = 0; i < 4; i++) {
     const u = (i - 1.5) / 1.5, xN = u * 0.0085, xB = u * 0.017, crown = (1 - u * u) * 0.0022;
     const r = lerp(0.00085, 0.00045, i / 3) * (c.scale > 2 ? 0.75 : 1);
-    K.add(i === 0 ? M.wire : M.steel, rod([xN, yNut + 0.003, zNut + 0.0036], [xB, -0.015, zBridgeTop + crown - 0.0005], r, r, 5));
+    K.add(M.steel, rod([xN, yNut + 0.003, zNut + 0.0036], [xB, -0.015, zBridgeTop + crown - 0.0005], r, r, 5));
     K.add(M.steel, rod([xB, -0.015, zBridgeTop + crown - 0.0005], [u * 0.013, -0.084, zb + hb * 0.5 + 0.007], r, r, 5));
     K.add(M.steel, rod([xN, yNut + 0.003, zNut + 0.0036], [(i % 2 ? 1 : -1) * 0.004, pegY0 + 0.007 + i * 0.0165, zNut - 0.011 - i * 0.002], r, r, 5));
   }
-  const g = K.build();
+  const g = K.build({ shadow: c.scale > 2 }); // 손에 든 바이올린·비올라는 그림자를 따로 드리우지 않습니다(몸 그림자에 묻힘)
   g.scale.setScalar(c.scale);
   g.userData.contact = V3(0, 0.014, zBridgeTop + 0.002); // 활이 닿는 자리(지판 끝과 브리지 사이)
   g.userData.neck = V3(0, 0.24, zNut - 0.012);
@@ -446,7 +446,7 @@ function buildTrumpet() {
   K.add(M.brass, torus(0.011, 0.0018, 6, 16, Math.PI * 1.3), { p: [xl + 0.004, y1 + 0.011, 0.045], r: [0, Math.PI / 2, 0.4] });
   K.add(M.brass, torus(0.01, 0.0018, 6, 16), { p: [0.02, -0.006, -0.1], r: [0, Math.PI / 2, 0] });
   K.add(M.silver, box(0.004, 0.004, 0.022), { p: [xl, (y1 + y2) / 2 - 0.052, 0.14], r: [0.5, 0, 0] });
-  const g = K.build();
+  const g = K.build({ shadow: false });
   return g;
 }
 function buildTrombone() {
@@ -468,7 +468,7 @@ function buildTrombone() {
   K.add(M.brass, rod([0.03, y2 + 0.03, -0.44], [bx, by, -0.3], 0.0035)); // 벨 버팀대
   K.add(M.brass, rod([0.0, y1, -0.15], [bx, by, -0.16], 0.0035));
   K.add(M.brass, sph(0.012, 10, 8), { p: [(0.045 + bx) / 2, (y2 + 0.05 + by) / 2, -0.56 - Math.hypot((0.045 - bx) / 2, (y2 + 0.05 - by) / 2) - 0.012] }); // 균형추
-  g.add(K.build());
+  g.add(K.build({ shadow: false }));
   // 움직이는 부분: 바깥 슬라이드(두 관 + 끝 U자 + 손잡이 버팀대)
   const S = new Kit();
   S.add(M.brass, cyl(rT, rT, 0.62, 12), { p: [0, y1, 0.3], r: [Math.PI / 2, 0, 0] });
@@ -479,7 +479,7 @@ function buildTrombone() {
   S.add(M.silver, cyl(rT + 0.0015, rT + 0.0015, 0.035, 12), { p: [0, y1, 0.005], r: [Math.PI / 2, 0, 0] });
   S.add(M.silver, cyl(rT + 0.0015, rT + 0.0015, 0.035, 12), { p: [0, y2, 0.005], r: [Math.PI / 2, 0, 0] });
   S.add(M.rubber, sph(0.006, 8, 6), { p: [0, (y1 + y2) / 2, 0.66] });
-  const slide = S.build();
+  const slide = S.build({ shadow: false });
   g.add(slide);
   g.userData.parts = { slide: g.children.indexOf(slide) };
   return g;
@@ -529,7 +529,7 @@ function buildHorn() {
   K.add(M.brass, torus(0.011, 0.0018, 6, 14, Math.PI), { p: [-0.168, -0.01, -0.004], r: [0, Math.PI / 2, 0] }); // 새끼손가락 걸이
   // 감긴 관을 묶는 버팀대
   for (const a of [20, 110, 200, 290]) K.add(M.brass, rod([Math.cos(a * R) * 0.165, Math.sin(a * R) * 0.165, -0.006], [Math.cos(a * R) * 0.108, Math.sin(a * R) * 0.108, 0.018], 0.0022));
-  const g = K.build();
+  const g = K.build({ shadow: false });
   return g;
 }
 function buildFlute() {
@@ -553,7 +553,7 @@ function buildFlute() {
   K.add(M.silver, cyl(0.0017, 0.0017, 0.085, 6), { p: [-0.245, 0.0075, 0.013], r: [0, 0, Math.PI / 2] });
   for (const x of [0.105, 0.0, -0.09, -0.185]) K.add(M.silver, sph(0.0028, 6, 5), { p: [x, 0.0075, 0.0125] });
   K.add(M.silver, sph(1, 10, 6), { p: [0.11, -0.004, 0.0125], s: [0.012, 0.0028, 0.006] }); // 엄지 키
-  const g = K.build();
+  const g = K.build({ shadow: false });
   return g;
 }
 
@@ -951,8 +951,8 @@ function buildChair() {
   for (const sx of [-1, 1]) {
     K.add(M.frame, tube([[sx * 0.2, 0.01, 0.19], [sx * 0.2, 0.42, 0.185], [sx * 0.2, 0.44, 0.1], [sx * 0.2, 0.44, -0.16]], 0.011, 8));
     K.add(M.frame, tube([[sx * 0.2, 0.01, -0.21], [sx * 0.2, 0.42, -0.2], [sx * 0.2, 0.62, -0.215], [sx * 0.2, 0.92, -0.25]], 0.011, 8));
-    K.add(M.rubber, cyl(0.014, 0.014, 0.012, 8), { p: [sx * 0.2, 0.006, 0.19] });
-    K.add(M.rubber, cyl(0.014, 0.014, 0.012, 8), { p: [sx * 0.2, 0.006, -0.21] });
+    K.add(M.frame, cyl(0.014, 0.014, 0.012, 8), { p: [sx * 0.2, 0.006, 0.19] });
+    K.add(M.frame, cyl(0.014, 0.014, 0.012, 8), { p: [sx * 0.2, 0.006, -0.21] });
   }
   K.add(M.frame, rod([-0.2, 0.2, 0.188], [0.2, 0.2, 0.188], 0.008));
   K.add(M.frame, rod([-0.2, 0.2, -0.205], [0.2, 0.2, -0.205], 0.008));
