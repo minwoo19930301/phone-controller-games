@@ -109,6 +109,31 @@ const GAMES = {
     fromController: ['photo', 'draw', 'sticker', 'undo', 'clear', 'nav', 'pick', 'start_game'],
     fromDisplay: ['game_state', 'countdown', 'shot', 'result', 'picker'],
     volatile: []
+  },
+  // 볼링: 폰을 뒤로 뺐다가 앞으로 밀어 굴립니다. 차례제 10프레임(짧은 경기는 5프레임).
+  bowling: {
+    title: '볼링',
+    play: '/play/bowling/',
+    fromController: ['aim', 'throw', 'calibrate', 'start_game'],
+    fromDisplay: ['game_state', 'turn', 'result', 'cue'],
+    volatile: ['aim']
+  },
+  // 양궁: 폰을 활처럼 세워 겨누고, 화면을 당겼다 놓아 쏩니다. 바람과 흔들림을 읽는 차례제.
+  archery: {
+    title: '양궁',
+    play: '/play/archery/',
+    fromController: ['aim', 'draw', 'release', 'calibrate', 'start_game'],
+    fromDisplay: ['game_state', 'turn', 'result', 'cue'],
+    volatile: ['aim', 'draw']
+  },
+  // 줄다리기: 두 편으로 나눠 구령에 맞춰 폰을 당깁니다. 8명까지.
+  tugofwar: {
+    title: '줄다리기',
+    play: '/play/tugofwar/',
+    max: 8,
+    fromController: ['pull', 'team', 'calibrate', 'start_game'],
+    fromDisplay: ['game_state', 'cue', 'result', 'beat'],
+    volatile: []
   }
 };
 

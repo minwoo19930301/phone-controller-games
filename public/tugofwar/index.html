@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#7fb6ea">
+<link rel="icon" href="data:,">
+<title>줄다리기 · 청백 대항전</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
+</script>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="vig"></div>
+<div id="flash" class="flash"></div>
+
+<!-- 경기 중 HUD -->
+<div id="hud" class="hud hidden">
+  <div class="top">
+    <div class="tm" id="tmL" data-team="blue"><b id="tmLName">청팀</b><span class="pips" id="pipsL"></span></div>
+    <div class="clock"><b id="timer">60</b><small id="roundTag">1 / 3판</small></div>
+    <div class="tm r" id="tmR" data-team="white"><span class="pips" id="pipsR"></span><b id="tmRName">백팀</b></div>
+  </div>
+  <div class="ropebar" id="ropebar">
+    <div class="rb-end l" id="rbL"></div>
+    <div class="rb-track">
+      <i class="rb-fillL" id="rbFillL"></i><i class="rb-fillR" id="rbFillR"></i>
+      <i class="rb-mid"></i>
+      <div class="rb-flag" id="rbFlag"><svg viewBox="0 0 24 30"><path d="M4 1v28" /><path d="M4 3h16l-4 6 4 6H4z" /></svg></div>
+    </div>
+    <div class="rb-end r" id="rbR"></div>
+  </div>
+  <div class="panel" id="panL" data-side="left">
+    <div class="ph"><b id="panLName">청팀</b><span class="sub" id="panLSub"></span></div>
+    <div class="meters">
+      <div class="meter force"><span>힘</span><div><i id="forceL"></i></div></div>
+      <div class="meter stam"><span>체력</span><div><i id="stamL"></i></div></div>
+    </div>
+    <div class="chips" id="chipsL"></div>
+  </div>
+  <div class="panel" id="panR" data-side="right">
+    <div class="ph"><b id="panRName">백팀</b><span class="sub" id="panRSub"></span></div>
+    <div class="meters">
+      <div class="meter force"><span>힘</span><div><i id="forceR"></i></div></div>
+      <div class="meter stam"><span>체력</span><div><i id="stamR"></i></div></div>
+    </div>
+    <div class="chips" id="chipsR"></div>
+  </div>
+  <div class="beat" id="beat">
+    <div class="bd" id="bdOne"><b>하나</b></div>
+    <div class="bd" id="bdTwo"><b>둘</b></div>
+    <div class="bd big" id="bdPull"><i class="ring" id="bdRing"></i><b>영차!</b></div>
+    <div class="bd rest" id="bdRest"><b>쉼</b></div>
+    <div class="brace-tag hidden" id="braceTag"></div>
+  </div>
+  <div id="callouts" class="callouts"></div>
+</div>
+<div id="floaters" class="floaters"></div>
+<div id="intro" class="intro hidden"><div class="intro-card"><small id="introTop"></small><b id="introBig"></b><span id="introSub"></span></div></div>
+
+<div id="join" class="join hidden">
+  <img id="qrMini" alt="">
+  <div><span class="join-k">참가</span><b id="codeMini">----</b></div>
+</div>
+
+<!-- 대기실 -->
+<section id="lobby" class="screen">
+  <div class="lobby">
+    <header class="lb-head">
+      <div class="lb-title">
+        <div class="eyebrow">1~8인 · 두 팀 · 3판 2선승</div>
+        <h1 class="wordmark">줄다리기</h1>
+        <p class="lede">구령에 맞춰 폰을 두 손으로 가슴까지 확 당겨요.<br>다 같이 박자가 맞으면 <b>한 몸!</b></p>
+      </div>
+      <div class="teams" id="teams"></div>
+      <div class="qr-card">
+        <img id="qr" alt="참가 QR">
+        <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
+        <div class="qr-url" id="url"></div>
+        <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 동작 센서가 꺼져 있어요. https 주소에서 열어 주세요.</div>
+      </div>
+    </header>
+    <footer class="lb-foot">
+      <div class="setbox" id="setBox"></div>
+      <div class="tutbox" id="tutBox"></div>
+      <div class="hint"><span>폰에서 모두 <b>준비</b>를 누르면 시작해요</span><span class="dot"></span><kbd>D</kbd><span>난이도</span></div>
+    </footer>
+  </div>
+  <div class="msg" id="msg"></div>
+</section>
+
+<!-- 결과 -->
+<section id="over" class="screen over-screen hidden">
+  <div class="over">
+    <div class="ov-top">
+      <div class="eyebrow"><span id="ovEyebrow">최종 결과</span><i class="diff" id="diffOver" data-d="normal">보통</i></div>
+      <h1 class="wordmark sm" id="ovTitle">청팀 우승!</h1>
+      <div class="ov-score" id="ovScore"></div>
+    </div>
+    <div class="ov-cards" id="ovCards"></div>
+    <div class="ov-table" id="ovTable"></div>
+    <div class="over-foot">
+      <div class="setbox" id="setBoxOver"></div>
+      <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 새 경기</span><span class="dot"></span><kbd>D</kbd><span>난이도</span></div>
+    </div>
+    <div class="tutbox" id="tutBoxOver"></div>
+  </div>
+</section>
+
+<section id="replaced" class="screen hidden">
+  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+</section>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>

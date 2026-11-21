@@ -100,6 +100,34 @@
 2. 폰을 퍼터처럼 아래로 쥐고 **어드레스**를 누릅니다.
 3. 시계추처럼 뒤로 뺐다가 밀면, 미는 속도가 공 속도가 됩니다.
 
+## 볼링 (BOWL NIGHT)
+
+`/bowling/` · 1~4명이 차례로 굴립니다. 기본 5프레임, 설정에서 10프레임으로 바꿀 수 있습니다.
+
+- 폰 화면을 좌우로 밀어 서는 자리를 정한 뒤, 폰을 공처럼 쥐고 뒤로 뺐다가 앞으로 휘둘러 굴립니다. 손목을 비틀면 훅이 걸립니다.
+- 점수는 실제 텐핀 규칙(스트라이크·스페어·마지막 프레임 보너스)을 따릅니다. 쉬움은 방향 보정과 안내선, 범퍼 옵션이 있습니다.
+- 핀은 직접 만든 가벼운 물리(`public/bowling/physics.mjs`)로 쓰러집니다. 포켓에 맞으면 스트라이크, 한가운데 직구는 스플릿이 잘 납니다.
+- 시험: 큰 화면 `?bots=N&autostart&fast=4`, 폰 `&debug`(센서 없이 슬라이더로 시험 투구). `node --test scripts/test-bowling-scoring.mjs scripts/test-bowling-physics.mjs`
+
+## 양궁
+
+`/archery/` · 1~4명이 한 발씩 돌아가며 쏩니다. 3엔드(엔드마다 3발) 기본, 5엔드 선택.
+
+- 폰을 활처럼 세워 쥐면 폰 방향이 조준경이 됩니다. 화면의 시위를 아래로 끌어 당겼다가 손을 떼면 발사입니다.
+- 끝까지 당긴 채 오래 버티면 팔이 떨리고 폰에 심박 진동이 옵니다. 심박 직후 숨 고르기 순간이 가장 안정적입니다.
+- 엔드마다 바람이 바뀝니다. 풍향계와 깃발을 보고 오조준합니다. 쉬움 30m(예상 낙점 표시) / 보통 50m / 어려움 70m(돌풍).
+- 총점으로 겨루고, 같으면 X 개수 → 10점 개수 순입니다.
+- 시험: 큰 화면 `?bots=N&autostart&speed=N`, 센서 없는 PC 는 조준 판과 시위를 끌어서 쏩니다. `node --test scripts/test-archery.mjs`
+
+## 줄다리기
+
+`/tugofwar/` · 1~8명이 청팀·백팀으로 나뉘어 3판 2선승으로 겨룹니다. 빈자리는 CPU 가 채워서 혼자서도 할 수 있습니다.
+
+- 폰을 두 손으로 쥐고 "하나, 둘, 영차!" 구령의 **영차** 박에 가슴 쪽으로 확 당깁니다.
+- 박에 맞을수록(PERFECT/GOOD) 힘이 세고, 같은 편이 같은 순간에 당기면 **한 몸** 보너스가 붙습니다. 박자를 무시하고 마구 당기면 체력만 빠집니다.
+- 판이 끝나기 10초 전부터는 두 배 빠른 막판 스퍼트입니다. 선에 몰린 팀은 "버티기" 신호에 폰을 가만히 두면 상대 힘을 반으로 줄입니다.
+- 시험: 큰 화면 `?bots=N&autostart`(`&fast=8&dur=20` 로 빨리 감기), 폰은 센서가 없으면 "당겨!" 버튼. `node --test scripts/test-tugofwar.mjs`
+
 ### 공통 시험 방법
 
 큰 화면 주소에 `?bots=N` 을 붙이면 폰 없이 봇이 자리를 채웁니다. 종목마다 키보드 시험 키가 대기실 아래에 적혀 있습니다.
@@ -138,6 +166,11 @@
 | `public/tennis/`, `public/play/tennis/` | 테니스. 선수 자동 이동, 포·백핸드, 탑스핀·슬라이스, 단식·복식 |
 | `public/airhockey/`, `public/play/airhockey/` | 에어하키. 퍽 물리, 터치 말렛 |
 | `public/putting/`, `public/play/putting/` | 골프의 퍼팅 챌린지 모드. 경사 그린 3홀과 진자 스트로크 |
+| `public/orchestra/`, `public/play/orchestra/` | 오케스트라. `hall.js` 공연장·단원·카메라, `props.js` 악기·의자·보면대 모형(재질별로 합친 메시를 복제), `parts.js` 악기별 악보 |
+| `public/golf/tee-props.js` | 골프 경기 화면의 티 소품(골프백·카트·홀 안내판·티 꽂이). 경기 화면 코스 품질은 `?q=low|medium|high` 로 고정 가능 |
+| `public/bowling/`, `public/play/bowling/` | 볼링. `scoring.mjs` 점수, `physics.mjs` 공·핀 물리, 레인 반사 |
+| `public/archery/`, `public/play/archery/` | 양궁. `scoring.mjs` 과녁 점수, `ballistics.mjs` 화살 탄도·바람, 1인칭 활과 과녁 확대 창 |
+| `public/tugofwar/`, `public/play/tugofwar/` | 줄다리기. `sim.mjs` 구령·판정·힘·체력 계산, 운동회 장면 |
 | `scripts/test-rooms.js` | 폰 없이 방·자리·중계 규칙 검사 |
 
 종목을 더할 때는 `server.js` 의 `GAMES` 에 오가는 이벤트 이름을 한 줄 추가하고 `public/<종목>/` 을 만듭니다.

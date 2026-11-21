@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<link rel="icon" href="data:,">
+<title>줄다리기 컨트롤러</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<style>
+  :root { --c: #4a86ff; --team: #2f6fe4; --teamfg: #fff; --bg: #0b1020; --fg: #f3f5fb; --dim: #9aa6bf; --line: rgba(255,255,255,.14); --gold: #ffd23a; }
+  body[data-team="white"] { --c: #ff6b5a; --team: #fff1d6; --teamfg: #b3241d; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; overscroll-behavior: none;
+    font-family: "Pretendard Variable", Pretendard, -apple-system, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  body { display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top) + 10px) 16px calc(env(safe-area-inset-bottom) + 14px);
+    background: radial-gradient(120% 55% at 50% 0%, color-mix(in srgb, var(--team) 38%, transparent), transparent 70%), var(--bg); }
+  header { position: relative; z-index: 2; display: flex; align-items: center; gap: 8px; height: 44px; }
+  .me { font-family: Anton, Impact, sans-serif; font-size: 24px; padding: 2px 13px; border-radius: 999px; background: var(--slot, #fff); color: #0b0f17; }
+  .team { padding: 4px 13px; border-radius: 999px; background: var(--team); color: var(--teamfg); font-weight: 900; font-size: 16px; border: 2px solid rgba(255,255,255,.7); }
+  .room { flex: 1; color: var(--dim); font-size: 12px; letter-spacing: .1em; text-align: right; }
+  .hidden { display: none !important; }
+  .banner { position: relative; z-index: 2; margin: 6px 0 0; padding: 9px 12px; border-radius: 12px; background: rgba(255,90,95,.14); color: #ffb3b5; font-size: 13px; text-align: center; }
+  main { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  .view.on { display: flex; }
+  .center { align-items: center; justify-content: center; text-align: center; gap: 14px; }
+  h1 { margin: 0; font-size: 28px; line-height: 1.25; letter-spacing: -.02em; }
+  p { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.55; white-space: pre-line; }
+  .note { font-size: 13px; color: #ffcf8a; }
+  button { font: inherit; border: 0; cursor: pointer; color: inherit; }
+  button:disabled { opacity: .55; }
+  .primary { width: 100%; padding: 19px; border-radius: 18px; background: var(--c); color: #0b0f17; font-size: 21px; font-weight: 800; box-shadow: 0 0 30px color-mix(in srgb, var(--c) 35%, transparent); }
+  .primary.waiting { background: rgba(255,255,255,.1); color: var(--fg); box-shadow: none; border: 1.5px solid var(--c); }
+  .ghost { width: 100%; padding: 14px; border-radius: 16px; background: transparent; color: var(--fg); border: 1.5px solid var(--line); font-size: 16px; font-weight: 700; }
+  .art { width: 140px; height: 150px; overflow: visible; }
+  .big { font-size: 38px; font-weight: 900; letter-spacing: -.03em; }
+  .chips { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .chip { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); font-size: 14px; color: var(--dim); }
+  .chip b { color: var(--fg); font-size: 16px; margin-left: 4px; }
+  .chip.ok b { color: #7ef0a0; }
+  .setbox { width: 100%; }
+  .wait { gap: 10px; overflow-y: auto; justify-content: flex-start; padding-top: 6px; }
+  .wait > * { flex: none; }
+  .wait .big { margin-top: auto; }
+  .wait #tutLink { margin-bottom: auto; }
+  .dtag { align-self: center; margin-left: 8px; padding: 2px 8px; border-radius: 999px; font: 800 11px/1.4 "Pretendard Variable", Pretendard, sans-serif; font-style: normal; color: #0b0f17; background: #8fd8ff; }
+  .dtag[data-d="easy"] { background: #5ee07a; }
+  .dtag[data-d="hard"] { background: #ff7a59; }
+
+  /* 팀 고르기 */
+  .picker { width: 100%; display: grid; grid-template-columns: 1fr 0.8fr 1fr; gap: 8px; }
+  .pk { padding: 12px 6px; border-radius: 16px; background: rgba(255,255,255,.07); border: 2px solid var(--line); font-size: 17px; font-weight: 900; display: flex; flex-direction: column; gap: 2px; align-items: center; }
+  .pk small { font-size: 12px; font-weight: 700; color: var(--dim); }
+  .pk[data-t="blue"] { border-color: rgba(47,111,228,.6); }
+  .pk[data-t="white"] { border-color: rgba(255,241,214,.6); }
+  .pk.on[data-t="blue"] { background: #2f6fe4; border-color: #fff; color: #fff; }
+  .pk.on[data-t="white"] { background: #fff1d6; border-color: #fff; color: #b3241d; }
+  .pk.on[data-t="auto"] { background: rgba(255,255,255,.2); border-color: #fff; }
+  .pk.on small { color: inherit; opacity: .85; }
+  .pick-note { font-size: 13px; color: var(--dim); text-align: center; }
+  .pick-note b { color: var(--fg); }
+  .readyrow { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; font-size: 13px; font-weight: 800; }
+  .readyrow .rr-h { width: 100%; color: var(--dim); font-size: 12.5px; }
+  .readyrow .rr { padding: 3px 10px; border-radius: 999px; color: var(--pc); box-shadow: inset 0 0 0 1.5px var(--pc); font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 14px; letter-spacing: .03em; }
+  .readyrow .rr.on { background: var(--pc); color: #0b0f17; box-shadow: none; }
+  .readyrow .rr.away { opacity: .45; }
+  .readyrow .rr.mine { outline: 2px solid rgba(255,255,255,.75); outline-offset: 2px; }
+  .primary.go { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 66px; }
+  .primary.go small { font-size: 13px; font-weight: 700; color: var(--dim); }
+  .primary.go.ready { background: color-mix(in srgb, #5ee07a 18%, rgba(255,255,255,.04)); border: 2px solid #5ee07a; color: #c9ffd8; opacity: 1; }
+  .practice { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 16px; border-radius: 20px; background: rgba(255,255,255,.05); border: 2px solid color-mix(in srgb, var(--c) 70%, transparent); touch-action: none; text-align: left; transition: transform .08s, background .1s; }
+  .practice:active, .practice.on { transform: scale(.985); background: color-mix(in srgb, var(--c) 30%, rgba(255,255,255,.05)); }
+  .practice b { display: block; font-size: 20px; font-weight: 900; }
+  .practice small { font-size: 13px; color: var(--dim); font-weight: 700; }
+  .practice .pm { margin-left: auto; width: 90px; height: 12px; border-radius: 8px; background: rgba(255,255,255,.12); overflow: hidden; }
+  .practice .pm i { display: block; height: 100%; width: 0; background: var(--c); transition: width .1s; }
+
+  /* 경기 중 */
+  .hudrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 6px; padding: 8px 14px; border-radius: 16px; background: rgba(0,0,0,.35); border: 1px solid var(--line); }
+  .hudrow .tm { font-size: 14px; font-weight: 800; color: var(--dim); }
+  .hudrow .tm b { color: var(--fg); font-size: 18px; margin-left: 4px; }
+  .hudrow .tt { font-family: Anton, Impact, sans-serif; font-size: 34px; line-height: 1; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+  .hudrow .tt.sprint { color: #ff8f3a; }
+  .beats { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px 0 6px; }
+  .bd { display: grid; place-items: center; width: 82px; height: 82px; border-radius: 50%; background: rgba(255,255,255,.07); border: 3px solid rgba(255,255,255,.28); font-size: 24px; font-weight: 900; color: var(--dim); transition: transform .06s, background .1s, color .1s; }
+  .bd.big { width: 112px; height: 112px; font-size: 30px; border-color: rgba(255,255,255,.5); }
+  .bd.on { transform: scale(1.14); background: var(--gold); color: #0b0f17; border-color: #fff; }
+  .bd.big.on { background: #ff4b3f; color: #fff; box-shadow: 0 0 0 8px rgba(255,75,63,.3), 0 0 40px rgba(255,75,63,.7); }
+  .bd.off { opacity: .25; }
+  .bd { position: relative; }
+  .bd .ring { position: absolute; inset: -4px; border-radius: 50%; border: 5px solid #ff4b3f; opacity: 0; transform: scale(2); pointer-events: none; }
+  .stam { display: flex; align-items: center; gap: 10px; margin: 6px 4px 2px; font-size: 13px; font-weight: 800; color: var(--dim); }
+  .stam div { flex: 1; height: 14px; border-radius: 8px; background: rgba(255,255,255,.12); overflow: hidden; }
+  .stam i { display: block; height: 100%; width: 100%; border-radius: 8px; background: linear-gradient(90deg, #3ec46d, #b6ea5c); transition: width .25s; }
+  .stam i.low { background: linear-gradient(90deg, #e0332c, #ff8f3a); }
+  .judge { min-height: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .judge b { font-size: 40px; font-weight: 900; letter-spacing: -.02em; line-height: 1.1; }
+  .judge b.perfect { color: var(--gold); }
+  .judge b.good { color: #7dffa8; }
+  .judge b.off { color: #ffb36b; }
+  .judge b.miss { color: #ff8c8c; }
+  .judge span { font-size: 15px; font-weight: 800; color: var(--dim); }
+  .pullbtn { position: relative; flex: 1; min-height: 120px; margin-top: 6px; border-radius: 30px; background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--c) 85%, #fff 10%), color-mix(in srgb, var(--c) 70%, #000)); color: #0b0f17;
+    font-size: 54px; font-weight: 900; letter-spacing: .02em; box-shadow: 0 0 44px color-mix(in srgb, var(--c) 40%, transparent), inset 0 -12px 0 rgba(0,0,0,.2); touch-action: none; }
+  .pullbtn small { display: block; font-size: 15px; font-weight: 800; opacity: .7; letter-spacing: 0; margin-top: 2px; }
+  .pullbtn:active, .pullbtn.on { transform: scale(.975); filter: brightness(1.25); }
+  .pullbtn.mini { flex: none; min-height: 84px; font-size: 30px; }
+  .braceov { position: absolute; inset: 0; z-index: 4; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; border-radius: 24px; background: color-mix(in srgb, var(--team) 80%, #000 20%); color: var(--teamfg); }
+  .braceov.on { display: flex; }
+  .braceov b { font-size: 54px; font-weight: 900; }
+  .braceov span { font-size: 19px; font-weight: 800; }
+  .braceov .bar { width: 70%; height: 14px; border-radius: 8px; background: rgba(0,0,0,.25); overflow: hidden; }
+  .braceov .bar i { display: block; height: 100%; width: 0; background: #fff; }
+  .braceov.fail { background: #7a1f1a; color: #fff; }
+  #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 5; background: radial-gradient(circle, transparent 40%, color-mix(in srgb, var(--c) 80%, transparent)); }
+  #flash.go { animation: flash .35s ease-out; }
+  @keyframes flash { from { opacity: .9; } to { opacity: 0; } }
+  .debug { position: fixed; left: 8px; right: 8px; bottom: calc(env(safe-area-inset-bottom) + 2px); font: 11px ui-monospace, monospace; color: rgba(255,255,255,.5); white-space: pre-wrap; pointer-events: none; z-index: 6; }
+
+  /* 튜토리얼 안의 조작 */
+  .gt-col { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+  .gt-btn { width: min(100%, 340px); padding: 16px; border-radius: 16px; background: var(--c); color: #0b0f17; font: 900 19px/1.1 "Pretendard Variable", Pretendard, sans-serif; box-shadow: 0 8px 26px color-mix(in srgb, var(--c) 35%, transparent); }
+  .gt-beats { display: flex; gap: 10px; align-items: center; justify-content: center; }
+  .gt-beats .bd { width: 58px; height: 58px; font-size: 17px; }
+  .gt-beats .bd.big { width: 80px; height: 80px; font-size: 21px; }
+  .gt-note { margin: 0; font-size: 13px; color: var(--dim); text-align: center; }
+  .gt-bar { width: min(100%, 300px); height: 16px; border-radius: 9px; background: rgba(255,255,255,.14); overflow: hidden; }
+  .gt-bar i { display: block; height: 100%; width: 0; background: var(--c); transition: width .1s linear; }
+  .pcgt .pcgt-card.gt-compact .pcgt-art { width: min(52vw, 190px, 22vh); }
+</style>
+</head>
+<body data-team="blue">
+<header>
+  <span class="me" id="me">…</span>
+  <span class="team hidden" id="teamTag"></span>
+  <span class="room" id="room"></span>
+</header>
+<div class="banner hidden" id="banner"></div>
+<main>
+  <!-- 처음 -->
+  <section class="view center on" id="vStart">
+    <svg class="art" viewBox="0 0 200 160" aria-hidden="true">
+      <g stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 116h164" stroke-dasharray="2 8" opacity=".5"/>
+        <g><animateTransform attributeName="transform" type="translate" values="30 0;-4 0;30 0" keyTimes="0;.18;1" dur="1.6s" calcMode="spline" keySplines=".1 .8 .2 1;.4 0 .4 1" repeatCount="indefinite"/>
+          <rect x="70" y="40" width="34" height="62" rx="7" fill="#0b1020"/><rect x="75" y="47" width="24" height="44" rx="3" fill="#2b3a66" stroke="none"/>
+          <path d="M70 84q-26 6-32 22M104 84q26 6 32 22" stroke="#ffd23a"/>
+        </g>
+        <path d="M150 62q-22 -10 -52 0" stroke="#ff6b5a"/><path d="M106 52l-9 10 12 5" stroke="#ff6b5a"/>
+      </g>
+    </svg>
+    <h1>폰을 확 당겨요</h1>
+    <p>두 손으로 폰을 쥐고
+"영차!" 구령에 맞춰 가슴 쪽으로 쭉!
+다 같이 맞으면 한 몸!</p>
+    <p class="note hidden" id="httpNote">https 주소가 아니라서 동작 센서가 꺼질 수 있어요.
+그때는 화면의 당겨! 버튼으로 할 수 있어요.</p>
+    <button class="primary" id="btnStart" style="margin-top:4px">시작하기</button>
+  </section>
+
+  <section class="view center" id="vMsg"><h1 id="msgT"></h1><p id="msgB"></p><button class="ghost hidden" id="btnMsg" style="max-width:280px"></button></section>
+
+  <!-- 대기실 · 경기 끝 · 관전 -->
+  <section class="view center wait" id="vWait">
+    <div class="big" id="waitT">대기실</div>
+    <p id="waitB"></p>
+    <div class="chips" id="waitChips"></div>
+    <div class="picker" id="picker">
+      <button class="pk" data-t="blue">청팀<small id="pkBlue">0명</small></button>
+      <button class="pk" data-t="auto">자동<small>알아서</small></button>
+      <button class="pk" data-t="white">백팀<small id="pkWhite">0명</small></button>
+    </div>
+    <div class="pick-note" id="pickNote"></div>
+    <div class="setbox" id="setBox"></div>
+    <div class="readyrow hidden" id="readyRow"></div>
+    <button class="primary go" id="btnGo">준비</button>
+    <button class="practice" id="btnPractice"><svg width="46" height="46" viewBox="0 0 48 48" fill="none" stroke="var(--c)" stroke-width="2.6" stroke-linecap="round"><rect x="16" y="8" width="16" height="28" rx="4"/><path d="M8 40h32M38 24q-6-8-14-8"/></svg><span><b>당기기 연습</b><small id="practiceSub">누르거나 폰을 당겨 봐요</small></span><span class="pm"><i id="practiceM"></i></span></button>
+    <div id="tutLink"></div>
+  </section>
+
+  <!-- 경기 중 -->
+  <section class="view" id="vPlay">
+    <div class="hudrow">
+      <div class="tm">청 <b id="winB">0</b></div>
+      <div class="tt" id="timeT">60</div>
+      <div class="tm">백 <b id="winW">0</b></div>
+    </div>
+    <div class="beats" id="beats">
+      <div class="bd" id="bOne">하나</div>
+      <div class="bd" id="bTwo">둘</div>
+      <div class="bd big" id="bPull"><i class="ring" id="bRing"></i>영차!</div>
+    </div>
+    <div class="stam"><span>체력</span><div><i id="stamI"></i></div></div>
+    <div class="judge" id="judge"><b id="judgeB">곧 시작해요</b><span id="judgeS">구령에 맞춰 폰을 확 당겨요</span></div>
+    <button class="pullbtn" id="btnPull">당겨!<small id="pullSub">폰을 당기거나 눌러요</small></button>
+    <div class="braceov" id="braceOv"><b>버텨!</b><span>폰을 꽉 쥐고 가만히</span><div class="bar"><i id="braceBar"></i></div></div>
+  </section>
+</main>
+<div id="flash"></div>
+<div class="debug" id="debug"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script type="module" src="controller.js"></script>
+</body>
+</html>

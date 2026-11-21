@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0c1a12">
+<title>양궁</title>
+<link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="/vendor/anton/index.css">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
+</script>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="vig" class="vig"></div>
+
+<!-- 경기 중 HUD -->
+<div id="hud" class="hud hidden">
+  <div class="board" id="board"></div>
+  <div class="topright">
+    <div class="wind" id="windBox">
+      <svg viewBox="-50 -50 100 100" class="compass" aria-hidden="true">
+        <circle r="44" class="c-bg"/><circle r="30" class="c-in"/>
+        <path d="M0 -44v-5M0 44v5M-44 0h-5M44 0h5" class="c-tk"/>
+        <g id="windArrow"><path d="M-24 0H18M18 0l-10 -9M18 0l-10 9" class="c-ar"/></g>
+        <text y="-34" class="c-n">과녁</text>
+      </svg>
+      <div class="wind-txt"><small>바람</small><b id="windSpd">0.0</b><span>m/s</span><em id="windWord">잔잔</em></div>
+    </div>
+    <div class="dist" id="distBox"><span id="distNum">50</span><small>m</small><i class="diff" id="diffTag" data-d="normal">보통</i></div>
+    <div class="join" id="join"><img id="qrMini" alt=""><div><span class="join-k">중간 참가</span><b id="codeMini">----</b></div></div>
+  </div>
+  <div class="center-top" id="whoBox"><span class="who-dot" id="whoDot"></span><b id="whoName">1P</b><span id="whoSub">차례</span></div>
+  <div class="gauge" id="gauge">
+    <div class="g-top"><span id="gState">활을 들어요</span><span id="gHint"></span></div>
+    <div class="g-bar"><i id="gFill"></i><b id="gFull"></b></div>
+    <div class="g-hold"><i id="gHold"></i></div>
+    <div class="g-arrows" id="gArrows"></div>
+  </div>
+  <div class="inset" id="inset"><span class="inset-tag" id="insetTag">과녁 확대</span><div class="inset-pop" id="insetPop"></div></div>
+</div>
+<div id="callout" class="callout"></div>
+<div id="banner" class="banner"><b></b><span></span></div>
+<div id="count" class="count"></div>
+
+<section id="lobby" class="screen">
+  <div class="lobby">
+    <div class="lobby-copy">
+      <div class="eyebrow">1~4인 · 차례로 한 발씩</div>
+      <h1 class="wordmark">ARCHERY</h1>
+      <p class="lede">폰을 활처럼 세워 겨누고, 화면의 시위를 당겼다 놓으면 쏩니다. 바람을 읽고 숨을 고르세요.</p>
+      <div class="slots" id="slots"></div>
+      <div class="setbox" id="setBox"></div>
+      <div class="tutbox" id="tutBox"></div>
+      <div class="hint"><span>폰에서 모두 <b>준비</b>를 누르면 시작해요</span><span class="dot"></span><kbd>D</kbd><span>난이도</span><kbd>E</kbd><span>엔드 수</span></div>
+    </div>
+    <div class="range" aria-hidden="true"></div>
+    <div class="qr-card">
+      <img id="qr" alt="참가 QR">
+      <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
+      <div class="qr-url" id="url"></div>
+      <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 동작 센서가 꺼져 있어요. https 주소에서 열어 주세요.</div>
+    </div>
+  </div>
+  <div class="msg" id="msg"></div>
+</section>
+
+<section id="over" class="screen over-screen hidden">
+  <div class="over">
+    <div class="eyebrow"><span>FINAL RESULT</span><i class="diff" id="diffOver" data-d="normal">보통</i><span id="overInfo" class="over-info"></span></div>
+    <h1 class="wordmark sm" id="overTitle">경기 결과</h1>
+    <div class="podium" id="podium"></div>
+    <div class="over-foot">
+      <div class="setbox" id="setBoxOver"></div>
+      <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 새 경기</span><span class="dot"></span><kbd>D</kbd><span>난이도</span></div>
+    </div>
+    <div class="tutbox" id="tutBoxOver"></div>
+  </div>
+</section>
+
+<section id="replaced" class="screen hidden">
+  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+</section>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/common/ready.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>
