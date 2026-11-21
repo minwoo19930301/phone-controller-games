@@ -9,6 +9,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { INSTRUMENTS, patternOf } from './parts.js';
+import { props } from './props.js';
 
 const STAGE_Y = 1.0;
 const CZ = 1.05; // 지휘자 자리 z
@@ -176,6 +177,55 @@ export function createHall(canvas) {
     const pcase = new THREE.Mesh(new THREE.BoxGeometry(13.5, 9, 1.2), M.woodDark);
     pcase.position.set(0, STAGE_Y + 12.8, CZ - 13.9);
     scene.add(pcase);
+    // 파이프 디테일: 아래 원뿔 발, 소리 구멍(윗입술), 받침 선반과 양옆 나무 탑
+    const feet = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.13, 0.045, 0.55, 14), M.brass, pipes);
+    const mouths = new THREE.InstancedMesh(new THREE.BoxGeometry(0.15, 0.1, 0.05), new THREE.MeshStandardMaterial({ color: 0x1a1208, roughness: 0.8 }), pipes);
+    const lips = new THREE.InstancedMesh(new THREE.BoxGeometry(0.17, 0.02, 0.06), M.gold, pipes);
+    for (let i = 0; i < pipes; i++) {
+      const u = i / (pipes - 1) - 0.5, x = u * 11.5, z = CZ - 13.0 + Math.abs(u) * 1.2;
+      m4.makeTranslation(x, STAGE_Y + 8.4 - 0.27, z); feet.setMatrixAt(i, m4);
+      m4.makeTranslation(x, STAGE_Y + 8.75, z + 0.115); mouths.setMatrixAt(i, m4);
+      m4.makeTranslation(x, STAGE_Y + 8.83, z + 0.12); lips.setMatrixAt(i, m4);
+    }
+    scene.add(feet, mouths, lips);
+    const shelf = new THREE.Mesh(new THREE.BoxGeometry(13.2, 0.3, 1.9), M.woodDark);
+    shelf.position.set(0, STAGE_Y + 7.95, CZ - 13.1);
+    scene.add(shelf);
+    const shelfTrim = new THREE.Mesh(new THREE.BoxGeometry(13.3, 0.07, 1.95), M.gold);
+    shelfTrim.position.set(0, STAGE_Y + 8.12, CZ - 13.1);
+    scene.add(shelfTrim);
+    for (const sx of [-1, 1]) {
+      const tower = new THREE.Mesh(new THREE.BoxGeometry(0.7, 8.4, 0.9), M.woodDark);
+      tower.position.set(sx * 6.6, STAGE_Y + 12.2, CZ - 12.6);
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.62, 0.9, 4), M.gold);
+      cap.position.set(sx * 6.6, STAGE_Y + 16.85, CZ - 12.6);
+      cap.rotation.y = Math.PI / 4;
+      scene.add(tower, cap);
+    }
+  }
+  // 무대 위 음향 반사판: 천장에 매달린 휜 나무판과 그 사이 작은 조명
+  {
+    const pg = new THREE.CylinderGeometry(9, 9, 3.1, 24, 1, true, -0.19, 0.38);
+    pg.rotateZ(Math.PI / 2);
+    pg.translate(0, 9, 0); // 아래로 볼록한 얇은 판(원통의 윗조각을 뒤집어 씀)
+    const pm = new THREE.MeshStandardMaterial({ color: 0xb9753a, roughness: 0.45, side: THREE.DoubleSide, envMapIntensity: 0.5 });
+    const lamp = new THREE.SphereGeometry(0.09, 10, 8), lm = new THREE.MeshBasicMaterial({ color: 0xffe1b0 });
+    const wire = new THREE.CylinderGeometry(0.012, 0.012, 4, 5);
+    for (let r = 0; r < 3; r++) for (let c = -2; c <= 2; c++) {
+      const g = new THREE.Group();
+      const panel = new THREE.Mesh(pg, pm);
+      panel.rotation.x = Math.PI;
+      panel.position.y = 9.05;
+      g.add(panel);
+      for (const dx of [-1.35, 1.35]) { const w = new THREE.Mesh(wire, M.stand); w.position.set(dx, 2.1, 0); g.add(w); }
+      const l = new THREE.Mesh(lamp, lm);
+      l.position.y = -0.12;
+      g.add(l);
+      g.position.set(c * 4.3, STAGE_Y + 11.6 + r * 0.9 + Math.abs(c) * 0.25, CZ - 8.5 + r * 4.4);
+      g.rotation.x = -0.16 - r * 0.07;
+      g.rotation.z = -c * 0.06;
+      scene.add(g);
+    }
   }
   // 옆벽·발코니·막
   for (const sx of [-1, 1]) {
@@ -899,226 +949,9 @@ export function createHall(canvas) {
     arm.el.quaternion.setFromUnitVectors(down, ik.fore);
   }
 
-  function makeChair() {
-    const g = new THREE.Group();
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.05, 0.44), M.chair);
-    seat.position.y = 0.46;
-    const back = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.48, 0.04), M.chair);
-    back.position.set(0, 0.72, -0.21);
-    g.add(seat, back);
-    for (const [x, z] of [[-0.2, -0.19], [0.2, -0.19], [-0.2, 0.19], [0.2, 0.19]]) {
-      const l = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.46, 6), M.stand);
-      l.position.set(x, 0.23, z);
-      g.add(l);
-    }
-    return g;
-  }
-  function makeStand(h = 1.05) {
-    const g = new THREE.Group();
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, h, 6), M.stand);
-    pole.position.y = h / 2;
-    const desk = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.015), M.stand);
-    desk.position.y = h + 0.12;
-    desk.rotation.x = -0.45;
-    const paper = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.3), M.paper);
-    paper.position.set(0, h + 0.12, 0.012);
-    paper.rotation.x = -0.45;
-    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.02, 12), M.stand);
-    foot.position.y = 0.01;
-    g.add(pole, desk, paper, foot);
-    return g;
-  }
-
-  // ───────── 악기 ─────────
-  const violinShape = (() => {
-    const s = new THREE.Shape();
-    const pts = [[0, 0.18], [0.07, 0.17], [0.1, 0.12], [0.085, 0.06], [0.06, 0.02], [0.065, -0.02], [0.105, -0.07], [0.11, -0.13], [0.07, -0.18], [0, -0.19]];
-    s.moveTo(pts[0][0], pts[0][1]);
-    const right = pts.map(([x, y]) => new THREE.Vector2(x, y));
-    const left = pts.slice().reverse().map(([x, y]) => new THREE.Vector2(-x, y));
-    s.setFromPoints([...right, ...left.slice(1)]);
-    return s;
-  })();
-  const violinGeo = new THREE.ExtrudeGeometry(violinShape, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.01, bevelSegments: 3, curveSegments: 8 });
-  violinGeo.translate(0, 0, -0.02);
-  function makeViolin(scale = 1) {
-    const g = new THREE.Group();
-    const b = new THREE.Mesh(violinGeo, M.wood);
-    g.add(b);
-    const neck = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.24, 0.02), M.woodDark);
-    neck.position.set(0, 0.29, 0.02);
-    const scroll = new THREE.Mesh(new THREE.TorusGeometry(0.018, 0.008, 6, 12), M.woodDark);
-    scroll.position.set(0, 0.42, 0.02);
-    scroll.rotation.y = Math.PI / 2;
-    const fb = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.22, 0.006), M.black);
-    fb.position.set(0, 0.2, 0.04);
-    g.add(neck, scroll, fb);
-    g.scale.setScalar(scale);
-    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    return g;
-  }
-  function makeBow(len = 0.72) {
-    const g = new THREE.Group();
-    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.006, len, 5), M.woodDark);
-    stick.rotation.z = Math.PI / 2;
-    const hair = new THREE.Mesh(new THREE.BoxGeometry(len * 0.92, 0.008, 0.003), M.string);
-    hair.position.y = -0.025;
-    g.add(stick, hair);
-    return g;
-  }
-  function makeTrumpet() {
-    const g = new THREE.Group();
-    const curve = new THREE.CatmullRomCurve3([[0, 0, -0.26], [0, 0, 0.08], [0, -0.05, 0.13], [0, -0.09, 0.06], [0, -0.09, -0.12], [0, -0.04, -0.18], [0, 0, -0.1], [0, 0.02, 0.0]].map((p) => new THREE.Vector3(...p)));
-    g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 0.011, 8), M.brass));
-    const bell = new THREE.Mesh(new THREE.LatheGeometry([new THREE.Vector2(0.012, 0), new THREE.Vector2(0.016, 0.08), new THREE.Vector2(0.03, 0.15), new THREE.Vector2(0.06, 0.19), new THREE.Vector2(0.065, 0.2)], 20), M.brass);
-    bell.rotation.x = Math.PI / 2;
-    bell.position.z = 0.08;
-    g.add(bell);
-    for (let i = 0; i < 3; i++) {
-      const v = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.12, 10), M.brass);
-      v.position.set(0, -0.03, -0.06 + i * 0.035);
-      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.02, 10), M.ivory);
-      cap.position.set(0, 0.04, -0.06 + i * 0.035);
-      g.add(v, cap);
-    }
-    const mp = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.05, 10), M.silver);
-    mp.rotation.x = -Math.PI / 2;
-    mp.position.z = -0.28;
-    g.add(mp);
-    g.userData.bell = bell;
-    return g;
-  }
-  function makeHorn() {
-    const g = new THREE.Group();
-    const c1 = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.014, 8, 36), M.brass);
-    const c2 = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.012, 8, 30), M.brass);
-    c2.position.z = 0.02;
-    g.add(c1, c2);
-    const bell = new THREE.Mesh(new THREE.LatheGeometry([new THREE.Vector2(0.02, 0), new THREE.Vector2(0.03, 0.1), new THREE.Vector2(0.06, 0.2), new THREE.Vector2(0.13, 0.27), new THREE.Vector2(0.14, 0.28)], 22), M.brass);
-    bell.position.set(0.14, -0.08, 0);
-    bell.rotation.z = -0.9;
-    g.add(bell);
-    g.userData.bell = bell;
-    return g;
-  }
-  function makeFlute() {
-    const g = new THREE.Group();
-    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.66, 10), M.silver);
-    t.rotation.z = Math.PI / 2;
-    g.add(t);
-    return g;
-  }
-  function makeTimpani() {
-    const g = new THREE.Group();
-    for (const [x, r] of [[-0.42, 0.36], [0.42, 0.32]]) {
-      const k = new THREE.Mesh(new THREE.LatheGeometry([new THREE.Vector2(0.001, -0.32), new THREE.Vector2(r * 0.6, -0.3), new THREE.Vector2(r * 0.95, -0.1), new THREE.Vector2(r, 0.05), new THREE.Vector2(r * 1.02, 0.08)], 28), M.copper);
-      k.position.set(x, 0.72, 0.35);
-      const headM = new THREE.Mesh(new THREE.CircleGeometry(r * 0.98, 28), M.head);
-      headM.rotation.x = -Math.PI / 2;
-      headM.position.set(x, 0.81, 0.35);
-      g.add(k, headM);
-      for (const a of [0, 120, 240]) {
-        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.42, 6), M.silver);
-        leg.position.set(x + Math.cos(a * R) * r * 0.6, 0.21, 0.35 + Math.sin(a * R) * r * 0.6);
-        g.add(leg);
-      }
-    }
-    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    return g;
-  }
-  function makeKit() {
-    const g = new THREE.Group();
-    const snare = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.14, 28), M.ivory);
-    snare.position.set(0, 0.66, 0.36);
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.012, 6, 28), M.silver);
-    rim.rotation.x = Math.PI / 2;
-    rim.position.set(0, 0.73, 0.36);
-    const bd = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.36, 28), M.dressR);
-    bd.rotation.x = Math.PI / 2;
-    bd.position.set(0.45, 0.34, 0.5);
-    const bdh = new THREE.Mesh(new THREE.CircleGeometry(0.3, 28), M.head);
-    bdh.position.set(0.45, 0.34, 0.69);
-    const cym = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.04, 28, 1, true), M.brass);
-    cym.position.set(-0.45, 1.25, 0.4);
-    const cst = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 1.2, 6), M.silver);
-    cst.position.set(-0.45, 0.62, 0.4);
-    const sst = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.6, 6), M.silver);
-    sst.position.set(0, 0.3, 0.36);
-    g.add(snare, rim, bd, bdh, cym, cst, sst);
-    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    g.userData.cym = cym;
-    return g;
-  }
-  function makeGrand() {
-    const g = new THREE.Group();
-    const s = new THREE.Shape();
-    s.moveTo(-0.72, 0);
-    s.lineTo(0.72, 0);
-    s.lineTo(0.72, -0.5);
-    s.bezierCurveTo(0.72, -1.2, 0.2, -1.1, 0.12, -1.6);
-    s.bezierCurveTo(0.05, -2.05, -0.3, -2.1, -0.55, -2.05);
-    s.bezierCurveTo(-0.72, -2.0, -0.72, -1.8, -0.72, -1.6);
-    s.closePath();
-    const body = new THREE.Mesh(new THREE.ExtrudeGeometry(s, { depth: 0.3, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.02, bevelSegments: 2 }), M.black);
-    body.rotation.x = Math.PI / 2;
-    body.position.y = 1.0;
-    const lid = new THREE.Mesh(new THREE.ExtrudeGeometry(s, { depth: 0.02, bevelEnabled: false }), M.black);
-    const lidPivot = new THREE.Group();
-    lidPivot.position.set(-0.72, 1.0, 0);
-    lid.rotation.x = Math.PI / 2;
-    lid.position.x = 0.72;
-    lidPivot.add(lid);
-    lidPivot.rotation.z = 0.62;
-    const keys = new THREE.Mesh(new THREE.BoxGeometry(1.36, 0.04, 0.18), M.ivory);
-    keys.position.set(0, 0.86, 0.12);
-    const keybed = new THREE.Mesh(new THREE.BoxGeometry(1.44, 0.08, 0.26), M.black);
-    keybed.position.set(0, 0.8, 0.1);
-    const blacks = new THREE.InstancedMesh(new THREE.BoxGeometry(0.014, 0.03, 0.1), M.black, 36);
-    const m4 = new THREE.Matrix4();
-    let k = 0;
-    for (let i = 0; i < 52 && k < 36; i++) { if ([0, 1, 3, 4, 5].includes(i % 7)) { m4.makeTranslation(-0.68 + (i + 1) * 0.026, 0.89, 0.08); blacks.setMatrixAt(k++, m4); } }
-    const desk = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.24, 0.02), M.black);
-    desk.position.set(0, 1.1, -0.1);
-    desk.rotation.x = -0.25;
-    g.add(body, lidPivot, keys, keybed, blacks, desk);
-    for (const [x, z] of [[-0.62, -0.1], [0.62, -0.1], [-0.4, -1.9]]) {
-      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.72, 10), M.black);
-      leg.position.set(x, 0.36, z);
-      g.add(leg);
-    }
-    const bench = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.06, 0.34), M.black);
-    bench.position.set(0, 0.48, 0.62);
-    g.add(bench);
-    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    return g;
-  }
-  function makeUpright() {
-    const g = new THREE.Group();
-    const b = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.2, 0.5), M.black);
-    b.position.set(0, 0.62, -0.15);
-    const keys = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.04, 0.16), M.ivory);
-    keys.position.set(0, 0.74, 0.16);
-    const bench = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.06, 0.34), M.black);
-    bench.position.set(0, 0.48, 0.62);
-    g.add(b, keys, bench);
-    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    return g;
-  }
-  function makeHarp() {
-    const g = new THREE.Group();
-    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.75, 10), M.gold);
-    col.position.set(0.4, 0.9, 0);
-    const neck = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0.4, 1.78, 0), new THREE.Vector3(0.1, 1.72, 0), new THREE.Vector3(-0.2, 1.5, 0), new THREE.Vector3(-0.42, 1.2, 0)]), 20, 0.03, 8), M.gold);
-    const sb = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.2, 0.18), M.wood);
-    sb.position.set(-0.2, 0.62, 0);
-    sb.rotation.z = -0.68;
-    g.add(col, neck, sb);
-    const pts = [];
-    for (let i = 0; i < 18; i++) { const u = i / 17; const x0 = lerp(-0.6, 0.25, u); pts.push(new THREE.Vector3(x0, lerp(0.2, 0.95, u), 0), new THREE.Vector3(x0 + 0.05, lerp(1.25, 1.74, u), 0)); }
-    g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xf6e8c8 })));
-    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    return g;
-  }
+  // 의자·보면대·악기 모형은 props.js 에서 만듭니다(재질별로 합친 메시를 복제해서 씀)
+  function makeChair() { return props.chair(); }
+  function makeStand(h = 0.82) { return props.stand(h); }
 
   // ───────── 단원 배치 ─────────
   const musicians = [];
@@ -1136,9 +969,9 @@ export function createHall(canvas) {
     g.rotation.y = opts.rotY ?? Math.atan2(fx - pos.x, fz - pos.z);
     if (!stand && !opts.noChair) g.add(makeChair());
     g.add(p.root);
-    if (opts.stand2 !== false && !stand && !['piano', 'timpani', 'kit', 'harp', 'bassdrum'].includes(kind)) {
-      const st = makeStand();
-      st.position.set(0, 0, 0.7);
+    if (opts.stand2 !== false && (!stand || opts.withStand) && !['piano', 'timpani', 'kit', 'harp', 'bassdrum'].includes(kind)) {
+      const st = makeStand(stand ? 1.1 : 0.82);
+      st.position.set(opts.standX ?? 0, 0, stand ? 0.85 : 0.7);
       st.rotation.y = Math.PI;
       g.add(st);
     }
@@ -1151,61 +984,65 @@ export function createHall(canvas) {
   function attachInstrument(m, opts) {
     const p = m.p;
     if (m.kind === 'violin' || m.kind === 'viola') {
-      const v = makeViolin(m.kind === 'viola' ? 1.12 : 1);
+      const v = props[m.kind]();
       v.position.set(0.17, 0.5, 0.2);
       v.rotation.set(-1.1, 0.25, 0.9);
       p.torso.add(v);
       v.updateMatrix();
       m.extra.violin = v;
-      const bow = makeBow();
-      bow.position.set(0, -0.02, 0.05);
+      const bow = props.bow();
       p.armR.hand.add(bow);
       m.extra.bow = bow;
-    } else if (m.kind === 'cello') {
-      const v = makeViolin(2.3);
-      v.position.set(0, 0.62, 0.38);
-      v.rotation.set(-0.25, 0, 0.12);
+    } else if (m.kind === 'cello' || m.kind === 'bass') {
+      // 첼로는 무릎 사이에, 콘트라베이스는 선 연주자 왼쪽 앞에 기대어 세웁니다(끝핀이 바닥에 닿는 높이)
+      const v = props[m.kind]();
+      if (m.kind === 'cello') { v.position.set(0.02, 0.63, 0.3); v.rotation.set(-0.3, 0, 0.1); }
+      else { v.position.set(0.13, 0.8, 0.2); v.rotation.set(-0.2, -0.42, 0.06); }
       m.g.add(v);
-      const bow = makeBow(0.72);
+      v.updateMatrix();
+      m.extra.inst = v;
+      const bow = props.bow(m.kind === 'bass' ? 0.68 : 0.7);
       p.armR.hand.add(bow);
       m.extra.bow = bow;
     } else if (m.kind === 'trumpet' || m.kind === 'trombone') {
-      const t = makeTrumpet();
-      if (m.kind === 'trombone') t.scale.set(1.3, 1.3, 2.1);
+      const t = props[m.kind]();
       const holder = new THREE.Group();
       holder.position.set(0, 0.68, 0.14);
       holder.add(t);
       t.position.z = 0.22;
       p.torso.add(holder);
       m.extra.horn = holder;
-      m.extra.bell = t.userData.bell;
+      m.extra.slide = t.userData.slide || null;
     } else if (m.kind === 'horn') {
-      const h = makeHorn();
+      const h = props.horn();
       const holder = new THREE.Group();
       holder.position.set(0.1, 0.38, 0.18);
       holder.rotation.y = 0.3;
       holder.add(h);
       p.torso.add(holder);
       m.extra.horn = holder;
-      m.extra.bell = h.userData.bell;
     } else if (m.kind === 'flute') {
-      const f = makeFlute();
+      const f = props.flute();
       f.position.set(-0.22, 0.66, 0.14);
       f.rotation.y = 0.2;
       p.torso.add(f);
       m.extra.horn = f;
-    } else if (m.kind === 'timpani') { m.g.add(makeTimpani()); }
-    else if (m.kind === 'kit') { const k = makeKit(); m.g.add(k); m.extra.cym = k.userData.cym; }
-    else if (m.kind === 'piano') { /* 피아노는 따로 */ }
+    } else if (m.kind === 'timpani') {
+      m.g.add(props.timpani());
+      for (const a of [p.armR, p.armL]) a.hand.add(props.stick('mallet'));
+    } else if (m.kind === 'kit') {
+      const k = opts.variant === 'bassdrum' ? props.bassDrum() : props.kit();
+      m.g.add(k);
+      m.extra.cym = k.userData.cym;
+      if (opts.variant === 'bassdrum') p.armR.hand.add(props.stick('beater'));
+      else for (const a of [p.armR, p.armL]) a.hand.add(props.stick('stick'));
+    } else if (m.kind === 'piano' || m.kind === 'harp') { /* 악기는 무대에 따로 놓습니다 */ }
     else if (m.kind === 'castanets') {
-      for (const a of [p.armR, p.armL]) { const c = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), M.woodDark); c.position.y = -0.03; a.hand.add(c); }
+      for (const a of [p.armR, p.armL]) a.hand.add(props.castanet());
     } else if (m.kind === 'conductor') {
       if (!opts.woman) p.hairMesh.material = HAIR[6]; // 은발
-      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.007, 0.42, 6), M.baton);
-      b.rotation.x = Math.PI / 2;
-      b.position.z = 0.2;
       const holder = new THREE.Group();
-      holder.add(b);
+      holder.add(props.baton());
       p.armR.hand.add(holder);
       m.extra.baton = holder;
     }
@@ -1222,28 +1059,40 @@ export function createHall(canvas) {
   S.horn = [-36, -28, -20].map((a) => seat('horn', polar(7.8, a, 0.56), { section: 'harmony' }));
   S.trumpet = [-8, 0, 8].map((a) => seat('trumpet', polar(7.8, a, 0.56), { section: 'melody' }));
   S.trombone = [20, 28].map((a) => seat('trombone', polar(7.8, a, 0.56), { section: 'bass' }));
+  // 3열 오른쪽 끝: 콘트라베이스(서서 연주)
+  S.dbass = [50, 62, 74].map((a) => seat('bass', polar(7.9, a, 0.56), { section: 'bass', stand: true, woman: false, withStand: true, standX: -0.35 }));
   // 4열: 타악기
   S.timp = [seat('timpani', polar(10.0, 4, 0.84), { section: 'drums', noChair: true, stand: true })];
   S.kit = [seat('kit', polar(10.0, 22, 0.84), { section: 'drums' })];
-  S.bass = [seat('kit', polar(10.0, -16, 0.84), { section: 'drums' })];
+  S.bass = [seat('kit', polar(10.0, -16, 0.84), { section: 'drums', variant: 'bassdrum', stand: true, woman: false })];
   S.cast = [seat('castanets', polar(9.6, 36, 0.84), { section: 'perc', stand: true }), seat('castanets', polar(9.6, -30, 0.84), { section: 'perc', stand: true })];
-  // 피아노(왼쪽 앞)·업라이트(오른쪽 뒤)·하프(오른쪽 앞)
-  const grand = makeGrand();
-  grand.position.set(-6.0, STAGE_Y, 0.2);
-  grand.rotation.y = 0.55;
+  // 그랜드 피아노(왼쪽 앞): 뚜껑이 객석 쪽으로 열리고 연주자 옆모습이 보이게 놓습니다
+  const GRAND = { x: -7.6, z: 0.0, rot: -Math.PI / 2 - 0.5 };
+  const grand = props.grand();
+  grand.position.set(GRAND.x, STAGE_Y, GRAND.z);
+  grand.rotation.y = GRAND.rot;
   scene.add(grand);
-  S.piano = [seat('piano', { x: -6.0 + Math.sin(0.55) * 0.66, y: STAGE_Y, z: 0.2 + Math.cos(0.55) * 0.66 }, { rotY: 0.55 + Math.PI, noChair: true, stand2: false, section: 'chords' })];
-  const upright = makeUpright();
-  upright.position.set(7.2, STAGE_Y + 0.28, -4.7);
-  upright.rotation.y = -0.9;
+  S.piano = [seat('piano', { x: GRAND.x + Math.sin(GRAND.rot) * 0.66, y: STAGE_Y, z: GRAND.z + Math.cos(GRAND.rot) * 0.66 }, { rotY: GRAND.rot + Math.PI, noChair: true, stand2: false, section: 'chords' })];
+  // 업라이트 피아노(오른쪽 뒤 맨 윗단)
+  const UPR = { x: 8.6, z: -4.4, rot: Math.PI / 2 };
+  const upright = props.upright();
+  upright.position.set(UPR.x, STAGE_Y + 0.84, UPR.z);
+  upright.rotation.y = UPR.rot;
   scene.add(upright);
-  S.piano.push(seat('piano', { x: 7.2 + Math.sin(-0.9) * 0.66, y: STAGE_Y + 0.28, z: -4.7 + Math.cos(-0.9) * 0.66 }, { rotY: -0.9 + Math.PI, noChair: true, stand2: false, section: 'chords' }));
-  const harp = makeHarp();
-  harp.position.set(6.3, STAGE_Y, -0.6);
-  harp.rotation.y = -0.6;
+  S.piano.push(seat('piano', { x: UPR.x + Math.sin(UPR.rot) * 0.66, y: STAGE_Y + 0.84, z: UPR.z + Math.cos(UPR.rot) * 0.66 }, { rotY: UPR.rot + Math.PI, noChair: true, stand2: false, section: 'chords' }));
+  // 하프(오른쪽 앞): 현이 객석에서 옆으로 보이게, 연주자는 울림통 뒤에 앉아 지휘자 쪽을 봅니다
+  const harp = props.harp();
+  harp.position.set(6.4, STAGE_Y, 0.9);
+  harp.rotation.y = Math.PI - 0.35;
   scene.add(harp);
-  S.harpist = [seat('violin', { x: 5.8, y: STAGE_Y, z: -0.2 }, { section: 'chords', stand2: false })];
-  S.harpist[0].p.root.visible = true;
+  harp.updateMatrixWorld(true);
+  {
+    const sp = harp.localToWorld(V3(-0.72, 0, -0.04)), fw = harp.localToWorld(V3(0.3, 0, -0.04));
+    const hm = seat('harp', { x: sp.x, y: STAGE_Y, z: sp.z }, { rotY: Math.atan2(fw.x - sp.x, fw.z - sp.z), section: 'chords', stand2: false, woman: true });
+    hm.g.updateMatrixWorld(true);
+    hm.extra.pluck = [V3(-0.26, 1.02, 0.07), V3(-0.24, 0.92, -0.06)].map((q) => hm.g.worldToLocal(harp.localToWorld(q)));
+    S.harpist = [hm];
+  }
   // 독창자(서서 관객을 봄)
   S.voice = [[2.5, 1.9], [3.5, 1.7], [-2.5, 1.9], [-3.5, 1.7]].map(([x, z], i) => seat('voice', { x, y: STAGE_Y, z }, { stand: true, woman: i % 2 === 0, dress: i % 2 === 0 ? M.dressR : null, faceX: x * 0.3, faceZ: 20, section: 'melody' }));
   S.voice.forEach((m, i) => { if (i > 0) m.g.visible = false; });
@@ -1587,6 +1436,35 @@ export function createHall(canvas) {
     return [x, y];
   }
 
+  // 단원 그룹 좌표의 점·방향을 몸통(torso) 좌표로
+  const _tq = new THREE.Quaternion(), _hp = new THREE.Vector3(), _zv = new THREE.Vector3(), _rx90 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+  function toTorso(p, v, dirOnly = false) {
+    if (!dirOnly) v.y -= p.hips.position.y;
+    return v.applyQuaternion(_tq.copy(p.torso.quaternion).invert());
+  }
+  // 활 긋기: 왼손은 지판, 오른손은 활을 쥐고 현 위에서 d(손~현 접점 거리)만큼 밀고 당깁니다. 활털이 현을 향하게 세웁니다
+  function bowStroke(m, inst, inGroup, d, neckY) {
+    const p = m.p, V = violinPose, k = inst.scale.x;
+    V.neck.copy(inst.userData.neck); V.neck.y = neckY;
+    V.neck.applyMatrix4(inst.matrix);
+    V.contact.copy(inst.userData.contact).applyMatrix4(inst.matrix);
+    V.across.copy(V.xAxis).applyQuaternion(inst.quaternion);
+    _zv.set(0, 0, 1).applyQuaternion(inst.quaternion);
+    V.bow.copy(inst.quaternion).multiply(_rx90);
+    if (inGroup) { toTorso(p, V.neck); toTorso(p, V.contact); toTorso(p, V.across, true); toTorso(p, _zv, true); V.bow.premultiply(_tq); }
+    reachArm(p.armL, V.neck, V.leftPole);
+    // 손목은 활대보다 조금 위(악기 바깥쪽)에 둡니다
+    V.grip.copy(V.contact).addScaledVector(_zv, 0.026 * k + 0.045).addScaledVector(V.across, -d);
+    reachArm(p.armR, V.grip, V.rightPole);
+    if (m.extra.bow) {
+      V.parent.copy(p.armR.sh.quaternion).multiply(p.armR.el.quaternion);
+      V.inv.copy(V.parent).invert();
+      m.extra.bow.quaternion.copy(V.inv).multiply(V.bow);
+      const half = (m.extra.bow.userData.len || 0.72) / 2 - 0.05;
+      m.extra.bow.position.copy(V.across).multiplyScalar(half).addScaledVector(_zv, -0.045).applyQuaternion(V.inv);
+    }
+  }
+
   function animMusician(m, t, dt) {
     const p = m.p;
     const isP = m.slot != null;
@@ -1600,31 +1478,30 @@ export function createHall(canvas) {
     switch (m.kind) {
       case 'violin': case 'viola': {
         m.bowPh += dt * (1.2 + a * 3.2) * m.bowDir;
-        const b = Math.sin(m.bowPh);
-        const violin = m.extra.violin;
-        const V = violinPose;
-        V.neck.set(0,.23,.025).applyMatrix4(violin.matrix);
-        reachArm(p.armL, V.neck, V.leftPole);
-        V.contact.set(0,.10+b*.035,.045).applyMatrix4(violin.matrix);
-        V.across.copy(V.xAxis).applyQuaternion(violin.quaternion).normalize();
-        V.grip.copy(V.contact).addScaledVector(V.across,-.30);
-        reachArm(p.armR, V.grip, V.rightPole);
+        bowStroke(m, m.extra.violin, false, 0.3 + Math.sin(m.bowPh) * (0.08 + 0.12 * Math.min(1, a * 1.6)), 0.23);
         p.head.rotation.set(0.15, 0.3, 0.25);
-        if (m.extra.bow) {
-          V.parent.copy(p.armR.sh.quaternion).multiply(p.armR.el.quaternion);
-          V.inv.copy(V.parent).invert();
-          V.bow.setFromUnitVectors(V.xAxis, V.across);
-          m.extra.bow.quaternion.copy(V.inv).multiply(V.bow);
-          m.extra.bow.position.copy(V.across).applyQuaternion(V.inv).multiplyScalar(.30);
-        }
         break;
       }
-      case 'cello': {
+      case 'cello': case 'bass': {
         m.bowPh += dt * (1 + a * 2.5) * m.bowDir;
-        const b = Math.sin(m.bowPh);
-        setArm(p.armL, -0.9, 0, 0.3, -1.2);
-        setArm(p.armR, -0.7, 0, -0.35 - b * 0.4 * (0.25 + a), -0.6);
-        p.head.rotation.set(0.25, 0, 0);
+        // 첼로는 무릎을 벌려 악기를 끼고, 베이스는 몸을 살짝 숙여 활을 긋습니다
+        if (m.kind === 'cello') { for (let i = 0; i < p.legs.length; i++) p.legs[i].leg.rotation.y = (i ? 1 : -1) * 0.5; p.torso.rotation.x = 0.06; }
+        else p.torso.rotation.x = 0.2;
+        bowStroke(m, m.extra.inst, true, 0.27 + Math.sin(m.bowPh) * (0.07 + 0.11 * Math.min(1, a * 1.6)), m.kind === 'cello' ? 0.2 : 0.17);
+        p.head.rotation.set(0.2, m.kind === 'bass' ? 0.25 : 0, 0);
+        break;
+      }
+      case 'harp': {
+        // 두 손이 현 양쪽에서 번갈아 뜯습니다
+        const k = 0.25 + a;
+        for (let i = 0; i < 2; i++) {
+          const ph = t * (2.2 + a * 3) + m.phase + i * 1.7;
+          _hp.copy(m.extra.pluck[i]);
+          _hp.x += (i ? 1 : -1) * 0.0; _hp.y += Math.sin(ph) * 0.06 * k; _hp.z += (0.02 + Math.max(0, Math.sin(ph * 2)) * 0.035) * k;
+          reachArm(i ? p.armL : p.armR, toTorso(p, _hp), i ? violinPose.leftPole : violinPose.rightPole);
+        }
+        p.torso.rotation.x = 0.08;
+        p.head.rotation.set(0.12, -0.25, 0);
         break;
       }
       case 'trumpet': case 'trombone': case 'horn': case 'flute': {
@@ -1633,7 +1510,7 @@ export function createHall(canvas) {
         else if (m.kind === 'flute') { setArm(p.armR, -1.1 * lift, 0, -0.4, -1.7 * lift); setArm(p.armL, -1.25 * lift, 0, 0.75, -1.7 * lift); }
         else { setArm(p.armR, -1.2 * lift, 0, -0.18, -1.55 * lift); setArm(p.armL, -1.25 * lift, 0, 0.18, -1.6 * lift); }
         if (m.extra.horn) { m.extra.horn.visible = true; m.extra.horn.rotation.x = -0.15 * lift - a * 0.12 + (m.kind === 'flute' ? 0 : -0.2); }
-        if (m.extra.bell && m.extra.bell.material) { /* 공유 재질이라 색은 안 바꿉니다 */ }
+        if (m.extra.slide) m.extra.slide.position.z = (0.04 + 0.2 * (0.5 + 0.5 * Math.sin(t * 1.4 + m.phase * 3))) * Math.min(1, a * 3);
         p.torso.rotation.x = -a * 0.06;
         p.head.rotation.x = 0.05;
         break;
@@ -1680,12 +1557,23 @@ export function createHall(canvas) {
   // 연주 화면: 위 막대와 아래 악보 칸 사이에 악단이 꽉 차게(객석 가운데 높은 자리에서)
   const WIDE = { pos: new THREE.Vector3(0, 6.0, 16.2), look: new THREE.Vector3(0, 1.55, -3.2) };
   const _p = new THREE.Vector3(), _l = new THREE.Vector3();
+  // [시작 x,y,z, 끝 x,y,z, 보는 곳 x,y,z]
+  const SECTION_SHOTS = [
+    [-4.6, 2.9, 2.6, -2.2, 2.7, 3.0, -2.6, 1.9, -1.6], // 바이올린
+    [-2.6, 3.9, -1.6, 2.6, 3.9, -1.6, 0, 2.5, -6.6], // 금관
+    [6.6, 3.0, 4.0, 4.4, 2.8, 3.4, 6.4, 2.1, -1.0], // 하프·첼로·베이스
+    [-1.5, 4.4, -3.4, 2.2, 4.4, -3.6, 1.2, 2.8, -8.8], // 타악
+    [-10.2, 2.9, 3.6, -8.4, 2.7, 4.4, -7.0, 1.9, 0.2], // 피아노
+  ];
   function closePlayerFor(t) {
     if (mode !== 'perform' || intro || outro || t % 28 < 14 || t % 28 >= 22) return null;
     const players = [...playersBySlot.values()].filter((m) => m && m.g.visible);
     return players.length ? players[Math.floor(t / 28) % players.length] : null;
   }
+  // 개발용: ?cam=x,y,z,lx,ly,lz 로 카메라를 고정해 같은 자리에서 모형을 비교합니다
+  const DBG_CAM = (new URLSearchParams(location.search).get('cam') || '').split(',').map(Number);
   function cameraFor(t) {
+    if (DBG_CAM.length === 6 && DBG_CAM.every(Number.isFinite)) { _p.set(DBG_CAM[0], DBG_CAM[1], DBG_CAM[2]); _l.set(DBG_CAM[3], DBG_CAM[4], DBG_CAM[5]); return; }
     if (intro) {
       const e = (performance.now() - intro.t0) / 1000;
       const cp = conductor.g.position;
@@ -1705,14 +1593,21 @@ export function createHall(canvas) {
       _l.copy(WIDE.look);
       // Brief, gentle cutaways show the active player's performance; the score
       // HUD stays in its fixed screen-space position and keeps animating.
+      // 사이사이 악기군을 천천히 훑는 장면(현 → 금관 → 타악 → 하프·베이스 → 피아노)
+      const c28 = t % 28;
+      if (!outro && c28 >= 3 && c28 < 9) {
+        const S0 = SECTION_SHOTS[Math.floor(t / 28) % SECTION_SHOTS.length], u = (c28 - 3) / 6;
+        _p.set(lerp(S0[0], S0[3], u), lerp(S0[1], S0[4], u), lerp(S0[2], S0[5], u));
+        _l.set(S0[6], S0[7], S0[8]);
+      }
       const m = closePlayerFor(t);
       if (m) {
-        const facing = m.g.rotation.y;
-        const side = 1.6, front = 3.25;
-        _p.set(m.g.position.x + side*Math.cos(facing) + front*Math.sin(facing),
-          m.g.position.y + (m.p.stand ? 1.75 : 1.45),
-          m.g.position.z - side*Math.sin(facing) + front*Math.cos(facing));
-        _l.set(m.g.position.x, m.g.position.y + (m.p.stand ? 1.25 : .95), m.g.position.z);
+        // 연주자 앞쪽 위에서 내려다봅니다. 옆으로는 객석 쪽으로 비켜서 지휘자·앞줄 단원·보면대에 가리지 않게 합니다
+        const facing = m.g.rotation.y, fx = Math.sin(facing), fz = Math.cos(facing);
+        const sg = -Math.sin(facing) >= 0 ? 1 : -1, sx = Math.cos(facing) * sg, sz = -Math.sin(facing) * sg;
+        const front = m.kind === 'piano' ? 1.5 : 1.9, side = m.kind === 'piano' ? 1.7 : 1.25, drift = Math.sin(t * 0.35) * 0.25;
+        _p.set(m.g.position.x + fx * front + sx * (side + drift), m.g.position.y + (m.p.stand ? 2.05 : 1.9), m.g.position.z + fz * front + sz * (side + drift));
+        _l.set(m.g.position.x + fx * 0.15, m.g.position.y + (m.p.stand ? 1.3 : 1.02), m.g.position.z + fz * 0.15);
       }
       return;
     }
@@ -1785,7 +1680,7 @@ export function createHall(canvas) {
       s.pts.material.opacity = 1 - s.t / 1.2;
     }
     cameraFor(t);
-    const k = intro ? 1 : clamp(dt * 1.6, 0, 1);
+    const k = intro || DBG_CAM.length === 6 ? 1 : clamp(dt * 1.6, 0, 1);
     camState.pos.lerp(_p, k);
     camState.look.lerp(_l, k);
     camera.position.copy(camState.pos);
