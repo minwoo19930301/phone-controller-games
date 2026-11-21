@@ -2,6 +2,10 @@
 import * as THREE from 'three';
 import { makeGolfer } from './golfer.js';
 import { CLUBS as BAG } from './clubs.js';
+import { makeGolfBag, makeGolfCart, makeHoleSign, makeTeePeg, TEE_PEG_H } from './tee-props.js';
+// 코스 품질: 기본은 PC 에서 high(지형 결·그림자·나무 밀도 최대, 환경 조명), 느린 기기는 medium. ?q=low|medium|high 로 고정할 수 있습니다.
+const QS=new URLSearchParams(location.search);
+const LEVEL=['high','medium','low'].includes(QS.get('q'))?QS.get('q'):((navigator.hardwareConcurrency||4)>=8&&!/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)?'high':'medium');
 export const CLUBS = Object.fromEntries(BAG.map(c => [c.id.toLowerCase(), {...c, len:c.lengthM}]));
 const RD=Math.PI/180;
 const V=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
@@ -9,7 +13,7 @@ export function createScene(canvas, firstHole, firstCourse, difficulty='normal')
   const renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});
   renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.3));
   renderer.toneMapping=THREE.ACESFilmicToneMapping;
-  renderer.shadowMap.enabled=true;
+  renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
   const scene=new THREE.Scene(), camera=new THREE.PerspectiveCamera(42,1,.05,6500);
   let hole,course,courseView,tee,ballAt=V(),target=V(0,0,1),aim=0,trail=null,markGroup=new THREE.Group();
   scene.add(markGroup);
@@ -20,15 +24,42 @@ export function createScene(canvas, firstHole, firstCourse, difficulty='normal')
   const focus=V(),cam=V(),look=V();let previous=performance.now(),lastMode='';
   function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()}
   addEventListener('resize',resize);resize();
+  // 티 옆 소품: 골프백은 공을 따라다니고(캐디백), 카트와 홀 안내판은 티에 둡니다
+  const bag=makeGolfBag(color),cart=makeGolfCart(),peg=makeTeePeg();let sign=null;
+  scene.add(bag,cart,peg);
+  const put=(o,x,z,ry)=>{o.position.set(x,hole.height(x,z),z);o.rotation.y=ry};
+  // 공에서 홀 쪽 단위 벡터 t 와 그 왼쪽(골퍼가 서는 쪽) 단위 벡터 l
+  function axes(x,z){const p=hole.aimFrom(x,z),dx=p.x-x,dz=p.z-z,L=Math.hypot(dx,dz)||1,tx=dx/L,tz=dz/L;return{tx,tz,lx:tz,lz:-tx}}
+  function dressTee(){
+    const a=axes(tee.x,tee.z);
+    // 물·벙커·OB 를 피해 자리를 고릅니다(없으면 숨김)
+    const spot=(o,cands,ry)=>{o.visible=false;for(const [u,v] of cands){const x=tee.x+a.lx*u+a.tx*v,z=tee.z+a.lz*u+a.tz*v,sf=hole.surface(x,z);if(sf==='water'||sf==='ob'||sf==='bunker'||sf==='green')continue;put(o,x,z,ry);o.visible=true;return}};
+    spot(cart,[[8.2,-1.5],[9.5,-6],[7,-10],[-8.5,-4]],Math.atan2(a.tx,a.tz)+.3);
+    if(sign){scene.remove(sign);sign.userData.dispose()}
+    sign=makeHoleSign({no:(course.holes?course.holes.indexOf(hole):0)+1,par:hole.par,meters:hole.distToPin(tee.x,tee.z),name:course.name||''});
+    scene.add(sign);spot(sign,[[5.6,3.4],[6.5,0],[5,-4]],Math.atan2(-a.lx-a.tx*.35,-a.lz-a.tz*.35));
+  }
   function setHole(h,c,d='normal'){
     if(courseView)courseView.dispose();
-    hole=h;course=c;courseView=h.build(scene,{level:'low',renderer,environment:false});
-    renderer.toneMappingExposure=courseView.exposure;tee=courseView.setTee(d);setBall(tee.x,tee.z);
+    hole=h;course=c;courseView=h.build(scene,{level:LEVEL,renderer});
+    renderer.toneMappingExposure=courseView.exposure;tee=courseView.setTee(d);dressTee();setBall(tee.x,tee.z);
     setTrail(null);setMarkers([]);courseView.update(0,camera);
   }
-  function setBall(x,z){ballAt.set(x,hole.height(x,z)+.0214,z);sphere.position.copy(ballAt);setAim(aim);}
+  function setBall(x,z){
+    const onTee=hole.surface(x,z)==='tee';
+    ballAt.set(x,hole.height(x,z)+.0214+(onTee?TEE_PEG_H-.006:0),z);sphere.position.copy(ballAt);
+    peg.visible=onTee;if(onTee)peg.position.set(x,hole.height(x,z),z);
+    // 골프백: 골퍼 등 뒤쪽에 세웁니다. 그린·벙커·물 위면 반대편, 그래도 안 되면 숨김
+    const a=axes(x,z);bag.visible=false;
+    for(const [u,v] of [[3.4,2.3],[3.4,-2.2],[4.8,.4],[-3.6,-2]]){
+      const bx=x+a.lx*u+a.tx*v,bz=z+a.lz*u+a.tz*v,sf=hole.surface(bx,bz);
+      if(sf==='green'||sf==='bunker'||sf==='water'||sf==='ob')continue;
+      put(bag,bx,bz,Math.atan2(-a.lx*Math.sign(u),-a.lz*Math.sign(u)));bag.visible=true;break;
+    }
+    setAim(aim);
+  }
   function setGolfer(c,id){
-    if(golfer)golfer.dispose();color=c||color;club=id||club;
+    if(golfer)golfer.dispose();color=c||color;club=id||club;bag.userData.setColor(color);
     golfer=makeGolfer({color});golfer.setClub(club.toUpperCase());scene.add(golfer.root);placeGolfer();
   }
   function placeGolfer(){if(golfer)golfer.placeAtBall(ballAt,target,hole.height(ballAt.x,ballAt.z));}
