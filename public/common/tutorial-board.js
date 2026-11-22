@@ -5,11 +5,13 @@
 //
 //   const board = createTutorialBoard();      // 화면 아래 가운데에 떠 있는 판(mount 를 주면 그 안에)
 //   board.attach(socket);                     // tutorial·players 듣기
-//   board.practicing();                       // 지금 연습 중인 자리 번호들
+//   board.practicing();                       // 지금 연습 중인 자리 번호들 (튜토리얼은 최대 2단계라 칸도 짧게 지나갑니다)
 //   board.hide(true);                         // 경기 중에는 숨기기
 
 const COLORS = { 1: '#ff5a5f', 2: '#3ab4ff', 3: '#ffc93c', 4: '#5ee07a', 5: '#c77dff', 6: '#ff8fd1', 7: '#3ee6d6', 8: '#ff9b3d' };
 const STALE_MS = 120000; // 이만큼 소식이 없으면(폰을 내려놓음) 칸을 지웁니다
+// 번역: 번역 모듈이 있으면 그걸 쓰고, 없으면 {이름} 자리만 채운 원문을 씁니다.
+const T = (tpl, vars) => (window.PCG && typeof window.PCG.t === 'function' ? window.PCG.t(tpl, vars) : String(tpl).replace(/\{(\w+)\}/g, (all, k) => (vars && k in vars ? String(vars[k]) : all)));
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const CSS = `
@@ -71,7 +73,7 @@ function injectCss() {
 const OK_SVG = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 
 /**
- * opts: { mount?: 요소(없으면 화면 아래 가운데에 띄움), position?: 'bottom' | 'top', players?, doneMs = 5000, title? }
+ * opts: { mount?: 요소(없으면 화면 아래 가운데에 띄움), position?: 'bottom' | 'top', players?, doneMs = 3500, title? }
  */
 export function createTutorialBoard(opts = {}) {
   injectCss();
@@ -86,7 +88,7 @@ export function createTutorialBoard(opts = {}) {
   const tiles = new Map(); // slot -> { el, data, at, timer }
   let players = Array.isArray(opts.players) ? opts.players : [];
   let hidden = false;
-  const doneMs = opts.doneMs ?? 5000;
+  const doneMs = opts.doneMs ?? 3500; // 연습이 짧아져서 끝 표시도 짧게
 
   function colorOf(slot) {
     const p = players.find((x) => Number(x.slot) === Number(slot));
@@ -130,7 +132,7 @@ export function createTutorialBoard(opts = {}) {
     else { line = `<b>연습 중</b><span class="pcgb-n">${step}/${total}</span>`; sub = d.title || ''; }
     const bar = Array.from({ length: total }, (_, k) => `<i class="${d.done || k < step - 1 ? 'd' : k === step - 1 ? 'c' : ''}"></i>`).join('');
     t.el.innerHTML = `<div class="pcgb-badge">${esc(nameOf(slot))}</div>` +
-      `<div class="pcgb-main"><div class="pcgb-line">${line}</div><div class="pcgb-t">${d.done ? esc(sub) : `· ${esc(sub)}`}</div><div class="pcgb-bar">${bar}</div></div>` +
+      `<div class="pcgb-main"><div class="pcgb-line">${line}</div><div class="pcgb-t">${d.done ? `<span>${esc(sub)}</span>` : `<span>·</span> <span>${esc(sub)}</span>`}</div><div class="pcgb-bar">${bar}</div></div>` +
       `<div class="pcgb-spin"></div><div class="pcgb-ok">${OK_SVG}</div>`;
   }
 
@@ -189,7 +191,7 @@ export function createTutorialBoard(opts = {}) {
     /** "2P·3P 연습 중" 같은 한 줄(없으면 '') */
     summary() {
       const list = api.practicing();
-      return list.length ? `${list.map(nameOf).join('·')} 연습 중` : '';
+      return list.length ? T('{names} 연습 중', { names: list.map(nameOf).join('·') }) : '';
     },
     hide(on = true) { hidden = Boolean(on); paintHead(); },
     clear() { for (const s of [...tiles.keys()]) remove(s); },

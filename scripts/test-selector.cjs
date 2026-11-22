@@ -85,33 +85,63 @@ function makePage(fetcher) {
     window, URL, AbortController, setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout,
     fetch: fetcher
   });
-  return { click: (event) => click(event), elements, timers, get navigated() { return navigated; } };
+  const noticeTimer = () => [...timers.values()].find((entry) => entry.ms === 400);
+  return { click: (event) => click(event), elements, timers, noticeTimer, get navigated() { return navigated; } };
 }
+const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-test('notice lets the user confirm and enter the chosen game server', async () => {
+test('a fast lookup goes straight to the chosen server without showing any notice', async () => {
   let prevented = false;
   const page = makePage(async (url) => response(url.includes('second') ? 0 : 2));
-  const pending = page.click({ button: 0, preventDefault() { prevented = true; } });
+  await page.click({ button: 0, preventDefault() { prevented = true; } });
   const dialog = page.elements[0];
-  const button = page.elements.find((element) => element.tag === 'button');
   assert.equal(prevented, true);
-  assert.equal(dialog.hidden, false);
-  assert.equal(button.focused, true);
-  assert.match(page.elements.find((element) => element.id === 'server-wait-description').textContent, /시간이 걸릴 수/);
-  assert.equal(page.navigated, undefined);
-  button.events.click();
-  await pending;
   assert.equal(page.navigated, `${servers[1]}/golf/`);
-  assert.equal([...page.timers.values()].some((timer) => timer.ms === 2000), false);
+  assert.equal(dialog.hidden, true); // 안내가 한 번도 뜨지 않음
+  assert.notEqual(dialog.style.display, 'grid');
+  assert.equal(page.noticeTimer(), undefined); // 안내 타이머도 정리됨
+  assert.equal([...page.timers.values()].some((timer) => timer.ms === 2000), false); // 더 이상 2초를 기다리지 않음
 });
 
-test('notice automatically enters the fallback server after two seconds', async () => {
-  const page = makePage(async () => { throw Error('offline'); });
+test('a slow lookup shows one short line after about 400 ms and moves on the moment it resolves', async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const page = makePage(async (url) => { await gate; return response(url.includes('third') ? 0 : 3); });
   const pending = page.click({ button: 0, preventDefault() {} });
-  const timer = [...page.timers.values()].find((entry) => entry.ms === 2000);
-  assert.ok(timer);
+  await flush();
+  const dialog = page.elements[0];
+  const timer = page.noticeTimer();
+  assert.ok(timer, 'the notice is scheduled, not shown yet');
+  assert.equal(dialog.hidden, true);
+  timer.handler(); // 400 ms 가 지남
+  assert.equal(dialog.hidden, false);
+  assert.equal(dialog.style.display, 'grid');
+  const lines = page.elements.filter((element) => element.textContent);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0].textContent, /연결하고 있어요/);
+  assert.equal(page.elements.some((element) => element.tag === 'button'), false); // 확인 버튼 없음
   assert.equal(page.navigated, undefined);
-  timer.handler();
+  release();
+  await pending;
+  assert.equal(page.navigated, `${servers[2]}/golf/`);
+});
+
+test('an offline lookup falls back to the first configured server as soon as the lookup gives up', async () => {
+  const page = makePage(async () => { throw Error('offline'); });
+  await page.click({ button: 0, preventDefault() {} });
+  assert.equal(page.navigated, `${servers[0]}/golf/`);
+  assert.equal(page.noticeTimer(), undefined);
+});
+
+test('the lookup keeps its 1.8 s timeout (sleeping servers fall back after it)', async () => {
+  const sleeping = (url, { signal }) => new Promise((resolve, reject) => { signal.addEventListener('abort', () => reject(Error('timeout'))); });
+  const page = makePage(sleeping);
+  const pending = page.click({ button: 0, preventDefault() {} });
+  await flush();
+  const lookupTimers = [...page.timers.values()].filter((entry) => entry.ms === 1800);
+  assert.equal(lookupTimers.length, 3); // 후보 3대 모두 1.8초 제한
+  assert.equal(page.navigated, undefined);
+  for (const entry of lookupTimers) entry.handler();
   await pending;
   assert.equal(page.navigated, `${servers[0]}/golf/`);
 });

@@ -41,6 +41,9 @@ fs.mkdirSync(output, { recursive: true });
 fs.writeFileSync(path.join(output, 'index.html'), html.replace('</body>', `${router}</body>`));
 fs.copyFileSync(path.join(root, 'scripts/selector-router.js'), path.join(output, 'selector-router.js'));
 fs.cpSync(path.join(root, 'public/previews'), path.join(output, 'previews'), { recursive: true });
+// 다국어: 선택창도 들어오는 순간 각자 언어로 보이도록 번역 모듈과 공통 사전을 같이 내보냅니다.
+fs.mkdirSync(path.join(output, 'common'), { recursive: true });
+for (const f of ['i18n.js', 'i18n-common.js', 'i18n-wait.js']) fs.copyFileSync(path.join(root, 'public/common', f), path.join(output, 'common', f));
 const fontRoot = path.join(output, 'vendor');
 fs.mkdirSync(path.join(fontRoot, 'pretendard/variable'), { recursive: true });
 fs.cpSync(path.join(root, 'node_modules/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css'), path.join(fontRoot, 'pretendard/variable/pretendardvariable-dynamic-subset.css'));

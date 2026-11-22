@@ -1,25 +1,32 @@
-// 처음 하는 사람을 위한 짧은 연습(튜토리얼) 공통 모듈 (폰 쪽).
+// 짧은 연습(튜토리얼) 공통 모듈 (폰 쪽).
 //
-// 폰마다 localStorage['pcg-tut-<key>'] 로 해 봤는지 기억합니다. 처음이면 권한·자세 맞추기 다음에 3~5단계 연습을 띄웁니다.
+// 튜토리얼은 저절로 시작하지 않습니다. firstTime() 은 주소에 ?tut=1 이 있을 때만 true 이고, 평소에는 '튜토리얼 다시 하기'
+// 링크(link())를 눌렀을 때만 run() 됩니다. 한 번 시작해도 단계는 최대 2개입니다(createTutorial 에 { full: true } 를 주면 전부).
 // 단계마다 큰 제목 + 한 줄 설명 + 동작 그림을 보여 주고, 종목의 감지기가 t.signal('swing', data) 처럼 알려 주면 ✓ 와 함께
-// 진동·번쩍임·소리로 칭찬하고 다음 단계로 넘어갑니다. 건너뛰기는 언제나 있습니다.
-// 진행 상황은 c2d tutorial {step, total, title, done} 으로 큰 화면에 보내, 대기실에 "2P 연습 중 2/4 · 휘둘러 보기" 가 뜹니다.
+// 진동·번쩍임·소리로 칭찬하고 바로 다음 단계로 넘어갑니다(마지막 단계 뒤에는 따로 끝 카드가 없이 닫힙니다).
+// 막히지 않도록 3번 틀리거나 12초가 지나면 그 단계는 저절로 통과하고, 건너뛰기 버튼은 늘 크게 보입니다.
+// 진행 상황은 c2d tutorial {step, total, title, done} 으로 큰 화면에 보내, 대기실에 "2P 연습 중 2/2 · 휘둘러 보기" 가 뜹니다.
 //
 //   const tut = createTutorial({ key: 'pingpong', socket, steps: [
 //     { title: '탁구채처럼 쥐기', body: '폰 아래쪽을 손잡이처럼 쥐어요', svg: 'hold' },                  // '다음' 버튼 단계
 //     { title: '포핸드', body: '오른쪽에서 앞으로 휘둘러요', svg: 'swing', waitFor: 'swing', check: (d) => d.hand === 'fore' || '반대쪽이에요' },
 //   ]});
-//   if (tut.firstTime()) await tut.run();
+//   if (tut.firstTime()) await tut.run();    // ?tut=1 일 때만 true. 평소에는 건너뜁니다.
 //   // 감지기에서: tut.signal('swing', data)
-//   tut.link($('waitBox'));   // "튜토리얼 다시 하기" 링크
+//   tut.link($('waitBox'));   // "튜토리얼 다시 하기" 링크 — 눌렀을 때만 연습합니다(필요할 때만 하는 방식)
 //
-// 주소로 시험: ?tut=1 (늘 처음처럼), ?tut=0 (안 띄움), &debug (단계마다 '시험: 성공 처리' 버튼)
+// 주소로 시험: ?tut=1 (시작할 때 띄움), &debug (단계마다 '시험: 성공 처리' 버튼)
 
 import { haptics } from './haptics.js';
 
 const params = new URLSearchParams(location.search);
 const FORCE = params.get('tut');
+const MAX_STEPS = 2; // { full: true } 가 아니면 이만큼만 합니다
+const FAILS_TO_PASS = 3; // 이만큼 틀리면 그 단계는 저절로 통과
+const AUTO_PASS_MS = 12000; // 이 시간이 지나도 저절로 통과
 const DEBUG = params.has('debug');
+// 번역: 번역 모듈이 있으면 그걸 쓰고, 없으면 {이름} 자리만 채운 원문을 씁니다.
+const T = (tpl, vars) => (window.PCG && typeof window.PCG.t === 'function' ? window.PCG.t(tpl, vars) : String(tpl).replace(/\{(\w+)\}/g, (all, k) => (vars && k in vars ? String(vars[k]) : all)));
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // ================================================================
@@ -194,10 +201,11 @@ const CSS = `
 .pcgt *{box-sizing:border-box;}
 .pcgt [hidden]{display:none !important;}
 .pcgt button{-webkit-tap-highlight-color:transparent;font-family:var(--_sans);}
-.pcgt-top{flex:none;display:flex;align-items:center;gap:10px;height:40px;}
+.pcgt-top{flex:none;display:flex;align-items:center;gap:10px;min-height:52px;}
 .pcgt-eyebrow{flex:1;text-align:left;font-size:12px;font-weight:800;letter-spacing:.16em;color:var(--pcgt-c);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.pcgt-skip{appearance:none;margin:0;padding:8px 14px;border-radius:999px;border:1.5px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);
-  color:#dfe6f0;font-size:14px;font-weight:800;cursor:pointer;}
+.pcgt-skip{appearance:none;flex:none;margin:0;min-width:104px;min-height:48px;padding:12px 22px;border-radius:999px;border:2px solid rgba(255,255,255,.4);background:rgba(255,255,255,.16);
+  color:#fff;font-size:17px;font-weight:900;cursor:pointer;position:relative;z-index:2;}
+.pcgt-skip:active{transform:scale(.97);}
 .pcgt-dots{flex:none;display:flex;gap:6px;justify-content:center;margin:6px 0 0;}
 .pcgt-dots i{display:block;width:22px;height:5px;border-radius:3px;background:rgba(255,255,255,.14);transition:background .3s,width .3s;}
 .pcgt-dots i.d{background:color-mix(in srgb,var(--pcgt-c) 60%,transparent);}
@@ -257,7 +265,7 @@ const CSS = `
 .pcgt-next{appearance:none;width:100%;max-width:420px;margin:0;padding:18px;border:0;border-radius:18px;background:var(--pcgt-c);color:#0b0f17;
   font-size:20px;font-weight:900;cursor:pointer;box-shadow:0 10px 30px color-mix(in srgb,var(--pcgt-c) 30%,transparent);}
 .pcgt-next:active{transform:scale(.98);}
-.pcgt-help{appearance:none;margin:0;padding:8px 12px;border:0;background:none;color:#9aa8bf;font-size:14px;font-weight:700;text-decoration:underline;text-underline-offset:3px;cursor:pointer;}
+.pcgt-help{appearance:none;margin:0;padding:12px 16px;border:0;background:none;color:#b9c4d6;font-size:15px;font-weight:700;text-decoration:underline;text-underline-offset:3px;cursor:pointer;}
 .pcgt-help.show{animation:pcgt-fade .4s;}
 .pcgt-sim{appearance:none;margin:0;padding:6px 12px;border-radius:10px;border:1px dashed rgba(255,255,255,.3);background:none;color:#9aa8bf;font:700 12px ui-monospace,monospace;cursor:pointer;}
 .pcgt-link{appearance:none;display:inline-flex;align-items:center;gap:6px;margin:4px auto 0;padding:8px 12px;border:0;background:none;
@@ -295,16 +303,17 @@ const REDO_SVG = '<svg viewBox="0 0 20 20"><path d="M4 10a6 6 0 1 0 2-4.5"/><pat
 
 /**
  * 튜토리얼 만들기.
- * opts: { key, steps, socket?, send?(event, data), color?, title?, onStep?(i, step), onDone?(result), helpAfterMs = 9000,
- *         finish?: { title, body, button } }
+ * opts: { key, steps, socket?, send?(event, data), color?, title?, onStep?(i, step), onDone?(result), helpAfterMs = 5000,
+ *         advanceMs = 500, full?: true (단계 2개 제한 풀기) }
  * step: { title, body?, svg?: 이름|SVG문자열|함수, svgOpts?, waitFor?: '이름'|['이름',..]|'tap'|null, check?(data) → true|false|'안내'|{ok,msg},
  *         count? = 1, hint? = '해 보세요' 대신 쓸 말, okText? = '좋아요!', render?(stageEl, api) → 정리 함수, next? = '다음' }
  */
 export function createTutorial(opts = {}) {
   const key = String(opts.key || 'game');
   const STORE = `pcg-tut-${key}`;
-  const steps = (opts.steps || []).filter(Boolean);
-  const helpAfter = opts.helpAfterMs ?? 9000;
+  const allSteps = (opts.steps || []).filter(Boolean);
+  const steps = opts.full === true ? allSteps : allSteps.slice(0, MAX_STEPS); // 처음 두 단계만(짧게)
+  const helpAfter = opts.helpAfterMs ?? 5000;
   let socket = opts.socket || null;
   let color = opts.color || null;
   let running = null; // { i, root, resolve, step, need, got, busy, timers[] , cleanup }
@@ -333,10 +342,9 @@ export function createTutorial(opts = {}) {
   }
   hook(socket);
 
+  // 저절로 시작하지 않습니다: 주소에 ?tut=1 이 있을 때만 true. ('튜토리얼 다시 하기' 링크는 firstTime 과 상관없이 run() 합니다.)
   function firstTime() {
-    if (FORCE === '1') return true;
-    if (FORCE === '0') return false;
-    try { return !localStorage.getItem(STORE); } catch (e) { return false; }
+    return FORCE === '1';
   }
   function markDone(skipped = false) {
     try { localStorage.setItem(STORE, JSON.stringify({ at: Date.now(), skipped: Boolean(skipped) })); } catch (e) {}
@@ -381,12 +389,13 @@ export function createTutorial(opts = {}) {
     const r = running;
     if (!r) return;
     clearTimers();
-    if (i >= steps.length) { showFinish(); return; }
+    if (i >= steps.length) { complete(); return; }
     const step = steps[i];
     r.i = i;
     r.step = step;
     r.need = Math.max(1, step.count || 1);
     r.got = 0;
+    r.fails = 0;
     r.busy = false;
     const waits = step.waitFor == null || step.waitFor === 'next' ? [] : [].concat(step.waitFor);
     r.waits = waits;
@@ -416,6 +425,8 @@ export function createTutorial(opts = {}) {
       help.addEventListener('click', () => go(i + 1));
       if (helpAfter > 0) later(() => { help.hidden = false; help.classList.add('show'); }, helpAfter);
     }
+    // 막히지 않게: 12초가 지나면 저절로 통과(건너뛰기·취소·성공이면 later 타이머가 지워집니다)
+    if (!manual) later(() => autoPass(i), AUTO_PASS_MS);
     const sim = bottom.querySelector('.pcgt-sim');
     if (sim) sim.addEventListener('click', () => succeed(null, true));
     if (waits.includes('tap')) {
@@ -447,6 +458,8 @@ export function createTutorial(opts = {}) {
   function failed(msg) {
     const r = running;
     if (!r || r.busy) return;
+    r.fails = (r.fails || 0) + 1;
+    if (r.fails >= FAILS_TO_PASS) { autoPass(r.i); return; }
     setMsg(msg || '조금만 다르게 해 볼까요?', false);
     const art = r.root.querySelector('.pcgt-art');
     if (art) {
@@ -455,6 +468,18 @@ export function createTutorial(opts = {}) {
       art.classList.add('bad');
     }
     try { haptics.play('warn', 0.5); } catch (e) {}
+  }
+
+  /** 3번 틀렸거나 12초가 지난 단계: 막히지 않게 그냥 통과시킵니다. */
+  function autoPass(i) {
+    const r = running;
+    if (!r || r.busy || r.i !== i || i < 0) return;
+    r.busy = true;
+    setMsg('괜찮아요, 다음으로 가요', true);
+    const help = r.root.querySelector('.pcgt-help');
+    if (help) help.hidden = true;
+    try { haptics.tick({ noFlash: true }); } catch (e) {}
+    later(() => go(i + 1), 450);
   }
 
   function succeed(res, forced) {
@@ -468,20 +493,20 @@ export function createTutorial(opts = {}) {
     if (r.got < r.need && !forced) {
       // 여러 번 해야 하는 단계: 작은 ✓ 만
       if (art) { art.classList.remove('pip'); void art.offsetWidth; art.classList.add('pip'); }
-      setMsg(msg || `좋아요! ${r.need - r.got}번 더`, true);
+      setMsg(msg || T('좋아요! {n}번 더', { n: r.need - r.got }), true);
       try { haptics.hit(0.6); } catch (e) {}
       return;
     }
     r.busy = true;
     if (art) art.classList.add('ok');
     const st = r.root.querySelector('.pcgt-status');
-    if (st) st.innerHTML = `<span class="pcgt-good">✓ ${esc(r.step.okText || '좋아요!')}</span>`;
+    if (st) st.innerHTML = `<span class="pcgt-good"><i aria-hidden="true">✓</i><span>${esc(r.step.okText || '좋아요!')}</span></span>`;
     setMsg(msg || '', true);
     const help = r.root.querySelector('.pcgt-help');
     if (help) help.hidden = true;
     try { haptics.success(); } catch (e) {}
     const i = r.i;
-    later(() => go(i + 1), opts.advanceMs ?? 1100);
+    later(() => go(i + 1), opts.advanceMs ?? 500);
   }
 
   /** 종목 감지기가 부릅니다. 지금 단계가 이 신호를 기다리면 판정하고 true 를 돌려줍니다. */
@@ -499,28 +524,18 @@ export function createTutorial(opts = {}) {
     return true;
   }
 
-  function showFinish() {
+  /** 마지막 단계까지 마치면 따로 끝 카드 없이 바로 닫습니다. */
+  function complete() {
     const r = running;
     if (!r) return;
     clearTimers();
     r.i = steps.length;
     r.step = null;
     r.busy = false;
-    r.dots.forEach((d) => { d.className = 'd'; });
-    const f = opts.finish || {};
-    const card = r.root.querySelector('.pcgt-card');
-    card.className = 'pcgt-card';
-    void card.offsetWidth;
-    card.classList.add('enter');
-    card.innerHTML = `<div class="pcgt-art">${illustrations.check()}</div>` +
-      `<div class="pcgt-num-step">DONE</div><h2 class="pcgt-title">${esc(f.title || '연습 끝!')}</h2>` +
-      `<p class="pcgt-body">${esc(f.body || '이제 준비를 누르면 돼요.\n다시 하고 싶으면 ‘튜토리얼 다시 하기’를 눌러요.')}</p>`;
-    r.root.querySelector('.pcgt-bottom').innerHTML = `<button type="button" class="pcgt-next">${esc(f.button || '좋아요')}</button>`;
-    r.root.querySelector('.pcgt-next').addEventListener('click', () => finish(false));
-    r.root.querySelector('.pcgt-skip').hidden = true;
     markDone(false);
     report({ step: steps.length, title: '연습 끝', done: true });
     try { haptics.success(); } catch (e) {}
+    finish(false);
   }
 
   function finish(skipped) {

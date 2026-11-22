@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0a1220">
 <title>Phone Controller Games</title>
+<script src="/common/i18n-wait.js"></script>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
 <style>
@@ -50,11 +51,16 @@
   .card .pv { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -1; }
   a.card::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, transparent 45%, rgba(0,0,0,.75)); }
   footer { margin-top: 32px; color: var(--dim); font-size: 14px; }
+  .topline { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .topline h1.title { margin-bottom: 36px; }
 </style>
 </head>
 <body>
 <main>
-  <h1 class="title">PHONE CONTROLLER GAMES</h1>
+  <div class="topline">
+    <h1 class="title">PHONE CONTROLLER GAMES</h1>
+    <div id="langBox"></div>
+  </div>
   <div class="games">
     <a class="card baseball" href="/baseball/">
       <img class="pv" src="/previews/baseball.gif" alt="" loading="lazy">
@@ -149,5 +155,10 @@
     </a>
   </div>
 </main>
+<script type="module">
+  import { mountSwitcher } from '/common/i18n.js';
+  import '/common/i18n-common.js';
+  mountSwitcher(document.getElementById('langBox'));
+</script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 // 난이도·종목 옵션 공통 모듈 (큰 화면 쪽).
 //
-// 큰 화면이 값을 가지고(종목마다 localStorage 'pcg-settings-<game>' 에 기억), 대기실에 알약 버튼과 질문 카드를 그리고,
+// 큰 화면이 값을 가지고(종목마다 localStorage 'pcg-settings2-<game>' 에 기억), 대기실에 알약 버튼과 질문 카드를 그리고,
 // 폰이 보내는 c2d settings 를 받아 바꾸고, game_state.settings 로 폰들에 알립니다. 경기 중에는 잠급니다.
 //
 //   const settings = createSettings({ game: 'pingpong', fields: [fields.difficulty(), fields.slow()], onChange: pushState });
@@ -11,7 +11,15 @@
 //   const win = settings.pick({ easy: 0.30, normal: 0.20, hard: 0.12 });
 //
 // 주소로 시험: ?difficulty=easy, ?slow=on (저장하지 않음), ?settings=reset (이 화면에 기억한 값 지우기)
+//
+// 기본 난이도는 '쉬움'입니다. 기억한 값은 pcg-settings2-<game> 에 저장합니다(예전 pcg-settings-<game> 은 읽지 않습니다:
+// 쉬움이 기본이 되기 전에 기억된 '보통'이 새 기본값을 이기지 않도록 저장 버전을 올렸습니다).
 
+// 번역 함수: 번역 모듈이 있으면 그걸 쓰고, 없으면 {이름} 자리만 채운 원문을 씁니다(이 모듈은 import 가 없습니다).
+const fill = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (all, k) => (vars && k in vars ? String(vars[k]) : all));
+const T = (tpl, vars) => (typeof window !== 'undefined' && window.PCG && typeof window.PCG.t === 'function' ? window.PCG.t(tpl, vars) : fill(tpl, vars));
+
+export const DEFAULT_DIFFICULTY = 'easy';
 export const DIFFICULTIES = ['easy', 'normal', 'hard'];
 export const DIFF_LABEL = { easy: '쉬움', normal: '보통', hard: '어려움' };
 export const PLAYER_COLORS = { 1: '#ff5a5f', 2: '#3ab4ff', 3: '#ffc93c', 4: '#5ee07a', 5: '#c77dff', 6: '#ff8fd1', 7: '#3ee6d6', 8: '#ff9b3d' };
@@ -30,7 +38,7 @@ export const fields = {
     const hints = { easy: '아주 넉넉하게 봐줘요', normal: '적당히 봐줘요', hard: '봐주는 것 없이', ...(o.hints || {}) };
     const { hints: _h, ...rest } = o;
     return {
-      key: 'difficulty', label: '난이도', type: 'pills', default: 'normal', hotkey: 'd',
+      key: 'difficulty', label: '난이도', type: 'pills', default: DEFAULT_DIFFICULTY, hotkey: 'd',
       options: [
         { value: 'easy', label: '쉬움', hint: hints.easy, tone: '#5ee07a', level: 1 },
         { value: 'normal', label: '보통', hint: hints.normal, tone: '#8fd8ff', level: 2 },
@@ -39,15 +47,14 @@ export const fields = {
       ...rest
     };
   },
-  /** 슬로우 모드: 처음엔 비어 있고, 누가 답하기 전까지 질문 카드가 뜹니다(준비 막힘). */
+  /** 슬로우 모드: 그냥 켜기/끄기 알약이고 처음부터 켜져 있습니다(질문 카드로 준비를 막지 않습니다). */
   slow(o = {}) {
     return {
-      key: 'slow', label: '슬로우 모드', type: 'ask', hotkey: 'l',
+      key: 'slow', label: '슬로우 모드', type: 'pills', default: true, hotkey: 'l',
       options: [
-        { value: true, label: '켜기', short: '켜짐', said: '켰어요' },
+        { value: true, label: '켜기', short: '켜짐', said: '켰어요', hint: '치기 직전에 느려져요' },
         { value: false, label: '끄기', short: '꺼짐', said: '껐어요' }
       ],
-      ask: { title: '슬로우 모드 켤까요?', body: '치기 직전에 느려져서 타이밍 맞추기 쉬워요' },
       ...o
     };
   },
@@ -184,7 +191,8 @@ export function createSettings(opts = {}) {
   const game = String(opts.game || 'game');
   const schema = (opts.fields || opts.schema || [fields.difficulty()]).map(normalizeField);
   const byKey = new Map(schema.map((f) => [f.key, f]));
-  const STORE = `pcg-settings-${game}`;
+  const STORE = `pcg-settings2-${game}`; // 2: 기본 난이도를 쉬움으로 바꾸면서 올린 저장 버전
+  const OLD_STORE = `pcg-settings-${game}`;
   const persist = opts.persist !== false;
   const sid = Math.random().toString(36).slice(2, 8); // 이 화면(페이지) 구분. 폰은 같은 sid 의 rev 가 커질 때만 받아들입니다.
   let rev = 1;
@@ -197,7 +205,7 @@ export function createSettings(opts = {}) {
   const mounts = new Set();
 
   // ---------- 불러오기 ----------
-  if (params.get('settings') === 'reset') { try { localStorage.removeItem(STORE); } catch (e) {} }
+  if (params.get('settings') === 'reset') { try { localStorage.removeItem(STORE); localStorage.removeItem(OLD_STORE); } catch (e) {} }
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) { saved = {}; }
   const values = {};
@@ -399,7 +407,7 @@ export function createSettings(opts = {}) {
       row.dataset.key = f.key;
       const kbd = f.hotkey ? `<kbd>${esc(f.hotkey.replace(/^Key/, ''))}</kbd>` : '';
       const lv = (o) => (o.level ? `<i class="pcgs-lv">${[1, 2, 3].map((n) => `<b class="${n <= o.level ? 'f' : ''}"></b>`).join('')}</i>` : '');
-      row.innerHTML = `<div class="pcgs-label">${esc(f.label || f.key)}${f.perPlayer ? ' · 모두' : ''}${kbd}</div>` +
+      row.innerHTML = `<div class="pcgs-label"><span>${esc(f.label || f.key)}</span>${f.perPlayer ? '<span> · 모두</span>' : ''}${kbd}</div>` +
         `<div class="pcgs-seg" role="radiogroup">${f.options.map((o, i) => `<button type="button" class="pcgs-pill" role="radio" data-i="${i}"${o.tone ? ` style="--tone:${esc(o.tone)}"` : ''}><span>${esc(o.short && f.type === 'ask' ? o.short : o.label)}</span>${lv(o)}</button>`).join('')}</div>` +
         `<div class="pcgs-hint"></div>`;
       row.addEventListener('click', (e) => {
@@ -473,7 +481,9 @@ export function createSettings(opts = {}) {
     const col = (p && p.color) || PLAYER_COLORS[slot] || '#fff';
     const who = slot ? `<b style="--pc:${esc(col)}">${esc((p && p.name) || slot + 'P')}</b>` : '';
     const val = o ? (f.type === 'ask' ? o.short || o.label : o.label) : '';
-    parts.toast.innerHTML = `${who}${esc(f.label || f.key)} → ${esc(val)}${f.perPlayer && slot ? ' (각자)' : ''}`;
+    // 한 문장을 틀 하나로 만들어 번역합니다(조각조각 번역하지 않습니다).
+    const line = T(f.perPlayer && slot ? '{label} → {value} (각자)' : '{label} → {value}', { label: f.label || f.key, value: val });
+    parts.toast.innerHTML = `${who}<span>${esc(line)}</span>`;
     parts.toast.classList.add('on');
     parts.foot.hidden = false;
     clearTimeout(parts.toastTimer);
@@ -542,8 +552,8 @@ export function createSettings(opts = {}) {
     unanswered,
     isLocked: () => locked,
     /** 난이도별 값: settings.pick({ easy, normal, hard }, slot?) */
-    pick: (table, slot) => byDifficulty(get('difficulty', slot) || 'normal', table),
-    difficulty: (slot) => get('difficulty', slot) || 'normal',
+    pick: (table, slot) => byDifficulty(get('difficulty', slot) || DEFAULT_DIFFICULTY, table),
+    difficulty: (slot) => get('difficulty', slot) || DEFAULT_DIFFICULTY,
     get values() { return snapshotValues(); },
     onChange(fn) { subs.add(fn); return () => subs.delete(fn); },
     destroy() {

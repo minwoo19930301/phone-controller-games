@@ -12,6 +12,19 @@
 //   "~" 를 붙이면 다음 같은 음과 붙임줄로 이어집니다. "|" 는 마디 줄이고 박 수 검사에 씁니다.
 //   화음: "D A | Bm F#m:1 G:3 | N" 마디 안 화음은 길이를 안 적으면 똑같이 나눕니다. N 은 화음 없음.
 
+// ───────────── 제목·작곡가 (페이지 언어에 맞춰) ─────────────
+// 한국어 페이지면 한국어 필드(title, composer), 아니면 영어 필드(en, composerEn)를 돌려줍니다.
+// 언어는 globalThis.PCG?.i18n?.lang?.() 로 읽으므로 번역 모듈이 없거나 node 에서는 한국어로 봅니다. 이 파일은 import 가 없는 채로 둡니다.
+const pageLang = () => (globalThis.PCG && globalThis.PCG.i18n && typeof globalThis.PCG.i18n.lang === 'function' ? globalThis.PCG.i18n.lang() : 'ko') || 'ko';
+export function songTitle(song) {
+  if (!song) return '';
+  return pageLang() === 'ko' ? song.title : song.en || song.title;
+}
+export function songComposer(song) {
+  if (!song) return '';
+  return pageLang() === 'ko' ? song.composer : song.composerEn || song.composer;
+}
+
 export const PART_NAMES = ['melody', 'harmony', 'bass', 'chords', 'drums', 'perc'];
 export const DRUM = { kick: 36, stick: 37, snare: 38, clap: 39, tomLow: 45, hat: 42, hatOpen: 46, tomMid: 47, tomHigh: 48, crash: 49, ride: 51, tamb: 54, triangle: 81, castanet: 85 };
 export const DIFFICULTIES = ['easy', 'normal', 'hard'];

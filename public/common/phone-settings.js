@@ -12,7 +12,7 @@
 
 import { haptics } from './haptics.js';
 
-const DIFF_FALLBACK = 'normal';
+const DIFF_FALLBACK = 'easy'; // 큰 화면의 기본값과 같습니다(첫 상태가 오기 전에도 같은 값)
 const PENDING_MS = 2500; // 화면이 이 시간 안에 확인하지 않으면 원래 값으로 되돌립니다
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const hasBatchim = (w) => {
@@ -26,6 +26,10 @@ const rieul = (w) => {
 const eul = (w) => (hasBatchim(w) ? '을' : '를');
 const euro = (w) => (hasBatchim(w) && !rieul(w) ? '으로' : '로');
 const same = (a, b) => a === b || String(a) === String(b);
+// 번역: 번역 모듈이 있으면 그걸 쓰고, 없으면 {이름} 자리만 채운 원문을 씁니다.
+const fill = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (all, k) => (vars && k in vars ? String(vars[k]) : all));
+const T = (tpl, vars) => (window.PCG && typeof window.PCG.t === 'function' ? window.PCG.t(tpl, vars) : fill(tpl, vars));
+const isKo = () => !(window.PCG && window.PCG.i18n && window.PCG.i18n.lang) || window.PCG.i18n.lang() === 'ko';
 
 const CSS = `
 .pcgp{--_c:var(--pcgp-accent,var(--c,#8fd8ff));--_sans:"Pretendard Variable",Pretendard,-apple-system,system-ui,sans-serif;
@@ -72,6 +76,13 @@ const CSS = `
 .pcgp.compact .pcgp-pill{min-height:36px;font-size:14px;}
 .pcgp.compact .pcgp-hint{display:none;}
 .pcgp.compact .pcgp-title{font-size:19px;}
+.pcgp-opt{appearance:none;-webkit-appearance:none;align-self:flex-start;display:inline-flex;align-items:center;gap:6px;margin:0;min-height:36px;padding:6px 14px;border-radius:999px;
+  border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#aab6cc;font:700 13px/1 var(--_sans);cursor:pointer;-webkit-tap-highlight-color:transparent;}
+.pcgp-opt svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;transition:transform .2s;}
+.pcgp-opt[aria-expanded="true"] svg{transform:rotate(180deg);}
+.pcgp-opt[hidden],.pcgp-more[hidden]{display:none;}
+.pcgp-more{display:flex;flex-direction:column;gap:10px;}
+.pcgp-note b.scr{font-family:var(--_sans);font-weight:800;font-size:11px;padding:2px 8px;}
 .pcgp-blocked{opacity:.42 !important;filter:saturate(.4);}
 .pcgp-readyhint{margin:6px 0 0;font-size:13px;font-weight:700;color:#ffcf8a;text-align:center;font-family:var(--_sans,"Pretendard Variable",Pretendard,system-ui,sans-serif);}
 .pcgp-readyhint[hidden]{display:none;}
@@ -193,12 +204,13 @@ export function createPhoneSettings(opts = {}) {
     const o = optOf(f, lc.value);
     if (!o) return;
     const by = Number(lc.by);
-    const who = by ? `<b style="--pc:${COLORS[by] || '#fff'}">${by}P</b>가` : '큰 화면에서';
-    let text;
-    if (o.said) text = `${esc(f.label)}${eul(f.label)} ${esc(o.said)}`;
-    else text = `${esc(f.label)}${eul(f.label)} ${esc(o.label)}${euro(o.label)} 바꿨어요`;
     if (f.perPlayer && by) return; // 각자 고르는 값은 남의 것을 알릴 필요가 없습니다
-    setNote(`${who} ${text}`, 2800);
+    // 누가: 칩 하나(2P / 큰 화면). 무엇을: 조사 없는 한 문장 틀. 한국어만 조사를 붙여 자연스럽게 씁니다.
+    const who = by ? `<b style="--pc:${COLORS[by] || '#fff'}">${by}P</b>` : `<b class="scr" style="--pc:#fff">${esc(T('큰 화면'))}</b>`;
+    let text;
+    if (o.said) text = isKo() ? `${f.label}${eul(f.label)} ${o.said}` : T('{label} {said}', { label: f.label, said: o.said });
+    else text = isKo() ? `${f.label}${eul(f.label)} ${o.label}${euro(o.label)} 바꿨어요` : T('{label}을(를) {value}(으)로 바꿨어요', { label: f.label, value: o.label });
+    setNote(`${who}<span>${esc(text)}</span>`, 2800);
   }
 
   function setNote(html, ms) {
@@ -224,13 +236,15 @@ export function createPhoneSettings(opts = {}) {
     const root = document.createElement('div');
     root.className = 'pcgp' + (mo.compact || opts.compact ? ' compact' : '');
     root.hidden = true;
+    const parts = { root, sig: '', opt: false };
     root.addEventListener('click', (e) => {
+      const ob = e.target.closest('[data-opt]');
+      if (ob && root.contains(ob)) { parts.opt = !parts.opt; paint(parts); return; }
       const b = e.target.closest('[data-key][data-i]');
       if (!b || !root.contains(b)) return;
       const f = field(b.dataset.key);
       if (f) choose(f.key, f.options[Number(b.dataset.i)].value);
     });
-    const parts = { root, sig: '' };
     mounts.add(parts);
     paint(parts);
     if (el) el.appendChild(root);
@@ -243,7 +257,11 @@ export function createPhoneSettings(opts = {}) {
     if (sig === parts.sig) return;
     parts.sig = sig;
     const lv = (o) => (o.level ? `<i class="pcgp-lv">${[1, 2, 3].map((n) => `<b class="${n <= o.level ? 'f' : ''}"></b>`).join('')}</i>` : '');
+    const rowHtml = (f) => `<div class="pcgp-row" data-row="${esc(f.key)}"><span class="pcgp-label">${esc(f.label)}${f.perPlayer ? '<small>나만</small>' : ''}</span>` +
+      `<div class="pcgp-seg" role="radiogroup" aria-label="${esc(f.label)}">${f.options.map((o, i) => `<button type="button" class="pcgp-pill" role="radio" data-key="${esc(f.key)}" data-i="${i}"${o.tone ? ` style="--tone:${esc(o.tone)}"` : ''}>${esc(f.type === 'ask' && o.short ? o.short : o.label)}${lv(o)}</button>`).join('')}</div>` +
+      `<span class="pcgp-hint"></span></div>`;
     let html = '';
+    // 질문 카드는 맨 위(접히지 않음)
     for (const f of list) {
       if (f.type === 'ask' && f.ask) {
         html += `<div class="pcgp-ask" data-ask="${esc(f.key)}"><div class="pcgp-eyebrow"><i></i>모두에게 물어봐요</div>` +
@@ -252,13 +270,17 @@ export function createPhoneSettings(opts = {}) {
           `<div class="pcgp-foot">누가 고르든 모두에게 적용돼요</div></div>`;
       }
     }
-    for (const f of list) {
-      html += `<div class="pcgp-row" data-row="${esc(f.key)}"><span class="pcgp-label">${esc(f.label)}${f.perPlayer ? '<small>나만</small>' : ''}</span>` +
-        `<div class="pcgp-seg" role="radiogroup" aria-label="${esc(f.label)}">${f.options.map((o, i) => `<button type="button" class="pcgp-pill" role="radio" data-key="${esc(f.key)}" data-i="${i}"${o.tone ? ` style="--tone:${esc(o.tone)}"` : ''}>${esc(f.type === 'ask' && o.short ? o.short : o.label)}${lv(o)}</button>`).join('')}</div>` +
-        `<span class="pcgp-hint"></span></div>`;
+    // 난이도가 먼저, 나머지 줄은 작은 '옵션' 버튼 뒤에 접어 둡니다.
+    const diff = list.filter((f) => f.key === 'difficulty');
+    const rest = list.filter((f) => f.key !== 'difficulty');
+    for (const f of diff) html += rowHtml(f);
+    if (rest.length) {
+      html += `<button type="button" class="pcgp-opt" data-opt aria-expanded="false" hidden><span>옵션</span><svg viewBox="0 0 12 12"><path d="M2 4.5l4 4 4-4"/></svg></button>` +
+        `<div class="pcgp-more" hidden>${rest.map(rowHtml).join('')}</div>`;
     }
     html += '<div class="pcgp-note" hidden></div>';
     parts.root.innerHTML = html;
+    parts.opt = parts.opt || false; // 펼침 상태는 줄을 다시 그려도 유지
   }
 
   function paint(parts) {
@@ -287,6 +309,15 @@ export function createPhoneSettings(opts = {}) {
       const o = optOf(f, v);
       row.querySelector('.pcgp-hint').textContent = o && o.hint ? o.hint : '';
     }
+    // '옵션' 접기: 접힌 줄 중 보여 줄 것(질문 전이 아닌 것)이 하나라도 있을 때만 버튼을 보입니다.
+    const optBtn = root.querySelector('[data-opt]');
+    const more = root.querySelector('.pcgp-more');
+    if (optBtn && more) {
+      const shown = list.some((f) => f.key !== 'difficulty' && !(f.type === 'ask' && get(f.key) === undefined));
+      optBtn.hidden = !shown;
+      optBtn.setAttribute('aria-expanded', parts.opt && shown ? 'true' : 'false');
+      more.hidden = !(parts.opt && shown);
+    }
     const note = root.querySelector('.pcgp-note');
     if (note) {
       if (noteMsg && noteMsg.until > Date.now()) { note.innerHTML = noteMsg.html; note.hidden = false; }
@@ -305,7 +336,8 @@ export function createPhoneSettings(opts = {}) {
       r.btn.setAttribute('aria-disabled', blocked ? 'true' : 'false');
       if (r.hint) {
         const f = field(left[0]);
-        r.hint.textContent = blocked ? (r.text || `${f ? f.label : '설정'}${f ? eul(f.label) : '을'} 먼저 골라 주세요`) : '';
+        const lbl = f ? f.label : '설정';
+        r.hint.textContent = blocked ? (r.text || (isKo() ? `${lbl}${eul(lbl)} 먼저 골라 주세요` : T('{label}을(를) 먼저 골라 주세요', { label: lbl }))) : '';
         r.hint.hidden = !blocked;
       }
     }
@@ -408,6 +440,8 @@ export function createPhoneSettings(opts = {}) {
       subs.clear();
     }
   };
+  // 언어를 바꾸면 틀로 만든 글(준비 안내)을 다시 씁니다.
+  window.addEventListener('pcg-langchange', () => { paintAll(); paintReady(); });
   window.PCG = window.PCG || {};
   window.PCG.phoneSettings = api;
   return api;

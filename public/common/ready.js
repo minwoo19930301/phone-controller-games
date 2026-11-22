@@ -9,6 +9,9 @@
   const orig = window.io;
   if (!orig || orig.__ready) return;
   const isPhone = location.pathname.startsWith('/play');
+  // 번역: 이 파일은 일반 스크립트라 import 를 못 씁니다. 번역 모듈(window.PCG.t)이 없으면 {이름} 자리만 채운 한국어를 씁니다.
+  const T = (tpl, vars) => (window.PCG && typeof window.PCG.t === 'function' ? window.PCG.t(tpl, vars)
+    : String(tpl).replace(/\{(\w+)\}/g, (all, k) => (vars && k in vars ? String(vars[k]) : all)));
   let bar = null;
   let mySlot = null;
   let last = null; // 마지막 ready_state
@@ -44,13 +47,14 @@
       const off = away.includes(s);
       return '<span style="display:inline-block;margin:0 3px;padding:1px 8px;border-radius:999px;' + (off ? 'opacity:.45;' : '') +
         (on ? 'background:' + COLORS[s] + ';color:#0b1420' : 'box-shadow:inset 0 0 0 1.5px ' + COLORS[s] + ';color:' + COLORS[s]) +
-        '">' + s + 'P' + (off ? ' 끊김' : '') + '</span>';
+        '">' + s + 'P' + (off ? ' ' + T('끊김') : '') + '</span>';
     }).join('');
     const mine = isPhone && mySlot != null && st.ready.includes(mySlot);
     let head;
-    if (isPhone) head = mine ? '준비 완료 · 다른 사람 기다리는 중' : '다른 사람이 준비했어요 · 준비를 누르세요';
-    else if (nag) head = `모두 준비해야 시작해요 · 준비 ${st.ready.length}/${st.need}`;
-    else head = `준비 ${st.ready.length}/${st.need} · 폰에서 모두 준비를 누르면 시작`;
+    const cnt = { a: st.ready.length, b: st.need };
+    if (isPhone) head = mine ? T('준비 완료 · 다른 사람 기다리는 중') : T('다른 사람이 준비했어요 · 준비를 누르세요');
+    else if (nag) head = T('모두 준비해야 시작해요 · 준비 {a}/{b}', cnt);
+    else head = T('준비 {a}/{b} · 폰에서 모두 준비를 누르면 시작', cnt);
     b.innerHTML = head + '&nbsp;&nbsp;' + dots;
     b.style.boxShadow = nag ? '0 0 0 3px #ffc93c, 0 6px 24px rgba(0,0,0,.35)' : '0 6px 24px rgba(0,0,0,.35)';
     b.style.display = 'block';
@@ -66,6 +70,8 @@
       setTimeout(show, 2600);
     }, true);
   }
+  // 언어를 바꾸면(새로 고침 없이) 띠를 다시 씁니다.
+  window.addEventListener('pcg-langchange', () => { try { show(); } catch (e) {} });
   function wrap(...a) {
     const s = orig(...a);
     try {

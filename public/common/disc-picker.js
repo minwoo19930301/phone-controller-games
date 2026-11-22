@@ -12,12 +12,18 @@
 //
 // 순서는 페이지를 열 때마다 섞이고, 처음 가운데에 오는 CD 는 직전 방문과 겹치지 않습니다(localStorage).
 
+import { songTitle, songComposer } from './music/songs.js';
+
+// 번역: 번역 모듈이 있으면 그걸 쓰고, 없으면 {이름} 자리만 채운 원문을 씁니다. (DOM 글자는 저절로 번역되므로 캔버스·틀 글자에만 씁니다)
+const T = (tpl, vars) => (globalThis.PCG && typeof globalThis.PCG.t === 'function' ? globalThis.PCG.t(tpl, vars) : String(tpl).replace(/\{(\w+)\}/g, (all, k) => (vars && k in vars ? String(vars[k]) : all)));
+const curLang = () => (globalThis.PCG && globalThis.PCG.i18n && globalThis.PCG.i18n.lang ? globalThis.PCG.i18n.lang() : 'ko');
+
 const DIFF_LABEL = { easy: '쉬움', normal: '보통', hard: '어려움' };
 const CSS_ID = 'disc-picker-css';
 // 실제 연주 녹음은 게임용 편곡과 별개입니다. 파일별 원본·라이선스: music/recordings/README.md
 const RECORDINGS = {
-  'fur-elise': { file: 'fur-elise.mp3', artist: 'V Gao (Gaodifan) · 피아노', source: 'https://commons.wikimedia.org/wiki/File:FurElise.ogg', license: 'CC0', licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/' },
-  gymnopedie: { file: 'gymnopedie.mp3', artist: 'Michael Laucke · 기타 편곡 연주', source: 'https://commons.wikimedia.org/wiki/File:Satie_Gymnopedie_No_1_performed_by_Michael_Laucke.flac', license: 'CC BY-SA 4.0', licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0/' },
+  'fur-elise': { file: 'fur-elise.mp3', artist: 'V Gao (Gaodifan)', role: '피아노', source: 'https://commons.wikimedia.org/wiki/File:FurElise.ogg', license: 'CC0', licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/' },
+  gymnopedie: { file: 'gymnopedie.mp3', artist: 'Michael Laucke', role: '기타 편곡 연주', source: 'https://commons.wikimedia.org/wiki/File:Satie_Gymnopedie_No_1_performed_by_Michael_Laucke.flac', license: 'CC BY-SA 4.0', licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0/' },
 };
 
 const CSS = `
@@ -218,8 +224,10 @@ function wrapText(g, text, maxW) {
   }
   return out;
 }
+// 표지 글자는 캔버스라 언어마다 따로 그립니다(그림만 있는 표지는 언어와 상관없음).
+const coverKey = (song, size, text = true) => song.id + '|' + size + (text ? '|' + curLang() : '|art');
 export function drawCover(song, size = 360, { text = true } = {}) {
-  const key = song.id + '|' + size + (text ? '' : '|art');
+  const key = coverKey(song, size, text);
   if (coverCache.has(key)) return coverCache.get(key);
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -248,11 +256,12 @@ export function drawCover(song, size = 360, { text = true } = {}) {
   g.textBaseline = 'alphabetic';
   g.fillStyle = 'rgba(255,255,255,.8)';
   g.font = `700 ${Math.round(size * 0.04)}px ${FONT}`;
-  g.fillText((song.genre || '').toUpperCase(), pad, pad + size * 0.04);
+  g.fillText(T(song.genre || '').toUpperCase(), pad, pad + size * 0.04);
   let fs = size * 0.105;
   g.font = `800 ${Math.round(fs)}px ${FONT}`;
-  let lines = wrapText(g, song.title, size - pad * 2);
-  if (lines.length > 2) { fs = size * 0.082; g.font = `800 ${Math.round(fs)}px ${FONT}`; lines = wrapText(g, song.title, size - pad * 2).slice(0, 3); }
+  const title = songTitle(song);
+  let lines = wrapText(g, title, size - pad * 2);
+  if (lines.length > 2) { fs = size * 0.082; g.font = `800 ${Math.round(fs)}px ${FONT}`; lines = wrapText(g, title, size - pad * 2).slice(0, 3); }
   const small = size * 0.042;
   let y = size - pad - small * 2.6 - (lines.length - 1) * fs * 1.12;
   g.fillStyle = '#fff';
@@ -262,10 +271,10 @@ export function drawCover(song, size = 360, { text = true } = {}) {
   g.shadowBlur = 0;
   g.font = `600 ${Math.round(small)}px ${FONT}`;
   g.fillStyle = 'rgba(255,255,255,.88)';
-  g.fillText(song.composer || '', pad, size - pad - small * 1.25);
+  g.fillText(songComposer(song), pad, size - pad - small * 1.25);
   g.fillStyle = 'rgba(255,255,255,.55)';
   g.font = `500 ${Math.round(small * 0.85)}px ${FONT}`;
-  const en = song.en || '';
+  const en = curLang() === 'ko' ? song.en || '' : ''; // 한국어가 아니면 제목이 이미 영어라 아래 영어 줄은 쓰지 않습니다
   g.fillText(g.measureText(en).width > size - pad * 2 ? en.slice(0, 34) + '…' : en, pad, size - pad);
   const url = c.toDataURL('image/jpeg', 0.88);
   coverCache.set(key, url);
@@ -336,7 +345,7 @@ export function createDiscPicker(container, opts = {}) {
   });
   paintCovers();
   if (document.fonts && document.fonts.status !== 'loaded') {
-    document.fonts.ready.then(() => { for (const s of songs) coverCache.delete(s.id + '|360'); paintCovers(); });
+    document.fonts.ready.then(() => { for (const s of songs) coverCache.delete(coverKey(s, 360)); paintCovers(); });
   }
 
   const chipsEl = $('.dp-chips');
@@ -392,8 +401,8 @@ export function createDiscPicker(container, opts = {}) {
   function renderInfo() {
     const s = songs[liveIndex];
     if (!s) return;
-    $('.dp-name').textContent = s.title;
-    $('.dp-sub').textContent = `${s.en} · ${s.composer}`;
+    $('.dp-name').textContent = songTitle(s);
+    $('.dp-sub').textContent = curLang() === 'ko' ? `${s.en} · ${s.composer}` : songComposer(s);
     $('.dp-listen').hidden = !RECORDINGS[s.id];
     $('.dp-meta').innerHTML = `<span class="dp-eq"><s></s><s></s><s></s><s></s></span><span>${esc(s.genre || '')}</span><i></i><span>${s.bpm} BPM</span><i></i><span>${fmtTime(s.lengthSec || 0)}</span><i></i><span>게임용 편곡</span>${s.mood ? `<i></i><span>${esc(s.mood)}</span>` : ''}`;
     chips.forEach((b) => {
@@ -404,7 +413,7 @@ export function createDiscPicker(container, opts = {}) {
       if (ci) {
         const k = Math.max(1, Math.min(10, ci.stars | 0));
         st.innerHTML = '★'.repeat(Math.min(k, 10)) + (k < 10 ? `<em>${'★'.repeat(Math.max(0, (k <= 5 ? 5 : 10) - k))}</em>` : '');
-        sm.textContent = `노트 ${ci.count}`;
+        sm.textContent = T('노트 {n}', { n: ci.count });
       } else { st.textContent = ''; sm.textContent = ''; }
     });
   }
@@ -476,7 +485,7 @@ export function createDiscPicker(container, opts = {}) {
     stopPreview();
     fullActive = true;
     recording.hidden = false;
-    recording.querySelector('.dp-rec-song').textContent = `${song.title} · ${rec.artist}`;
+    recording.querySelector('.dp-rec-song').textContent = `${songTitle(song)} · ${rec.artist}${rec.role ? ' · ' + T(rec.role) : ''}`;
     const source = recording.querySelector('.dp-rec-source'); source.href = rec.source;
     const license = recording.querySelector('.dp-rec-license'); license.href = rec.licenseUrl; license.textContent = rec.license;
     recording.querySelector('.dp-rec-error').hidden = true;
@@ -639,6 +648,7 @@ export function createDiscPicker(container, opts = {}) {
       closeRecording();
       stopPreview();
       cancelAnimationFrame(raf);
+      window.removeEventListener('pcg-langchange', onLang);
       if (o.keyboard) window.removeEventListener('keydown', onKey);
       if (ro) ro.disconnect(); else window.removeEventListener('resize', measure);
       root.remove();
@@ -647,6 +657,9 @@ export function createDiscPicker(container, opts = {}) {
     set onSelect(f) { o.onSelect = f; }, get onSelect() { return o.onSelect; },
     set onDifficulty(f) { o.onDifficulty = f; }, get onDifficulty() { return o.onDifficulty; },
   };
+  // 언어를 바꾸면(새로 고침 없이) 표지·곡 정보 글자를 다시 그립니다.
+  const onLang = () => { paintCovers(); renderInfo(); };
+  window.addEventListener('pcg-langchange', onLang);
   measure();
   kick();
   return api;
