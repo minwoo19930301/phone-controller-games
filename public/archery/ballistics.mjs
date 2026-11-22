@@ -4,16 +4,20 @@
 export const G = 9.80665;
 export const DRAG_K = 0.0025; // 화살 속도 감쇠(1/m): v(x) = v0·exp(-k·x)
 export const V_FULL = 58; // 만궁 초속(m/s)
-export const FULL_PULL = 0.92; // 이 이상 당기면 만궁으로 봄(폰 당김 0..1)
-export const SIGHT_GAIN = 0.28; // 폰 1° 가 과녁 면에서 움직이는 정도 = 거리·tan(1°)·SIGHT_GAIN (손맛 조정용)
+export const FULL_PULL = 0.8; // 이 이상 당기면 만궁으로 봄(폰 당김 0..1, 폰 컨트롤러도 이 값을 그대로 씁니다)
+export const SIGHT_GAIN = 0.28; // 폰 1° 가 과녁 면에서 움직이는 정도 = 거리·tan(1°)·gain (어려움 기준 값, 쉬움·보통은 난이도 표의 gain 이 더 작음)
+export const FLOOR_SPEED = 0.6; // 아주 조금 당겨도 만궁 속도의 이 비율은 나감(땅에 꽂히는 일을 줄임)
 
-// 난이도: 거리, 바람 세기 상한(m/s), 화살마다 바뀌는 폭, 돌풍 확률·세기, 화면 흔들림(도), 지칠 때까지(초), 예상 낙점 표시
+// 난이도: 거리, 바람 세기 상한(m/s), 화살마다 바뀌는 폭, 돌풍 확률·세기, 화면 흔들림(도), 지칠 때까지(초), 예상 낙점 표시,
+// gain = 폰 1° 가 과녁에서 움직이는 비율(작을수록 손떨림이 덜 티 남), assist = 조준을 과녁 쪽(바람 보정 위치)으로 끌어당기는 비율,
+// spread = 산포 배율, steadyRms = 폰이 이만큼(도) 흔들리면 안정도 0
+// 쉬움이 기본값: 아주 넉넉하게. 보통은 예전 쉬움 정도. 어려움은 예전 그대로.
 export const DIFFICULTY = {
-  easy: { distance: 30, windMax: 2.0, windStep: 0.35, gust: 0.0, gustMul: 1, sway: 0.1, steadySec: 2.6, marker: true },
-  normal: { distance: 50, windMax: 4.2, windStep: 0.6, gust: 0.12, gustMul: 1.4, sway: 0.2, steadySec: 2.0, marker: false },
-  hard: { distance: 70, windMax: 7.0, windStep: 1.0, gust: 0.3, gustMul: 1.9, sway: 0.34, steadySec: 1.6, marker: false }
+  easy: { distance: 20, windMax: 0.8, windStep: 0.2, gust: 0.0, gustMul: 1, sway: 0.04, steadySec: 99, marker: true, gain: 0.12, assist: 0.6, spread: 0.5, steadyRms: 1.5 },
+  normal: { distance: 30, windMax: 2.0, windStep: 0.35, gust: 0.0, gustMul: 1, sway: 0.1, steadySec: 3.5, marker: true, gain: 0.2, assist: 0.35, spread: 0.8, steadyRms: 1.0 },
+  hard: { distance: 70, windMax: 7.0, windStep: 1.0, gust: 0.3, gustMul: 1.9, sway: 0.34, steadySec: 1.6, marker: false, gain: SIGHT_GAIN, assist: 0, spread: 1, steadyRms: 0.5 }
 };
-export const diffOf = (level) => DIFFICULTY[level] || DIFFICULTY.normal;
+export const diffOf = (level) => DIFFICULTY[level] || DIFFICULTY.easy;
 
 export function mulberry32(seed) {
   let a = seed >>> 0;
@@ -33,7 +37,7 @@ const gauss = (rng) => Math.sqrt(-2 * Math.log(Math.max(1e-9, rng()))) * Math.co
 export function launchSpeed(pull) {
   const p = clamp(Number.isFinite(pull) ? pull : 0, 0, 1);
   if (p >= FULL_PULL) return V_FULL;
-  return V_FULL * (0.3 + 0.7 * (p / FULL_PULL));
+  return V_FULL * (FLOOR_SPEED + (1 - FLOOR_SPEED) * (p / FULL_PULL));
 }
 // x(m) 지점까지 걸린 시간(초)
 export function timeAt(x, v0) {
@@ -52,15 +56,17 @@ export function driftAt(x, v0, wind) {
   return crossWind(wind) * (timeAt(x, v0) - x / v0);
 }
 // 폰 각도(도) → 과녁 면 미터
-export const metersPerDeg = (distance) => distance * Math.tan(RD) * SIGHT_GAIN;
+export const metersPerDeg = (distance, gain = SIGHT_GAIN) => distance * Math.tan(RD) * gain;
+// 조준 도움: 조준(도) a 를 보정 위치 off(바람 반대쪽으로 겨눈 값)와 중앙 쪽으로 assist 만큼 끌어당김. assist 0 이면 그대로
+export const assistAim = (a, off, assist) => off + (a - off) * (1 - clamp(assist || 0, 0, 1));
 
 // 한 발: aim = 폰 조준(도, 중앙 기준; 흔들림 포함), pull, steady 0..1(1 = 아주 안정)
 // 반환: { x, y, drift, dropExtra, t, v0, sx, sy } — sx/sy = 바람·처짐 없이 조준한 곳(예상 낙점 계산용)
-export function shoot({ distance, aimX = 0, aimY = 0, pull = 1, steady = 1, wind = null, seed = 1 }) {
+export function shoot({ distance, aimX = 0, aimY = 0, pull = 1, steady = 1, wind = null, seed = 1, gain = SIGHT_GAIN, spread = 1 }) {
   const rng = mulberry32(seed);
   const v0 = launchSpeed(pull);
-  const mpd = metersPerDeg(distance);
-  const sigmaDeg = 0.04 + 0.2 * (1 - clamp(steady, 0, 1));
+  const mpd = metersPerDeg(distance, gain);
+  const sigmaDeg = (0.04 + 0.2 * (1 - clamp(steady, 0, 1))) * spread;
   const sx = aimX * mpd;
   const sy = aimY * mpd;
   const tFull = timeAt(distance, V_FULL);
@@ -72,10 +78,10 @@ export function shoot({ distance, aimX = 0, aimY = 0, pull = 1, steady = 1, wind
   return { x, y, drift, dropExtra, t, v0, sx, sy };
 }
 // 날아가는 중 위치: f = 0..1 (사선 진행 비율). 반환 { x, y, t } 과녁 좌표계(사수 기준 높이는 호출 쪽에서 더함)
-export function pathAt(f, { distance, aimX = 0, aimY = 0, pull = 1, wind = null, impact }) {
+export function pathAt(f, { distance, aimX = 0, aimY = 0, pull = 1, wind = null, impact, gain = SIGHT_GAIN }) {
   const v0 = launchSpeed(pull);
   const xd = clamp(f, 0, 1) * distance;
-  const mpd = metersPerDeg(distance);
+  const mpd = metersPerDeg(distance, gain);
   const tFull = timeAt(distance, V_FULL);
   const tanTh = (0.5 * G * tFull * tFull) / distance;
   const lerpY = (aimY * mpd) * (xd / distance);

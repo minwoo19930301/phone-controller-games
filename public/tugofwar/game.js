@@ -11,6 +11,7 @@ import { sfx } from './sfx.js';
 import { createSettings, fields } from '/common/settings.js';
 import { createTutorialBoard } from '/common/tutorial-board.js';
 import { sendHaptic } from '/common/haptics.js';
+import { t as T, mountSwitcher } from '/common/i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -21,6 +22,8 @@ const AUTOSTART = params.has('autostart');
 const FAST = clamp(num(params.get('fast'), 1), 1, 8); // 시험용: 판 시계를 이만큼 빠르게
 const DUR = params.get('dur') ? clamp(num(params.get('dur'), CFG.ROUND_SEC), 10, 120) : CFG.ROUND_SEC; // 시험용: 한 판 길이(초)
 const SEED = num(params.get('seed'), 0);
+// 사람 수 글자(CPU 가 있으면 함께). 한 문장 틀로 번역합니다
+const headcount = (n, cpu) => (cpu ? T('{n}명 + CPU {c}', { n, c: cpu }) : T('{n}명', { n }));
 
 // ---------- 조정 값 ----------
 const LEAD = 0.42; // 박이 오기 이만큼(초) 전에 폰에 beat 를 미리 보냄(폰이 지연을 빼고 맞춰 번쩍·진동)
@@ -115,8 +118,8 @@ socket.on('msg_v', (d) => onMsg(d));
 const settings = createSettings({
   game: 'tugofwar',
   fields: [
-    fields.difficulty({ hints: { easy: '박 판정이 넉넉 · CPU 가 서툴러요', normal: '보통 판정 · CPU 도 제법', hard: '판정이 빡빡 · CPU 가 정확해요' } }),
-    fields.choice('rounds', '경기', [{ value: '3', label: '3판 2선승', hint: '표준' }, { value: '1', label: '단판', hint: '한 판으로 끝' }], { default: '3', hotkey: 'r' })
+    fields.difficulty(),
+    fields.choice('rounds', '경기', [{ value: '3', label: '3판 2선승' }, { value: '1', label: '단판' }], { default: '3', hotkey: 'r' })
   ],
   keys: true,
   onChange: () => {
@@ -124,6 +127,10 @@ const settings = createSettings({
     pushState(true);
   }
 });
+mountSwitcher($('langBox'), { reload: true, compact: true }); // 언어 고르기(대기실에서만 보임)
+// 안내 문장: 굵은 낱말을 끼운 한 문장 틀로 번역합니다
+$('hintGo').innerHTML = T('폰에서 모두 {k}를 누르면 시작해요', { k: `<b>${T('준비')}</b>` });
+$('hintAgain').innerHTML = T('폰에서 모두 {k}를 누르면 새 경기', { k: `<b>${T('다시 하기')}</b>` });
 settings.attach(socket);
 settings.mount($('setBox'));
 settings.mount($('setBoxOver'), { compact: true });
@@ -250,9 +257,9 @@ function onMsg(d) {
 // ================================================================
 // 대기실 화면
 // ================================================================
-function lobbyMessage(t) {
+function lobbyMessage(text) {
   const m = $('msg');
-  m.textContent = t;
+  m.textContent = T(text);
   m.classList.add('on');
   clearTimeout(lobbyMessage.t);
   lobbyMessage.t = setTimeout(() => m.classList.remove('on'), 3200);
@@ -268,7 +275,7 @@ function renderLobby() {
   }
   for (const tm of ['blue', 'white']) {
     const humans = plan[tm];
-    $(`tc-${tm}`).textContent = `${humans.length}명${plan.cpu[tm] ? ` + CPU ${plan.cpu[tm]}` : ''}`;
+    $(`tc-${tm}`).textContent = headcount(humans.length, plan.cpu[tm]);
     const seats = [];
     for (const slot of humans) {
       const P = roster.get(slot);
@@ -280,16 +287,17 @@ function renderLobby() {
       else if (readyNow.has(slot)) st = '준비 완료';
       else if (P.calibrated) st = '자세 확인';
       const pick = P.pref === 'auto' ? '자동' : '직접';
-      seats.push(`<div class="seat human${readyNow.has(slot) && !P.bot ? ' rdy' : ''}${!P.connected ? ' away' : ''}" style="--pc:${P.color}"><span class="sn">${P.name}</span><span>${pick} · ${st}</span></div>`);
+      const seatTxt = T('{pick} · {st}', { pick, st });
+      seats.push(`<div class="seat human${readyNow.has(slot) && !P.bot ? ' rdy' : ''}${!P.connected ? ' away' : ''}" style="--pc:${P.color}"><span class="sn">${P.name}</span><span>${seatTxt}</span></div>`);
     }
-    for (let i = 0; i < plan.cpu[tm]; i++) seats.push(`<div class="seat cpu"><span class="sn">CPU</span><span>자동으로 채워요</span></div>`);
+    for (let i = 0; i < plan.cpu[tm]; i++) seats.push(`<div class="seat cpu"><span class="sn">CPU</span><span>${T('자동으로 채워요')}</span></div>`);
     const html = seats.join('');
     if ($(`seats-${tm}`).dataset.h !== html) { $(`seats-${tm}`).innerHTML = html; $(`seats-${tm}`).dataset.h = html; }
   }
   seatEls.blue = [1];
   const diff = settings.difficulty();
   const dt = $('diffOver');
-  dt.textContent = DIFF_LABEL[diff] || '보통';
+  dt.textContent = DIFF_LABEL[diff] || '쉬움';
   dt.dataset.d = diff;
 }
 
@@ -312,6 +320,7 @@ function startGame() {
     return;
   }
   sfx.audio();
+  sfx.bed(true);
   settings.lock(true);
   for (const b of boards) b.hide(true);
   match = new Match({ target: settings.get('rounds') === '1' ? 1 : 2 });
@@ -363,7 +372,7 @@ function introTick() {
   const t = game.stageT;
   const card = $('intro');
   const steps = [
-    [0, `${match.round}판`, `${TEAM_NAME[leftTeam]}이 왼쪽 · ${TEAM_NAME[otherTeam(leftTeam)]}이 오른쪽`, `${match.wins.blue} : ${match.wins.white}`, 'txt'],
+    [0, T('{n}판', { n: match.round }), T('{a} · {b}', { a: TEAM_NAME[leftTeam], b: TEAM_NAME[otherTeam(leftTeam)] }), `${match.wins.blue} : ${match.wins.white}`, 'txt'],
     [1.5, '3', '준비!', '', ''],
     [2.1, '2', '', '', ''],
     [2.7, '1', '', '', ''],
@@ -375,7 +384,7 @@ function introTick() {
     introStep = idx;
     const s = steps[idx];
     card.classList.remove('hidden');
-    $('introTop').textContent = idx === 0 ? (match.target === 1 ? '단판' : `${match.target * 2 - 1}판 ${match.target}선승`) : '';
+    $('introTop').textContent = idx === 0 ? (match.target === 1 ? T('단판') : T('{n}판 {w}선승', { n: match.target * 2 - 1, w: match.target })) : '';
     const big = $('introBig');
     big.textContent = s[1];
     big.className = s[4];
@@ -464,7 +473,7 @@ function emitBeats() {
       // 큰북 치는 모습은 박 시각에 맞춰
       setTimeout(() => view.callerBeat(b.kind), Math.max(0, (inSim / FAST) * 1000 - 20));
       if (cyc.brace && b.kind === 'one') {
-        setTimeout(() => { callout(`${TEAM_NAME[cyc.brace]} 버티기!`, 'brace small'); sfx.brace(); }, Math.max(0, (inSim / FAST) * 1000));
+        setTimeout(() => { callout(T('{team} 버티기!', { team: TEAM_NAME[cyc.brace] }), 'brace small'); sfx.brace(); }, Math.max(0, (inSim / FAST) * 1000));
       }
     }
   }
@@ -473,12 +482,12 @@ function onJudge(e) {
   const human = e.slot != null;
   if (e.spam) {
     view.stumble(e.id);
-    if (human) { floater(e.id, JLABEL.spam, 'miss'); sfx.judge('miss'); sendHaptic(socket, e.slot, 'miss', 0.5); updateChip(e.slot, 'miss', 0); }
+    if (human) { floater(e.id, T(JLABEL.spam), 'miss'); sfx.judge('miss'); sendHaptic(socket, e.slot, 'miss', 0.5); updateChip(e.slot, 'miss', 0); }
     return;
   }
   if (e.brace) {
     view.stumble(e.id);
-    if (human) { floater(e.id, '버텨야 해요!', 'miss'); sendHaptic(socket, e.slot, 'miss', 0.4); }
+    if (human) { floater(e.id, T('버텨야 해요!'), 'miss'); sendHaptic(socket, e.slot, 'miss', 0.4); }
     return;
   }
   view.pull(e.id, e.power, e.j);
@@ -486,7 +495,7 @@ function onJudge(e) {
   if (!human) return;
   let label = JLABEL[e.j];
   if (e.j === 'off') label = e.off < 0 ? JLABEL.early : JLABEL.late;
-  floater(e.id, label + (e.combo >= 3 ? ` ×${e.combo}` : ''), e.j);
+  floater(e.id, T(label) + (e.combo >= 3 ? ` ×${e.combo}` : ''), e.j);
   sfx.judge(e.j, e.combo);
   sendHaptic(socket, e.slot, e.j === 'perfect' ? 'perfect' : e.j === 'good' ? 'good' : e.j === 'off' ? 'tick' : 'miss', e.j === 'perfect' ? 1 : 0.7);
   send('cue', { j: e.j, off: Math.round(e.off * 1000), combo: e.combo, power: Math.round(e.power * 100) / 100, stamina: Math.round(e.stamina * 100) / 100, label }, e.slot);
@@ -507,7 +516,7 @@ function onResolve(e) {
     const bt = e.sync.blue.body && (!e.sync.white.body || e.F.blue >= e.F.white) ? 'blue' : 'white';
     if (round.t - lastBodyAt > 0.9) {
       lastBodyAt = round.t;
-      callout('한 몸!', 'body');
+      callout(T('한 몸!'), 'body');
       sfx.body();
       view.punch(1);
       view.shake(0.8);
@@ -518,7 +527,7 @@ function onResolve(e) {
     }
   }
   if (e.brace) {
-    if (e.brace.success) { callout('버티기 성공!', 'brace small'); sfx.braceOk(); view.shake(0.5); } else callout('밀린다!', 'small');
+    if (e.brace.success) { callout(T('버티기 성공!'), 'brace small'); sfx.braceOk(); view.shake(0.5); } else callout(T('밀린다!'), 'small');
     for (const p of round.team[e.brace.team]) if (!p.cpu) sendHaptic(socket, p.slot, e.brace.success ? 'success' : 'fail', 0.9);
   }
   sfx.crowdLevel(clamp(Math.abs(round.rope), 0, 1));
@@ -557,8 +566,8 @@ function onRoundEnd(e) {
   state.cheer = 1;
   state.ropeDrop = 0;
   sfx.win();
-  const line = e.reason === 'line' ? '선을 넘었다!' : '시간 종료';
-  callout(`${TEAM_NAME[win]} 승리!`, 'body');
+  const line = T(e.reason === 'line' ? '선을 넘었다!' : '시간 종료');
+  callout(T('{team} 승리!', { team: TEAM_NAME[win] }), 'body');
   setTimeout(() => callout(line, 'small'), 500);
   setupHudPips();
   for (const p of round.members) if (!p.cpu) sendHaptic(socket, p.slot, p.team === win ? 'success' : 'fail', 1);
@@ -578,6 +587,7 @@ function endTick(dt) {
 // 결과
 // ================================================================
 function showResults() {
+  sfx.bed(false);
   game.phase = 'over';
   game.stage = 'over';
   settings.lock(false);
@@ -585,28 +595,28 @@ function showResults() {
   showScreen('over');
   const win = match.winner;
   const title = $('ovTitle');
-  title.textContent = `${TEAM_NAME[win]} 우승!`;
+  title.textContent = T('{team} 우승!', { team: TEAM_NAME[win] });
   title.style.color = win === 'blue' ? '#7fb0ff' : '#fff3dc';
-  $('ovEyebrow').textContent = match.target === 1 ? '단판 결과' : `${match.history.length}판 결과`;
-  $('ovScore').innerHTML = `<i style="background:#2f6fe4;color:#fff">청 ${match.wins.blue}</i><span>:</span><i style="background:#fff3dc;color:#c92a22;border:3px solid #e0332c">${match.wins.white} 백</i>`;
+  $('ovEyebrow').textContent = T(match.target === 1 ? '단판 결과' : '{n}판 결과', { n: match.history.length });
+  $('ovScore').innerHTML = `<i style="background:#2f6fe4;color:#fff">${T('청 {n}', { n: match.wins.blue })}</i><span>:</span><i style="background:#fff3dc;color:#c92a22;border:3px solid #e0332c">${T('{n} 백', { n: match.wins.white })}</i>`;
   const rows = [...totals.values()].sort((a, b) => b.perfect - a.perfect || b.bestCombo - a.bestCombo);
   const mvp = rows[0];
   const cards = [];
   if (mvp && mvp.pulls) {
     const P = roster.get(mvp.slot) || { color: '#fff', name: `${mvp.slot}P` };
-    cards.push(`<div class="ov-card" style="--pc:${P.color}"><small>MVP · PERFECT 가장 많이</small><b><em>${P.name}</em>${mvp.perfect}번</b><span>${TEAM_NAME[mvp.team]} · 최고 콤보 ${mvp.bestCombo}</span></div>`);
+    cards.push(`<div class="ov-card" style="--pc:${P.color}"><small>${T('MVP · PERFECT 가장 많이')}</small><b><em>${P.name}</em>${T('{n}번', { n: mvp.perfect })}</b><span>${T('{team} · 최고 콤보 {n}', { team: TEAM_NAME[mvp.team], n: mvp.bestCombo })}</span></div>`);
   }
   const bs = matchBestSync.blue >= matchBestSync.white ? 'blue' : 'white';
-  cards.push(`<div class="ov-card"><small>최고 한 몸 연속</small><b>${matchBestSync[bs]}번 연속</b><span>${TEAM_NAME[bs]}${matchBestSync[bs] === 0 ? ' · 아직 없어요' : ''}</span></div>`);
-  const bw = match.history.map((h, i) => `${i + 1}판 ${TEAM_NAME[h.winner]}(${h.reason === 'line' ? '선 넘김' : '시간승'})`).join(' · ');
-  cards.push(`<div class="ov-card"><small>판별 기록</small><span style="color:var(--ink);font-size:17px">${bw}</span></div>`);
+  cards.push(`<div class="ov-card"><small>${T('최고 한 몸 연속')}</small><b>${T('{n}번 연속', { n: matchBestSync[bs] })}</b><span>${matchBestSync[bs] === 0 ? T('{team} · 아직 없어요', { team: TEAM_NAME[bs] }) : T(TEAM_NAME[bs])}</span></div>`);
+  const bw = match.history.map((h, i) => T('{n}판 {team}({why})', { n: i + 1, team: TEAM_NAME[h.winner], why: T(h.reason === 'line' ? '선 넘김' : '시간승') })).join(' · ');
+  cards.push(`<div class="ov-card"><small>${T('판별 기록')}</small><span style="color:var(--ink);font-size:17px">${bw}</span></div>`);
   $('ovCards').innerHTML = cards.join('');
   const body = rows.map((r, i) => {
     const P = roster.get(r.slot) || { color: '#fff', name: `${r.slot}P` };
     const avg = r.perfect + r.good + r.off ? Math.round((r.powerSum / Math.max(1, r.perfect + r.good + r.off)) * 100) : 0;
     return `<tr class="${i === 0 && r.pulls ? 'mvp' : ''}"><td><span class="tn" style="--pc:${P.color}">${P.name}</span><span class="tt" style="background:${TEAM_COLOR[r.team]}"></span></td><td>${r.perfect}</td><td>${r.good}</td><td>${r.off}</td><td>${r.miss + r.spam}</td><td>${r.bestCombo}</td><td>${avg}%</td></tr>`;
   }).join('');
-  $('ovTable').innerHTML = `<table><thead><tr><th>선수</th><th>PERFECT</th><th>GOOD</th><th>엇박</th><th>MISS</th><th>최고 콤보</th><th>평균 힘</th></tr></thead><tbody>${body}</tbody></table>`;
+  $('ovTable').innerHTML = `<table><thead><tr><th>${T('선수')}</th><th>PERFECT</th><th>GOOD</th><th>${T('엇박')}</th><th>MISS</th><th>${T('최고 콤보')}</th><th>${T('평균 힘')}</th></tr></thead><tbody>${body}</tbody></table>`;
   // 폰에 개인 결과
   rows.forEach((r, i) => {
     send('result', { rank: i + 1, team: r.team, win: r.team === win, perfect: r.perfect, good: r.good, off: r.off, miss: r.miss + r.spam, bestCombo: r.bestCombo, mvp: i === 0 && r.pulls > 0, wins: match.wins, winner: win }, r.slot);
@@ -615,6 +625,7 @@ function showResults() {
   pushState(true);
 }
 function backToLobby(msg) {
+  sfx.bed(false);
   game.phase = 'lobby';
   game.stage = 'lobby';
   round = null;
@@ -653,7 +664,7 @@ function setupHud() {
     $('ropebar').style.setProperty(side === 'left' ? '--lc' : '--rc', tm === 'blue' ? '#2f6fe4' : '#e0332c');
     const humans = round.team[tm].filter((p) => !p.cpu);
     const cpus = round.team[tm].length - humans.length;
-    $(`pan${L}Sub`).textContent = `${humans.length}명${cpus ? ` + CPU ${cpus}` : ''}`;
+    $(`pan${L}Sub`).textContent = headcount(humans.length, cpus);
     const box = $(`chips${L}`);
     box.innerHTML = '';
     for (const p of humans) {
@@ -673,7 +684,7 @@ function setupHud() {
   }
   hudChips = new Map([...hudChips].filter(([s]) => round.parts.has(`p${s}`)));
   setupHudPips();
-  $('roundTag').textContent = match.target === 1 ? '단판' : `${match.round} / ${match.target * 2 - 1}판`;
+  $('roundTag').textContent = match.target === 1 ? T('단판') : T('{r} / {n}판', { r: match.round, n: match.target * 2 - 1 });
   $('timer').textContent = String(DUR);
   document.querySelector('.clock').classList.remove('sprint');
 }
@@ -768,7 +779,7 @@ function updateHud(dt) {
   const brace = cur && cur.brace && toPull > -0.5;
   $('beat').classList.toggle('brace', Boolean(brace));
   $('braceTag').classList.toggle('hidden', !brace);
-  if (brace) $('braceTag').textContent = `${TEAM_NAME[cur.brace]} 버티기! 폰을 가만히`;
+  if (brace) $('braceTag').textContent = T('{team} 버티기!', { team: TEAM_NAME[cur.brace] });
 }
 
 // ================================================================
@@ -846,7 +857,7 @@ function tick() {
         if (e.type === 'cycle') scheduleBots(e.cyc);
         else if (e.type === 'judge') onJudge(e);
         else if (e.type === 'resolve') onResolve(e);
-        else if (e.type === 'sprint') { callout('막판 스퍼트!', 'sprint'); sfx.sprint(); view.shake(0.6); state.cheer = 1; for (const p of round.members) if (!p.cpu) sendHaptic(socket, p.slot, 'warn', 0.8); pushState(true); }
+        else if (e.type === 'sprint') { callout(T('막판 스퍼트!'), 'sprint'); sfx.sprint(); view.shake(0.6); state.cheer = 1; for (const p of round.members) if (!p.cpu) sendHaptic(socket, p.slot, 'warn', 0.8); pushState(true); }
         else if (e.type === 'end') onRoundEnd(e);
       }
     } else if (game.stage === 'end') endTick(dt);

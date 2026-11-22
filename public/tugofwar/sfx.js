@@ -1,8 +1,37 @@
-// 줄다리기 소리: 큰북, 구령("하나·둘·영차" 목소리 흉내), 호루라기, 관중 환호, 판정 소리. 전부 WebAudio 로 합성합니다(파일 없음).
-// 구령은 사람 목소리처럼 들리게 톱니파를 모음(ㅏ ㅜ ㅕ) 필터 두 개로 거르고, 음높이를 살짝 굴려서 만듭니다.
+// 줄다리기 소리: 공용 녹음 라이브러리(/common/samples.js)를 먼저 틀고, 못 받았을 때만 예전 합성음(큰북·구령·호루라기·환호)을 냅니다.
+// 녹음이 없는 것: 구령 "하나·둘"(한국어 낱말 녹음 없음)은 합성 목소리 그대로입니다. 영차!는 단체 "헤이!" 녹음.
+// 구령 목소리는 사람 목소리처럼 들리게 톱니파를 모음(ㅏ ㅜ ㅕ) 필터 두 개로 거르고, 음높이를 살짝 굴려서 만듭니다.
+import { createSamples } from '/common/samples.js';
+import { SFX } from '/common/sfx/manifest.js';
+
+// 큰북은 같은 이름의 두 벌(부드러운 것·센 것)을 골라 쓰려고 파일 하나씩 이름을 따로 둡니다.
+const MANIFEST = {
+  ...SFX,
+  'tug/drum-soft': { file: 'perc/big-drum-1.mp3', gain: 0.55, jitter: 0.02 },
+  'tug/drum-hard': { file: 'perc/big-drum-2.mp3', gain: 0.85, jitter: 0.02 }
+};
+// 이 종목이 쓰는 녹음 묶음(대기실에서 미리 받음)
+const GROUPS = ['tug/', 'perc/', 'crowd/', 'swing/rope-creak', 'ui/countdown-tick', 'ui/pop', 'ui/fail', 'ui/fanfare-win'];
+// 소리 크기(녹음 기본 세기에 곱함): 부딪힘·북이 제일 크고 관중 바탕은 조용히
+export const GAIN = { drumSoft: 1, drumHard: 1, heave: 0.9, whistle: 1, tick: 0.9, bed: 0.22, bedSpan: 0.4, cheer: 0.75, creak: 0.8, judge: 0.45 };
+
 let actx = null;
 let master = null;
 let crowdGain = null;
+let samples = null;
+let bedLoop = null;
+let bedWanted = false;
+let bedLevel = 0;
+let cheerTimer = 0;
+const played = {};
+// 디버그: 어떤 녹음이 몇 번 울렸는지(window.__tugofwarSfx.played)
+window.__tugofwarSfx = { played, has: (n) => !!samples && samples.has(n), state: () => (actx ? actx.state : 'none'), bed: () => !!bedLoop };
+const sample = (name, opts) => {
+  if (!actx || actx.state !== 'running' || !samples) return false;
+  const ok = samples.play(name, opts);
+  if (ok) played[name] = (played[name] || 0) + 1;
+  return ok;
+};
 export function audio() {
   if (!actx) {
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -14,14 +43,30 @@ export function audio() {
       const out = actx.createGain();
       out.gain.value = 0.9;
       master.connect(out).connect(actx.destination);
+      samples = createSamples(actx, master, { manifest: MANIFEST });
+      samples.preload(GROUPS).then(() => { if (bedWanted) startBed(); });
+      actx.addEventListener('statechange', syncChip);
     }
   }
-  if (actx && actx.state === 'suspended') actx.resume();
-  if (actx && actx.state === 'running' && !crowdGain) startCrowd();
+  if (actx && actx.state === 'suspended' && !document.hidden) actx.resume().catch(() => {});
+  if (actx && actx.state === 'running' && bedWanted && !bedLoop) startBed();
+  syncChip();
   return actx;
 }
-window.addEventListener('pointerdown', audio);
-window.addEventListener('keydown', audio);
+// 큰 화면은 클릭 없이(폰으로) 시작하는 일이 많아 소리가 막혀 있을 수 있음: 아무 키·포인터에서 다시 켭니다.
+for (const ev of ['pointerdown', 'keydown', 'touchstart', 'mousedown', 'click']) window.addEventListener(ev, audio, { passive: true });
+// 대기실에서 소리가 막혀 있으면 작은 안내 칩을 보여 줍니다(켜지면 사라짐)
+function syncChip() {
+  const chip = document.getElementById('soundChip');
+  if (chip) chip.classList.toggle('on', !!actx && actx.state !== 'running');
+}
+// 숨겨진 탭에서는 소리를 멈추고, 돌아오면 이어서 켭니다
+document.addEventListener('visibilitychange', () => {
+  if (!actx) return;
+  if (document.hidden) { stopBed(); actx.suspend().catch(() => {}); } else { audio(); }
+});
+// 대기실에서 미리 만들어 두고 녹음을 받습니다(소리는 첫 입력 때 켜짐)
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', audio); else audio();
 const ready = () => actx && actx.state === 'running';
 export const now = () => (actx ? actx.currentTime : 0);
 
@@ -72,6 +117,9 @@ function tone(freq, sec, gain, type = 'sine', glide = 0, delay = 0, attack = 0.0
 // kind: one | two | pull | rest. delay(초) 뒤 정확히 울립니다(박 시각에 맞춤).
 function drum(kind, delay = 0) {
   if (!ready()) return;
+  if (kind === 'pull') {
+    if (sample('tug/drum-hard', { gain: GAIN.drumHard, when: delay })) return;
+  } else if (sample('tug/drum-soft', { gain: GAIN.drumSoft, rate: kind === 'two' ? 1.12 : 1, when: delay })) return;
   if (kind === 'pull') {
     tone(150, 0.34, 0.9, 'sine', 0.38, delay, 0.002);
     tone(68, 0.5, 0.8, 'sine', 0.6, delay, 0.002);
@@ -132,6 +180,7 @@ function chant(kind, delay = 0, fast = false) {
   if (kind === 'one') { shout(150, 'a', 0.13 * k, 0.5, delay - 0.01, 0.9); shout(160, 'a', 0.11 * k, 0.4, delay + 0.14 * k, 0.9); } // 하-나
   else if (kind === 'two') shout(172, 'u', 0.2 * k, 0.5, delay - 0.01, 0.95); // 둘
   else if (kind === 'pull') {
+    if (sample('perc/heave', { gain: GAIN.heave * (fast ? 0.85 : 1), rate: fast ? 1.08 : 1, when: Math.max(0, delay - 0.12) })) return;
     shout(165, 'yeo', 0.2 * k, 0.55, delay - 0.2 * k, 1.1); // 영~
     shout(205, 'cha', 0.28, 0.85, delay - 0.02, 0.8, 0.12); // 차!
   }
@@ -148,6 +197,7 @@ export const sfx = {
   whistle(at = 0, long = false) {
     audio();
     if (!ready()) return;
+    if (sample(long ? 'perc/whistle-long' : 'perc/whistle-short', { gain: GAIN.whistle, when: at })) return;
     const t = actx.currentTime + at;
     const o = actx.createOscillator();
     const o2 = actx.createOscillator();
@@ -176,10 +226,18 @@ export const sfx = {
   },
   count(n) {
     audio();
+    // 시작! 은 바로 뒤따르는 whistle() 녹음이 맡습니다(녹음이 있으면 삑 소리는 생략)
+    if (n > 0 && sample('ui/countdown-tick', { gain: GAIN.tick, rate: 1 + (3 - n) * 0.06 })) return;
+    if (n === 0 && samples && samples.has('perc/whistle-short')) return;
     tone(n > 0 ? 660 : 990, n > 0 ? 0.16 : 0.4, 0.3, 'square', 0, 0, 0.004);
   },
   judge(j, combo = 0) {
     audio();
+    const g = GAIN.judge;
+    if (j === 'perfect' && sample('perc/clap', { gain: g * (1 + Math.min(combo, 6) * 0.06) })) return;
+    if (j === 'good' && sample('perc/woodblock', { gain: g * 0.8 })) return;
+    if (j === 'off' && sample('perc/snare-rim', { gain: g * 0.6, rate: 0.9 })) return;
+    if (j === 'miss' && sample('ui/fail', { gain: g * 0.9, rate: 1.1 })) return;
     if (j === 'perfect') { tone(1320, 0.18, 0.2, 'triangle', 1.0, 0, 0.003); tone(1980, 0.22, 0.12, 'sine', 1, 0.04, 0.003); }
     else if (j === 'good') tone(990, 0.14, 0.15, 'triangle', 1, 0, 0.003);
     else if (j === 'off') tone(520, 0.12, 0.1, 'triangle', 0.9, 0, 0.003);
@@ -187,24 +245,45 @@ export const sfx = {
   },
   body() { // 한 몸!
     audio();
+    if (samples && samples.has('swing/rope-creak') && samples.has('crowd/cheer-small')) {
+      sample('swing/rope-creak', { gain: GAIN.creak, rate: 1.1 });
+      this.cheer(0.9);
+      return;
+    }
     for (const [i, f] of [523, 659, 784, 1047].entries()) tone(f, 0.34, 0.16, 'triangle', 1, i * 0.045, 0.004);
     noise(0.4, 1200, 0.6, 0.18, 'bandpass', 0, 3200);
     this.cheer(0.7);
   },
-  brace() { audio(); tone(110, 0.5, 0.35, 'sawtooth', 0.7, 0, 0.01); tone(55, 0.6, 0.5, 'sine', 0.8, 0, 0.01); },
-  braceOk() { audio(); for (const [i, f] of [392, 523, 659].entries()) tone(f, 0.28, 0.18, 'square', 1, i * 0.07, 0.004); },
-  sprint() { audio(); this.whistle(0, false); this.whistle(0.4, false); this.cheer(0.9); },
+  brace() {
+    audio();
+    if (sample('perc/tom-low', { gain: 0.9, rate: 0.85 })) { sample('swing/rope-creak', { gain: GAIN.creak, rate: 0.85, when: 0.05 }); return; }
+    tone(110, 0.5, 0.35, 'sawtooth', 0.7, 0, 0.01); tone(55, 0.6, 0.5, 'sine', 0.8, 0, 0.01);
+  },
+  braceOk() { audio(); if (sample('crowd/cheer-small', { gain: GAIN.cheer * 0.8 })) return; for (const [i, f] of [392, 523, 659].entries()) tone(f, 0.28, 0.18, 'square', 1, i * 0.07, 0.004); },
+  sprint() { audio(); this.whistle(0, false); this.whistle(0.4, false); if (!sample('crowd/kids-cheer', { gain: GAIN.cheer * 0.7, when: 0.5 })) this.cheer(0.9); },
   roundStart() { audio(); this.whistle(0, true); },
   win() {
     audio();
     this.whistle(0, true);
+    if (samples && samples.has('crowd/cheer-big') && samples.has('ui/fanfare-win')) {
+      sample('crowd/cheer-big', { gain: GAIN.cheer, when: 0.35 });
+      sample('crowd/applause-long', { gain: GAIN.cheer * 0.5, when: 1.2 });
+      sample('ui/fanfare-win', { gain: 0.5, when: 0.6 });
+      return;
+    }
     for (const [i, f] of [523, 659, 784, 1047, 784, 1047, 1319].entries()) tone(f, 0.26, 0.2, 'triangle', 1, 0.15 + i * 0.13, 0.004);
     this.cheer(1.2);
   },
-  join() { audio(); tone(880, 0.1, 0.15, 'triangle', 1, 0); tone(1320, 0.14, 0.12, 'triangle', 1, 0.08); },
+  join() { audio(); if (sample('ui/pop', { gain: 0.7 })) return; tone(880, 0.1, 0.15, 'triangle', 1, 0); tone(1320, 0.14, 0.12, 'triangle', 1, 0.08); },
   thud() { audio(); tone(80, 0.3, 0.5, 'sine', 0.5, 0); noise(0.2, 300, 0.8, 0.35, 'lowpass'); },
   cheer(level = 0.6) {
-    if (!ready() || !crowdGain) return;
+    if (!ready()) return;
+    if (sample('crowd/cheer-small', { gain: GAIN.cheer * level, rate: 0.95 + level * 0.1 })) {
+      // 관중 바탕도 잠깐 커졌다가 돌아옵니다
+      if (bedLoop) { bedLoop.set({ gain: GAIN.bed + GAIN.bedSpan * Math.min(1, bedLevel + 0.4), glide: 0.1 }); clearTimeout(cheerTimer); cheerTimer = setTimeout(() => bedLevelSet(bedLevel), 1800); }
+      return;
+    }
+    if (!crowdGain) return;
     const t = actx.currentTime;
     crowdGain.gain.cancelScheduledValues(t);
     crowdGain.gain.setValueAtTime(Math.max(0.05, crowdGain.gain.value), t);
@@ -212,10 +291,35 @@ export const sfx = {
     crowdGain.gain.linearRampToValueAtTime(0.03, t + 1.8);
   },
   crowdLevel(x) {
-    if (!ready() || !crowdGain) return;
+    bedLevelSet(x);
+    if (!ready() || !crowdGain || bedLoop || !bedWanted) return;
     crowdGain.gain.setTargetAtTime(0.025 + 0.05 * x, actx.currentTime, 0.5);
+  },
+  // 경기 중 관중 바탕 소리 켜고 끄기(대기실·결과에서는 끔)
+  bed(on) {
+    bedWanted = !!on;
+    if (!on) { stopBed(); return; }
+    audio();
+    if (ready()) startBed();
   }
 };
+function bedLevelSet(x) {
+  bedLevel = x;
+  if (bedLoop) bedLoop.set({ gain: GAIN.bed + GAIN.bedSpan * x, rate: 1 + 0.08 * x, glide: 0.4 });
+}
+function startBed() {
+  if (bedLoop || !ready() || !samples) return;
+  bedLoop = samples.loop('crowd/murmur-loop', { gain: GAIN.bed });
+  if (bedLoop) { bedLevelSet(bedLevel); if (crowdGain) crowdGain.gain.setTargetAtTime(0.0001, actx.currentTime, 0.05); return; }
+  // 녹음을 아직 못 받았으면 합성 바탕(받는 대로 녹음으로 바뀝니다)
+  if (!crowdGain) startCrowd();
+  if (crowdGain) crowdGain.gain.setTargetAtTime(0.03, actx.currentTime, 0.1);
+}
+function stopBed() {
+  if (bedLoop) { bedLoop.stop(0.3); bedLoop = null; }
+  clearTimeout(cheerTimer);
+  if (crowdGain) { crowdGain.gain.setTargetAtTime(0.0001, actx.currentTime, 0.1); }
+}
 function startCrowd() {
   if (!ready()) return;
   const src = actx.createBufferSource();

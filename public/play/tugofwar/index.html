@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
+<script src="/common/i18n-wait.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0b1020">
 <link rel="icon" href="data:,">
@@ -67,13 +68,15 @@
   .readyrow .rr.on { background: var(--pc); color: #0b0f17; box-shadow: none; }
   .readyrow .rr.away { opacity: .45; }
   .readyrow .rr.mine { outline: 2px solid rgba(255,255,255,.75); outline-offset: 2px; }
+  .wait .primary.go { position: sticky; bottom: 0; z-index: 3; }
   .primary.go { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 66px; }
   .primary.go small { font-size: 13px; font-weight: 700; color: var(--dim); }
   .primary.go.ready { background: color-mix(in srgb, #5ee07a 18%, rgba(255,255,255,.04)); border: 2px solid #5ee07a; color: #c9ffd8; opacity: 1; }
   .practice { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 16px; border-radius: 20px; background: rgba(255,255,255,.05); border: 2px solid color-mix(in srgb, var(--c) 70%, transparent); touch-action: none; text-align: left; transition: transform .08s, background .1s; }
   .practice:active, .practice.on { transform: scale(.985); background: color-mix(in srgb, var(--c) 30%, rgba(255,255,255,.05)); }
-  .practice b { display: block; font-size: 20px; font-weight: 900; }
-  .practice small { font-size: 13px; color: var(--dim); font-weight: 700; }
+  .practice b { display: block; font-size: 18px; font-weight: 900; }
+  .practice small { font-size: 14px; color: #ffd23a; font-weight: 800; }
+  .practice small:empty { display: none; }
   .practice .pm { margin-left: auto; width: 90px; height: 12px; border-radius: 8px; background: rgba(255,255,255,.12); overflow: hidden; }
   .practice .pm i { display: block; height: 100%; width: 0; background: var(--c); transition: width .1s; }
 
@@ -152,12 +155,9 @@
       </g>
     </svg>
     <h1>폰을 확 당겨요</h1>
-    <p>두 손으로 폰을 쥐고
-"영차!" 구령에 맞춰 가슴 쪽으로 쭉!
-다 같이 맞으면 한 몸!</p>
-    <p class="note hidden" id="httpNote">https 주소가 아니라서 동작 센서가 꺼질 수 있어요.
-그때는 화면의 당겨! 버튼으로 할 수 있어요.</p>
+    <p>박자에 맞춰 폰을 확 당겨요!</p>
     <button class="primary" id="btnStart" style="margin-top:4px">시작하기</button>
+    <div id="langBox"></div>
   </section>
 
   <section class="view center" id="vMsg"><h1 id="msgT"></h1><p id="msgB"></p><button class="ghost hidden" id="btnMsg" style="max-width:280px"></button></section>
@@ -176,7 +176,7 @@
     <div class="setbox" id="setBox"></div>
     <div class="readyrow hidden" id="readyRow"></div>
     <button class="primary go" id="btnGo">준비</button>
-    <button class="practice" id="btnPractice"><svg width="46" height="46" viewBox="0 0 48 48" fill="none" stroke="var(--c)" stroke-width="2.6" stroke-linecap="round"><rect x="16" y="8" width="16" height="28" rx="4"/><path d="M8 40h32M38 24q-6-8-14-8"/></svg><span><b>당기기 연습</b><small id="practiceSub">누르거나 폰을 당겨 봐요</small></span><span class="pm"><i id="practiceM"></i></span></button>
+    <button class="practice" id="btnPractice"><svg width="46" height="46" viewBox="0 0 48 48" fill="none" stroke="var(--c)" stroke-width="2.6" stroke-linecap="round"><rect x="16" y="8" width="16" height="28" rx="4"/><path d="M8 40h32M38 24q-6-8-14-8"/></svg><span><b>당기기 연습</b><small id="practiceSub"></small></span><span class="pm"><i id="practiceM"></i></span></button>
     <div id="tutLink"></div>
   </section>
 
@@ -193,15 +193,17 @@
       <div class="bd big" id="bPull"><i class="ring" id="bRing"></i>영차!</div>
     </div>
     <div class="stam"><span>체력</span><div><i id="stamI"></i></div></div>
-    <div class="judge" id="judge"><b id="judgeB">곧 시작해요</b><span id="judgeS">구령에 맞춰 폰을 확 당겨요</span></div>
-    <button class="pullbtn" id="btnPull">당겨!<small id="pullSub">폰을 당기거나 눌러요</small></button>
-    <div class="braceov" id="braceOv"><b>버텨!</b><span>폰을 꽉 쥐고 가만히</span><div class="bar"><i id="braceBar"></i></div></div>
+    <div class="judge" id="judge"><b id="judgeB" data-k="intro">곧 시작해요</b><span id="judgeS"></span></div>
+    <button class="pullbtn" id="btnPull">당겨!</button>
+    <div class="braceov" id="braceOv"><b>버텨!</b><div class="bar"><i id="braceBar"></i></div></div>
   </section>
 </main>
 <div id="flash"></div>
 <div class="debug" id="debug"></div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
+<script type="module" src="/tugofwar/i18n.js"></script>
 <script type="module" src="controller.js"></script>
 </body>
 </html>

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0a0d18">
 <title>카트 레이스</title>
+<script src="/common/i18n-wait.js"></script>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
 <link rel="stylesheet" href="style.css">
@@ -18,26 +19,27 @@
 <div id="join" class="join hidden"><img id="qrMini" alt="중간 참가 QR"><div><span>중간 참가</span><b id="codeMini">----</b></div></div>
 
 <section id="lobby" class="screen">
+  <div class="lang-box" id="langBox"></div>
   <div class="lobby">
     <div class="lobby-copy">
-      <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 · 화면 분할</div>
       <h1 class="wordmark">KART<br>RACE</h1>
-      <p class="lede">폰을 가로로 들고 핸들처럼 기울여 달리세요. <span class="lede-sub">화면 회전 잠금은 그대로 둬도 돼요.</span></p>
+      <p class="lede">폰을 가로로 들고 핸들처럼 기울여요.</p>
       <div class="slots" id="slots"></div>
       <div class="set-wrap">
         <div id="setBox"></div>
       </div>
       <div class="tut-box" id="tutBox"></div>
-      <div class="hint keys"><span>폰에서 모두 <b>준비</b>를 누르면 출발해요</span> <span class="dot"></span> <span>폰 없이 봇으로 시험할 땐</span> <kbd>Enter</kbd></div>
+      <div class="hint keys"><span id="hintReady" data-i18n="off">폰에서 <b>준비</b>를 누르면 출발해요</span><span class="dev-hint hidden" id="devHint"> <span class="dot"></span> <kbd>Enter</kbd></span></div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
       <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
       <div class="qr-url" id="url"></div>
-      <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 동작 센서가 꺼져 있어요. https 주소에서 열어 주세요.</div>
+      <div class="qr-warn hidden" id="warn">https 주소로 열어 주세요</div>
     </div>
   </div>
   <div class="msg" id="msg"></div>
+<div class="sound-chip hidden" id="soundChip">화면을 한 번 눌러 소리 켜기</div>
 </section>
 
 <section id="over" class="screen hidden">
@@ -47,16 +49,18 @@
     <div class="over-meta" id="overMeta"></div>
     <div class="podium" id="podium"></div>
     <div class="over-set" id="overSet"></div>
-    <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 다음 판이 출발해요</span></div>
+    <div class="hint"><span id="hintAgain" data-i18n="off">폰에서 <b>다시 하기</b>를 누르면 출발해요</span></div>
   </div>
 </section>
 
 <section id="replaced" class="screen hidden">
-  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1></div>
 </section>
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/kart/i18n.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
 <script type="module" src="game.js"></script>
 </body>
 </html>

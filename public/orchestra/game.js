@@ -3,16 +3,18 @@
 // 모든 넘어가기(대기실·연습·곡 고르기·결과 → 다음)는 서버의 start_game(들어온 사람이 모두 준비)으로만 합니다.
 import { createSettings, fields } from '/common/settings.js';
 import { createTutorialBoard } from '/common/tutorial-board.js';
-import { SONGS, getSong, bpmAt } from '/common/music/songs.js';
-import { createSynth, createTransport, playPreview } from '/common/music/synth.js';
+import { SONGS, getSong, bpmAt, songTitle, songComposer } from '/common/music/songs.js';
+import { mountSwitcher } from '/common/i18n.js';
+import { createSynth, createTransport, playPreview, defaultOrch } from '/common/music/synth.js';
 import { createDiscPicker, drawCover } from '/common/disc-picker.js';
 import {
   INSTRUMENTS, INST_ORDER, ICONS, buildPart, windowFor, POINTS, gradeOf, GRADE_WORD, PITCH_TOL, dirOk, patternOf, DIFF_LABEL,
-  chartStats, isSustain, solfa, noteName, DIR_ARROW, JUDGE_LABEL,
+  chartStats, isSustain, solfa, noteName, DIR_ARROW, JUDGE_LABEL, T,
 } from './parts.js';
 import { createScore } from './score.js';
 import { createHall } from './hall.js';
 import { createRecorder } from './recorder.js';
+import { makeSfx, sampleKit, BIG_NAMES, registerChipText } from './sounds.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -26,6 +28,8 @@ const REC_ON = params.get('rec') !== '0';
 const SLOT_INFO = { 1: { name: '1P', color: '#ff5a5f' }, 2: { name: '2P', color: '#3ab4ff' }, 3: { name: '3P', color: '#ffc93c' }, 4: { name: '4P', color: '#5ee07a' } };
 const BOT_PREF = ['violin', 'drum', 'trumpet', 'piano', 'castanets', 'horn', 'voice', 'conductor'];
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+/** 곡 제목 아래 줄: 한국어는 '작곡가 · 영어 제목', 다른 언어는 그 언어 작곡가 이름만 */
+const songSub = (song) => (window.PCG && window.PCG.i18n && window.PCG.i18n.lang() !== 'ko' ? songComposer(song) : `${song.composer} · ${song.en}`);
 const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 
 await Promise.race([
@@ -36,14 +40,34 @@ await Promise.race([
 // ═══════════════ 소리 ═══════════════
 const synth = createSynth({ volume: 0.8, reverb: 1 });
 let audioOn = false;
-function unlockAudio() { synth.resume().then((s) => { audioOn = s === 'running'; }); }
-window.addEventListener('pointerdown', unlockAudio, { capture: true });
-window.addEventListener('keydown', unlockAudio, { capture: true });
+// 큰 화면은 클릭이 한 번도 없을 수 있어서(경기를 폰으로 시작) 키·포인터·터치 어느 것이든 오디오를 깨웁니다.
+function unlockAudio() { synth.resume().then((s) => { audioOn = s === 'running'; updateSoundChip(); }); }
+for (const ev of ['pointerdown', 'pointerup', 'mousedown', 'touchstart', 'click', 'keydown', 'keyup', 'wheel']) window.addEventListener(ev, unlockAudio, { capture: true, passive: true });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { try { synth.allOff(); } catch (e) {} } else if (synth.ctx.state !== 'running') synth.ctx.resume().catch(() => {});
+});
+// 소리가 아직 막혀 있으면 대기실에 작은 안내 칩을 보여 주고, 열리면 사라집니다.
+registerChipText();
+function updateSoundChip() {
+  const chip = document.getElementById('soundChip');
+  if (!chip) return;
+  chip.classList.toggle('hidden', synth.ctx.state !== 'suspended' || !game || game.phase !== 'lobby');
+}
+synth.ctx.addEventListener('statechange', () => { audioOn = synth.ctx.state === 'running'; updateSoundChip(); });
 const outLat = () => Math.min(0.2, synth.ctx.outputLatency || synth.ctx.baseLatency || 0.02);
 const clickInst = synth.instrument('drums', { gain: 0.8 });
+// 실제 녹음(타악기·박수). 대기실에서 미리 받아 두고, 못 받았으면 아래 합성음이 대신 납니다.
+const stageSfx = makeSfx(synth.ctx, synth.bus, BIG_NAMES);
+Object.defineProperty(window.__orchestraSfx, 'has', { value: (n) => stageSfx.has(n), enumerable: false }); // 시험용: 미리 받았는지
 
 // 박수(관객) — 인사할 때. 짧은 잡음 덩어리를 무작위로 많이 겹칩니다.
-function applause(sec = 4, gain = 0.5) {
+function applause(sec = 4, gain = 0.5, cheer = 0) {
+  // 녹음이 있으면 관객 박수 녹음(+환호)을 틀고, 없을 때만 합성 박수
+  if (stageSfx.play('crowd/applause-long', { gain: gain * 1.5, jitter: 0.02 })) {
+    bumpPlayed('crowd/applause-long');
+    if (cheer > 0 && stageSfx.play('crowd/cheer-small', { gain: cheer, when: 0.35 })) bumpPlayed('crowd/cheer-small');
+    return;
+  }
   const ctx = synth.ctx;
   const t0 = ctx.currentTime + 0.05;
   const out = ctx.createGain();
@@ -74,6 +98,8 @@ function applause(sec = 4, gain = 0.5) {
   setTimeout(() => { try { out.disconnect(); } catch (e) {} }, (sec + 1) * 1000);
 }
 
+function bumpPlayed(n) { const st = window.__orchestraSfx; if (st) st.played[n] = (st.played[n] || 0) + 1; }
+
 // ═══════════════ 3D 공연장 ═══════════════
 const hall = createHall($('cv'));
 
@@ -96,11 +122,12 @@ function send(event, data, slot) {
 // ═══════════════ 설정·연습 현황 ═══════════════
 const settings = createSettings({
   game: 'orchestra',
-  fields: [fields.difficulty({ perPlayer: true, hints: { easy: '음표 적게 · 판정 넉넉 · 음정 자동', normal: '반박까지 · 밸브·건반 맞추기', hard: '악보 그대로 · 화음 · 현 고르기' } })],
+  fields: [fields.difficulty({ perPlayer: true, hints: { easy: '음표 적게 · 넉넉하게', normal: '조금 더 촘촘히', hard: '악보 그대로' } })],
   onChange: () => { if (picker) picker.setDifficulty(settings.get('difficulty')); renderLobby(); renderPractice(); renderSelectBar(); pushState(); },
 });
 settings.attach(socket);
 settings.mount($('settingsBox'));
+mountSwitcher($('langBox'), { reload: true, compact: true }); // 언어 고르기: 대기실에서만 보임(대기실 화면 안에 있음)
 const board = createTutorialBoard({ mount: $('tutBoard') });
 board.attach(socket);
 
@@ -198,7 +225,7 @@ function onInstrument(d) {
     p.inst = d.inst;
     p.fresh = Boolean(d.fresh);
     p.act = newAct();
-    const diff = settings.get('difficulty', p.slot) || 'normal';
+    const diff = settings.get('difficulty', p.slot) || 'easy';
     const part = buildPart(game.song, p.inst, diff);
     const joinBeat = Math.max(0, heardBeat() + 0.5);
     const remaining = part.notes.filter((n) => n.b >= joinBeat).length;
@@ -223,7 +250,7 @@ function onInstrument(d) {
     if (p.inst === 'conductor' && game.perf.leader == null) game.perf.leader = p.slot;
     hall.setPlayers(playerList());
     buildPanels(game.song);
-    toast(`${p.name} 합주에 참가했어요`);
+    toast(T('{name} 합주에 참가했어요', { name: p.name }));
     pushState();
     return;
   }
@@ -259,6 +286,7 @@ function setPhase(ph) {
   for (const id of ['lobby', 'practice', 'select', 'perform', 'over']) $(id).classList.toggle('hidden', id !== (ph === 'playing' ? 'perform' : ph));
   $('join').classList.toggle('hidden', ph === 'lobby');
   document.body.dataset.phase = ph;
+  updateSoundChip();
   hall.setMode(ph === 'playing' ? 'perform' : ph);
   settings.lock(ph === 'playing');
   board.hide(ph !== 'lobby');
@@ -276,13 +304,17 @@ const KEY_HINTS = {
   select: ['<kbd>←</kbd><kbd>→</kbd> 넘기기', '<kbd>↑</kbd><kbd>↓</kbd> 난이도', '<kbd>Space</kbd> 이 곡', '<kbd>Enter</kbd> 연주 시작(폰이 없을 때)', '<kbd>Esc</kbd> 대기실'],
   over: ['<kbd>Enter</kbd> 다음 곡(폰이 없을 때)', '<kbd>Esc</kbd> 대기실'],
 };
-function renderKeys() { $('keys').innerHTML = (KEY_HINTS[game.phase] || []).map((k) => `<span>${k}</span>`).join(''); }
+// 폰이 하나라도 들어와 있으면 키 안내는 필요 없어서 비웁니다(폰이 없을 때만 보임).
+function renderKeys() {
+  const phones = playerList().some((p) => !p.bot && p.connected);
+  $('keys').innerHTML = phones ? '' : (KEY_HINTS[game.phase] || []).map((k) => `<span>${k}</span>`).join('');
+}
 function everyoneHasInst() { return playerList().every((p) => p.inst); }
 function anyFresh() { return playerList().some((p) => !p.bot && p.fresh); }
 /** 모두 준비(서버 start_game) 또는 폰이 없을 때 Enter */
 function advance() {
   if (game.phase === 'lobby') {
-    if (!players.size) { toast('폰으로 QR을 찍어 들어와요 · 시험은 ?bots=2'); return; }
+    if (!players.size) { toast('폰으로 QR을 찍어 들어와요'); return; }
     if (!everyoneHasInst()) { toast('아직 악기를 안 고른 사람이 있어요'); return; }
     setPhase(anyFresh() ? 'practice' : 'select');
   } else if (game.phase === 'practice') setPhase('select');
@@ -333,6 +365,7 @@ function toast(text) {
 
 // ═══════════════ 대기실 ═══════════════
 function renderLobby() {
+  renderKeys();
   if (game.phase !== 'lobby') return;
   const list = playerList();
   const taken = {};
@@ -345,7 +378,7 @@ function renderLobby() {
   const ready = readySt && readySt.ready ? readySt.ready : [];
   $('slots').innerHTML = [1, 2, 3, 4].map((s) => {
     const p = players.get(s);
-    if (!p) return `<div class="slot empty"><b>${s}P</b><span>QR로 들어와요</span></div>`;
+    if (!p) return `<div class="slot empty"><b>${s}P</b><span>${T('QR로 들어와요')}</span></div>`;
     const I = p.inst ? INSTRUMENTS[p.inst] : null;
     const st = p.bot ? '봇' : !p.connected ? '연결 끊김' : ready.includes(s) ? '준비 ✓' : I ? (p.fresh ? '처음 · 연습 예정' : '준비 전') : '악기 고르는 중';
     return `<div class="slot" style="--pc:${p.color}"><b>${p.name}</b><i>${I ? ICONS[p.inst] : ''}</i><div><strong>${I ? I.label : '…'}</strong><span class="${ready.includes(s) ? 'ok' : ''}">${st}</span></div><em>${DIFF_LABEL[settings.get('difficulty', s)] || ''}</em></div>`;
@@ -383,13 +416,13 @@ function renderPractice() {
     const inTut = t && !t.done;
     const bar = el.querySelector('.tp-bar');
     bar.innerHTML = inTut ? Array.from({ length: t.total || 4 }, (_, i) => `<i class="${i < t.step - 1 ? 'd' : i === t.step - 1 ? 'c' : ''}"></i>`).join('') : '';
-    el.querySelector('.tp-t').textContent = p.bot ? '봇은 연습 없이 준비됐어요' : inTut ? `연습 중 ${t.step}/${t.total} · ${t.title}` : t && t.done ? (t.skipped ? '연습 건너뜀 · 자유 연습' : '연습 끝 ✓ · 자유 연습') : p.fresh ? '폰에서 연습을 시작해요' : '자유 연습 · 소리를 내 보세요';
+    el.querySelector('.tp-t').textContent = p.bot ? '봇' : inTut ? T('연습 중 {step}/{total}', { step: t.step, total: t.total }) : t && t.done ? (t.skipped ? '연습 건너뜀' : '연습 끝 ✓') : '자유 연습';
     el.classList.toggle('tut', Boolean(inTut));
     // 가운데 큰 글: 튜토리얼 단계 / 자유 연습 안내(소리를 내면 그림에 가려 흐려짐)
     const ti = el.querySelector('.ta-i');
     if (ti.dataset.k !== p.inst) { ti.innerHTML = ICONS[p.inst] || ''; ti.dataset.k = p.inst || ''; }
     el.querySelector('.ta-t').textContent = inTut ? t.title : p.bot ? '' : ok ? '준비 완료' : '자유 연습';
-    el.querySelector('.ta-s').textContent = inTut ? `튜토리얼 ${t.step}/${t.total}` : p.bot ? '' : ok ? '다른 사람을 기다려요' : I.how;
+    el.querySelector('.ta-s').textContent = inTut ? T('튜토리얼 {step}/{total}', { step: t.step, total: t.total }) : p.bot ? '' : ok ? '다른 사람을 기다려요' : I.how;
   }
   for (const el of [...box.querySelectorAll('.tile')]) if (!players.has(Number(el.dataset.slot))) { tileCv.delete(Number(el.dataset.slot)); el.remove(); }
 }
@@ -504,7 +537,7 @@ function ensurePicker() {
     difficulty: settings.get('difficulty'),
     storageKey: 'pcg-orch-picker',
     title: '연주할 곡',
-    hint: '폰에서 좌우로 밀어 넘기기 · ← → · 가운데를 누르면 선택',
+    hint: '폰에서 밀어 넘겨요',
     keyboard: false,
     accent: '#e9c47a',
     startId: params.get('song') && getSong(params.get('song')) ? params.get('song') : undefined,
@@ -547,10 +580,10 @@ function onPick(d) {
 function renderSelectBar() {
   if (game.phase !== 'select') return;
   const s = game.picked;
-  $('selMsg').innerHTML = s ? `<b>${esc(s.title)}</b> 골랐어요 · 폰에서 모두 준비하면 연주를 시작해요` : '폰에서 밀어 넘기고 ‘이 곡으로’를 누르면 골라져요';
+  $('selMsg').innerHTML = s ? `<b>${esc(songTitle(s))}</b> · ${T('모두 준비하면 시작해요')}` : T('곡을 골라요');
   $('selMsg').classList.toggle('picked', Boolean(s));
   const ready = readySt && readySt.ready ? readySt.ready : [];
-  $('selPlayers').innerHTML = playerList().map((p) => `<div class="sp" style="--pc:${p.color}"><b>${p.name}</b><i>${ICONS[p.inst] || ''}</i><span>${p.inst ? INSTRUMENTS[p.inst].label : ''} · ${DIFF_LABEL[settings.get('difficulty', p.slot)]}</span>${ready.includes(p.slot) ? '<em>준비 ✓</em>' : ''}</div>`).join('');
+  $('selPlayers').innerHTML = playerList().map((p) => `<div class="sp" style="--pc:${p.color}"><b>${p.name}</b><i>${ICONS[p.inst] || ''}</i><span>${p.inst ? T(INSTRUMENTS[p.inst].label) + ' · ' : ''}${T(DIFF_LABEL[settings.get('difficulty', p.slot)])}</span>${ready.includes(p.slot) ? '<em>준비 ✓</em>' : ''}</div>`).join('');
 }
 
 // ═══════════════ 연주 ═══════════════
@@ -587,6 +620,17 @@ function startPerformance(song) {
   tr = createTransport(synth);
   const instruments = {};
   for (const part of humanParts) instruments[part] = null;
+  // 큰 화면이 반주하는 타악기·캐스터네츠 파트는 녹음으로(못 받은 소리는 합성음). 자리(좌우)는 합성 악기와 같게
+  const orch = defaultOrch(song);
+  const SEATS = { drums: 0.06, castanets: 0.15 };
+  for (const part of ['drums', 'perc']) {
+    if (humanParts.has(part) || !song.parts[part]) continue;
+    const nm = orch[part];
+    if (nm !== 'drums' && nm !== 'castanets') continue;
+    const k = sampleKit(synth.instrument(nm, { pan: SEATS[nm] }));
+    kitInsts.push(k);
+    instruments[part] = k;
+  }
   const gains = {};
   // 사람이 있으면 큰 화면 반주는 조용히(폰 소리가 잘 들리게)
   const soft = humanParts.size ? 0.62 : 0.85;
@@ -603,8 +647,8 @@ function startPerformance(song) {
   buildPanels(song);
   setPhase('playing');
   $('pCover').src = drawCover(song, 160);
-  $('pSong').textContent = song.title;
-  $('pComposer').textContent = `${song.composer} · ${song.en}`;
+  $('pSong').textContent = songTitle(song);
+  $('pComposer').textContent = songSub(song);
   hall.setPlayers(playerList());
   // 녹화
   game.rec = { on: false, uploading: false };
@@ -640,7 +684,9 @@ function countIn() {
   const t0 = synth.ctx.currentTime + 0.35;
   perf.startAt = t0 + n * step;
   for (let i = 0; i < n; i++) {
-    clickInst.play(i === 0 ? 76 : 77, { when: t0 + i * step, vel: i === 0 ? 0.9 : 0.6 });
+    const ck = { when: t0 + i * step, vel: i === 0 ? 0.9 : 0.6 };
+    if (stageSfx.play('perc/woodblock', { gain: 0.7 * (i === 0 ? 1 : 0.7), rate: i === 0 ? 1.12 : 1, when: Math.max(0, ck.when - synth.ctx.currentTime), jitter: 0 })) bumpPlayed('perc/woodblock');
+    else clickInst.play(i === 0 ? 76 : 77, ck);
     queueAt(t0 + i * step, () => { centerText(String(n - i), ''); send('cue', { count: n - i }); hall.countBeat(i); });
   }
   queueAt(perf.startAt, () => { centerText('', ''); send('cue', { go: true }); });
@@ -662,7 +708,7 @@ function endSong(cut = false) {
     for (const n of P.part.notes) if (!P.judged[n.i] && (!cut || n.b <= bNow)) judge(P, n, 'miss', true);
   }
   pushState();
-  applause(5, 0.42);
+  applause(5, 0.42, 0.3);
   hall.outro();
   centerText('브라보!', 'Bravo');
   setTimeout(() => finishPerformance(), 3600);
@@ -701,7 +747,7 @@ function finishPerformance() {
       const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
       const d = new Date();
       const day = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
-      const name = `오케스트라-${game.song.title.replace(/\s+/g, '')}-${day}.${ext}`;
+      const name = `${T('오케스트라')}-${songTitle(game.song).replace(/\s+/g, '')}-${day}.${ext}`;
       game.recInfo = { name, size: blob.size, type: blob.type };
       renderOver();
       try {
@@ -719,9 +765,11 @@ function finishPerformance() {
   }
   pushState();
 }
+const kitInsts = []; // 반주용 녹음 타악기(transport 가 대신 치우지 않으므로 여기서 치움)
 function stopPerformance() {
   document.body.classList.remove('rec', 'intro');
   if (tr) { tr.unload(); tr = null; }
+  while (kitInsts.length) { try { kitInsts.pop().dispose(); } catch (e) {} }
   if (recorder) { try { recorder.cancel(); } catch (e) {} recorder = null; }
   if (recSynth) { try { recSynth.dispose(); } catch (e) {} recSynth = null; }
   animQ.length = 0;
@@ -794,11 +842,10 @@ function popJudge(pn, j, combo) {
 function noteMatch(P, n, d) {
   const k = INSTRUMENTS[P.inst].kind;
   if (k === 'keys') {
-    if (P.diff === 'easy') return !n.chord || false;
+    if (P.diff !== 'hard') return !n.chord || false; // 쉬움·보통은 아무 건반이나
     return n.m === d.m;
   }
-  if (k === 'tap') return !n.roll || P.diff !== 'hard' || Boolean(d.roll);
-  return true;
+  return true; // 캐스터네츠: 굴리기 음도 톡 한 번이면 인정(두 손가락은 덤)
 }
 function judgeTap(P, d, tm) {
   const [wp, wg] = windowFor(P.inst, P.diff);
@@ -829,12 +876,12 @@ function pitchAt(P, t) {
   return null;
 }
 function pitchOk(P, n, t0) {
-  if (P.diff === 'easy' && P.inst !== 'voice') return true;
+  if (P.diff !== 'hard' && P.inst !== 'voice') return true; // 쉬움·보통은 밸브를 안 맞춰도 됨
   if (P.inst === 'voice') {
     const tol = PITCH_TOL[P.diff] || 1.6;
     const t1 = t0 + Math.min(timeOf(n.b + n.d) - t0, 0.8);
     const xs = P.pitches.filter((q) => q.t >= t0 - 0.05 && q.t <= t1 && q.raw != null).map((q) => { const o = n.m + 12 * Math.round((q.raw - n.m) / 12); return Math.abs(q.raw - o); });
-    if (!xs.length) { const q = pitchAt(P, t0 + 0.1); if (!q || q.raw == null) return P.diff === 'easy'; const o = n.m + 12 * Math.round((q.raw - n.m) / 12); return Math.abs(q.raw - o) <= tol; }
+    if (!xs.length) { const q = pitchAt(P, t0 + 0.1); if (!q || q.raw == null) return P.diff !== 'hard'; const o = n.m + 12 * Math.round((q.raw - n.m) / 12); return Math.abs(q.raw - o) <= tol; }
     xs.sort((a, b) => a - b);
     return xs[xs.length >> 1] <= tol;
   }
@@ -856,7 +903,7 @@ function judgeSustainDue(P, tmNow) {
     const sound = isSounding(P, t0 + Math.min(0.12, (timeOf(n.b + n.d) - t0) * 0.5));
     const ok = pitchOk(P, n, t0);
     let j = 'miss';
-    if (P.diff === 'easy') j = (art || sound) && ok ? (art && bd > wp ? 'good' : 'perfect') : 'miss';
+    if (P.diff !== 'hard') j = (art || sound) && ok ? (art && bd > wp ? 'good' : 'perfect') : 'miss';
     else if (art && bd <= wp && ok) j = 'perfect';
     else if ((art || sound) && ok) j = 'good';
     judge(P, n, j);
@@ -881,7 +928,7 @@ function expireTaps(P, tmNow) {
 // ─── 폰 이벤트 ───
 function recInst(P) {
   if (!recSynth) return null;
-  if (!P.recInst) P.recInst = recSynth.instrument(INSTRUMENTS[P.inst].synth || 'drums');
+  if (!P.recInst) P.recInst = sampleKit(recSynth.instrument(INSTRUMENTS[P.inst].synth || 'drums'));
   return P.recInst;
 }
 function onPlay(d) {
@@ -1082,7 +1129,7 @@ function buildPanels(song) {
     const el = document.createElement('div');
     el.className = 'panel';
     el.style.setProperty('--pc', P.color);
-    el.innerHTML = `<div class="ph"><b>${P.name}</b><i>${ICONS[P.inst]}</i><div class="pn"><strong>${I.label}</strong><span>${I.role} · ${DIFF_LABEL[P.diff]}${P.bot ? ' · 봇' : ''}</span></div><div class="pacc"><b>–</b><span>정확도</span></div></div><div class="pbody"><canvas></canvas><div class="pop"></div><div class="pcombo"></div></div>`;
+    el.innerHTML = `<div class="ph"><b>${P.name}</b><i>${ICONS[P.inst]}</i><div class="pn"><strong>${I.label}</strong><span>${T(I.role)} · ${T(DIFF_LABEL[P.diff])}${P.bot ? ' · ' + T('봇') : ''}</span></div><div class="pacc"><b>–</b><span>정확도</span></div></div><div class="pbody"><canvas></canvas><div class="pop"></div><div class="pcombo"></div></div>`;
     box.appendChild(el);
     const sc = createScore(el.querySelector('canvas'), { compact: list.length >= 3, ahead: 3.6 });
     sc.setPart(P.part, song, P.inst, P.color, P.diff);
@@ -1143,13 +1190,13 @@ function renderOver() {
   if (game.phase !== 'over' || !R) return;
   const song = R.song;
   $('oCover').src = drawCover(song, 220);
-  $('oSong').textContent = song.title;
-  $('oComposer').textContent = `${song.composer} · ${song.en}`;
+  $('oSong').textContent = songTitle(song);
+  $('oComposer').textContent = songSub(song);
   $('oGrade').textContent = R.ens.grade;
-  $('oWord').textContent = R.list.length ? `${GRADE_WORD[R.ens.grade]} · ${R.ens.partial ? '중간 참가 구간 정확도' : '합주 정확도'} ${Math.round(R.ens.acc * 100)}%` : '자동 연주';
+  $('oWord').textContent = R.list.length ? T(R.ens.partial ? '{grade} · 중간 참가 구간 정확도 {acc}%' : '{grade} · 합주 정확도 {acc}%', { grade: T(GRADE_WORD[R.ens.grade]), acc: Math.round(R.ens.acc * 100) }) : T('자동 연주');
   $('oCards').innerHTML = R.list.map((r) => {
     const I = INSTRUMENTS[r.inst];
-    return `<div class="oc" style="--pc:${r.color}"><div class="oc-h"><b>${r.name}</b><i>${ICONS[r.inst]}</i><strong>${I.label}</strong><em>${DIFF_LABEL[r.diff]}${r.late ? ' · 중간 참가' : ''}</em></div><div class="oc-g">${r.grade}<span>${Math.round(r.acc * 100)}%</span></div><div class="oc-s"><span>PERFECT <b>${r.perfect}</b></span><span>GOOD <b>${r.good}</b></span><span>MISS <b>${r.miss}</b></span><span>콤보 <b>${r.maxCombo}</b></span>${r.steady != null ? `<span>안정감 <b>${Math.round(r.steady * 100)}%</b></span>` : ''}</div></div>`;
+    return `<div class="oc" style="--pc:${r.color}"><div class="oc-h"><b>${r.name}</b><i>${ICONS[r.inst]}</i><strong>${I.label}</strong><em>${T(DIFF_LABEL[r.diff])}${r.late ? ' · ' + T('중간 참가') : ''}</em></div><div class="oc-g">${r.grade}<span>${Math.round(r.acc * 100)}%</span></div><div class="oc-s"><span>PERFECT <b>${r.perfect}</b></span><span>GOOD <b>${r.good}</b></span><span>MISS <b>${r.miss}</b></span><span>콤보 <b>${r.maxCombo}</b></span>${r.steady != null ? `<span>안정감 <b>${Math.round(r.steady * 100)}%</b></span>` : ''}</div></div>`;
   }).join('');
   const btn = $('oDlBtn');
   if (localBlobUrl) {
@@ -1158,10 +1205,10 @@ function renderOver() {
     btn.classList.remove('off');
   } else { btn.removeAttribute('href'); btn.classList.add('off'); }
   const info = game.recInfo;
-  $('oDlSub').textContent = !REC_ON ? '녹화를 껐어요' : game.rec.uploading && !localBlobUrl ? '녹화 마무리하는 중…'
-    : game.clip ? `${info ? (info.size / 1048576).toFixed(1) + 'MB · ' : ''}폰에서도 받을 수 있어요 · 10분 뒤 사라져요`
-      : game.rec.uploading ? '폰으로 보내는 중… · 10분 뒤 사라져요'
-        : localBlobUrl ? `이 화면에서만 받을 수 있어요 · 다음 곡을 시작하면 사라져요` : '녹화본이 없어요';
+  $('oDlSub').textContent = !REC_ON ? T('녹화를 껐어요') : game.rec.uploading && !localBlobUrl ? T('녹화 마무리하는 중…')
+    : game.clip ? (info ? (info.size / 1048576).toFixed(1) + 'MB · ' : '') + T('폰에서도 받을 수 있어요 · 10분 뒤 사라져요')
+      : game.rec.uploading ? T('폰으로 보내는 중… · 10분 뒤 사라져요')
+        : localBlobUrl ? T('이 화면에서만 받을 수 있어요 · 다음 곡을 시작하면 사라져요') : T('녹화본이 없어요');
   $('oDl').classList.toggle('hidden', !REC_ON);
   renderOverReady();
 }
@@ -1169,7 +1216,7 @@ function renderOverReady() {
   if (game.phase !== 'over') return;
   const ready = readySt && readySt.ready ? readySt.ready : [];
   const need = readySt ? readySt.need : 0;
-  $('oReady').textContent = need ? `다시 하기 준비 ${ready.length}/${need}` : '';
+  $('oReady').textContent = need ? T('다시 하기 준비 {a}/{b}', { a: ready.length, b: need }) : '';
 }
 $('oDlBtn').addEventListener('click', (e) => { if (!localBlobUrl) e.preventDefault(); });
 window.addEventListener('pagehide', () => { if (localBlobUrl) URL.revokeObjectURL(localBlobUrl); });
@@ -1186,7 +1233,7 @@ function composeFrame(g, W, H) {
   g.fillRect(0, 0, W, 54);
   g.fillStyle = '#f6f1e7';
   g.font = '800 24px "Pretendard Variable", Pretendard, sans-serif';
-  if (game.song) g.fillText(`${game.song.title} · ${game.song.composer}`, 22, 35);
+  if (game.song) g.fillText(`${songTitle(game.song)} · ${songComposer(game.song)}`, 22, 35);
   g.textAlign = 'right';
   g.font = '700 16px "Pretendard Variable", Pretendard, sans-serif';
   g.fillStyle = '#e9c47a';
@@ -1207,7 +1254,7 @@ function composeFrame(g, W, H) {
     g.fillText(P ? P.name : '', x + 14, y + 26);
     g.font = '800 15px "Pretendard Variable", Pretendard, sans-serif';
     g.fillStyle = '#f6f1e7';
-    if (P) g.fillText(`${INSTRUMENTS[P.inst].label} · ${pn.acc.textContent}`, x + 50, y + 25);
+    if (P) g.fillText(`${T(INSTRUMENTS[P.inst].label)} · ${pn.acc.textContent}`, x + 50, y + 25);
     const cv = pn.score.canvas;
     const cr = cv.getBoundingClientRect();
     if (cv.width && cr.width) g.drawImage(cv, cr.left * sx, cr.top * sy, cr.width * sx, cr.height * sy);
@@ -1283,6 +1330,7 @@ if (AUTOSTART && BOTS) {
 }
 
 window.__orchestra = {
+  get synth() { return synth; },
   get phase() { return game.phase; }, get stage() { return game.stage; }, game, players, settings, hall,
   get picker() { return picker; }, get tr() { return tr; }, get beat() { return heardBeat(); },
   advance,

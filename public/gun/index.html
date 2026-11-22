@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#05070d">
 <title>좀비 건 아케이드</title>
+<script src="/common/i18n-wait.js"></script>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
 <link rel="stylesheet" href="style.css">
@@ -18,7 +19,7 @@
 <div id="hurt" class="hurt"></div>
 
 <div id="topbar" class="topbar hidden">
-  <div class="stagetag"><span><em id="stageName">1 · 폐허가 된 거리</em><i class="diff" id="diffTag" data-d="normal">보통</i></span><b id="waveName">WAVE 1/9</b></div>
+  <div class="stagetag"><span><em id="stageName"></em><i class="diff" id="diffTag" data-d="normal">보통</i></span><b id="waveName">WAVE 1/9</b></div>
   <div class="foe"><span>남은 좀비</span><b id="foeLeft">0</b></div>
 </div>
 
@@ -34,28 +35,29 @@
 </div>
 
 <section id="lobby" class="screen">
+  <div class="langbox" id="langBox"></div>
   <div class="lobby">
     <div class="lobby-copy">
       <div class="eyebrow">1~8인 · 한 화면</div>
       <h1 class="wordmark">ZOMBIE<br>GUN</h1>
-      <p class="lede">폰을 화면에 겨누고 방아쇠를 눌러 좀비를 잡아요.</p>
+      <p class="lede">폰을 겨누고 좀비를 쏴요.</p>
       <div class="slots" id="slots"></div>
       <div class="setbox" id="setBox"></div>
       <div class="tutbox" id="tutBox"></div>
-      <div class="hint"><span>폰에서 모두 <b>준비</b>를 누르면 시작해요</span><span class="dot"></span><kbd>D</kbd><span>난이도 바꾸기</span></div>
+      <div class="hint"><span id="hintReady"></span><span class="dot"></span><kbd>D</kbd><span>난이도</span></div>
     </div>
     <!-- 가운데 빈 곳 = 연습 사격장. 연습 좀비가 이 범위 안에 서도록 game.js 가 위치를 잽니다. -->
     <div class="range" id="range" aria-hidden="true">
       <div class="range-tag">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5"/></svg>
-        <span><b>연습 사격장</b><small>폰을 겨누고 쏴 보세요</small></span>
+        <span><b>연습 사격장</b></span>
       </div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
       <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
       <div class="qr-url" id="url"></div>
-      <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 동작 센서가 꺼져 있어요. https 주소에서 열어 주세요.</div>
+      <div class="qr-warn hidden" id="warn">http 주소라 폰 센서가 꺼져요. https로 열어 주세요.</div>
     </div>
   </div>
   <div class="msg" id="msg"></div>
@@ -68,18 +70,20 @@
     <div class="podium" id="podium"></div>
     <div class="over-foot">
       <div class="setbox" id="setBoxOver"></div>
-      <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 새 판</span><span class="dot"></span><kbd>D</kbd><span>난이도</span></div>
+      <div class="hint"><span id="hintAgain"></span><span class="dot"></span><kbd>D</kbd><span>난이도</span></div>
     </div>
     <div class="tutbox" id="tutBoxOver"></div>
   </div>
 </section>
 
 <section id="replaced" class="screen hidden">
-  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">마지막으로 연 화면에서 이어져요.</p></div>
 </section>
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<!-- 사전은 한 모듈 묶음으로 불러야 첫 번역(화면 준비 직후) 전에 모두 등록됩니다 -->
+<script type="module">import '/common/i18n-common.js'; import '/gun/i18n.js';</script>
 <script type="module" src="game.js"></script>
 </body>
 </html>

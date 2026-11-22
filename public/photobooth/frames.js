@@ -4,6 +4,8 @@
 //   const sheet = makeSheet('strip', { cutSlots: [[1], [2], [1], [2]] });
 //   drawSheet(ctx, sheet, 'pastel', { cell: (ci, sub) => ({ src: img }), date: new Date() });
 
+import { t as T } from '/common/i18n.js';
+
 // 세로 네컷(인생 사진 띠)과 2×2(포즈 미션). 컷 비율: 세로 네컷 672×490(가로가 긴 사진), 2×2 530×726(세로 사진)
 export const STRIP = { w: 800, h: 2400, side: 64, top: 64, gap: 26, foot: 300 };
 export const GRID = { w: 1200, h: 1800, side: 56, top: 56, gap: 28, foot: 264 };
@@ -16,7 +18,7 @@ export const MODES = [
 export const MODE = Object.fromEntries(MODES.map((m) => [m.id, m]));
 
 const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
-const SANS = '"Pretendard Variable",Pretendard,-apple-system,"Apple SD Gothic Neo",system-ui,sans-serif';
+const SANS = '"Pretendard Variable",Pretendard,-apple-system,"Apple SD Gothic Neo","Hiragino Sans","PingFang SC","Noto Sans CJK JP","Noto Sans CJK SC","Microsoft YaHei",system-ui,sans-serif';
 const ANTON = 'Anton,Impact,"Pretendard Variable",sans-serif';
 
 // ---------- 판 모양 ----------
@@ -501,7 +503,7 @@ function drawFoot(ctx, sheet, th, u, o) {
     const k = sheet.w / 1200;
     const y = f.y + f.h * 0.5;
     const tf = th.titleAnton ? `400 ${84 * k}px ${ANTON}` : `900 ${70 * k}px ${SANS}`;
-    text(ctx, th.title, 70 * k, y + 26 * k, { font: tf, color: th.ink, align: 'left', spacing: th.titleAnton ? 4 * k : -1 * k, ...(th.neon ? { glow: th.ink, glowBlur: 26 * k, stroke: 'rgba(255,255,255,.85)', strokeW: 1.5 * k } : {}) });
+    text(ctx, T(th.title), 70 * k, y + 26 * k, { font: tf, color: th.ink, align: 'left', spacing: th.titleAnton ? 4 * k : -1 * k, ...(th.neon ? { glow: th.ink, glowBlur: 26 * k, stroke: 'rgba(255,255,255,.85)', strokeW: 1.5 * k } : {}) });
     text(ctx, date, sheet.w - 70 * k, y - 4 * k, { font: `400 ${40 * k}px ${ANTON}`, color: th.sub, align: 'right', spacing: 6 * k, ...(th.neon ? { glow: th.sub, glowBlur: 16 * k } : {}) });
     text(ctx, 'PHONE CONTROLLER GAMES', sheet.w - 70 * k, y + 40 * k, { font: `800 ${17 * k}px ${SANS}`, color: th.mark, align: 'right', spacing: 5 * k });
     dots(ctx, players, sheet.w - 70 * k, y - 68 * k, 9 * k, 'right');
@@ -520,7 +522,7 @@ function drawFoot(ctx, sheet, th, u, o) {
     text(ctx, o.owner.name, cx, f.y + 16 * u + fs * 1.08, { font: `400 ${fs}px ${ANTON}`, color: '#0b0f17', spacing: 2 * u });
     y += 30 * u;
   }
-  text(ctx, th.title, cx, y, { font: titleFont, color: th.ink, spacing: th.titleAnton ? 5 * u : -1 * u, ...neonTitle });
+  text(ctx, T(th.title), cx, y, { font: titleFont, color: th.ink, spacing: th.titleAnton ? 5 * u : -1 * u, ...neonTitle });
   text(ctx, date, cx, y + 58 * u, { font: `400 ${30 * u}px ${ANTON}`, color: th.sub, spacing: 6 * u, ...(th.neon ? { glow: th.sub, glowBlur: 14 * u } : {}) });
   text(ctx, 'PHONE CONTROLLER GAMES', cx, y + 100 * u, { font: markFont, color: th.mark, spacing: 5 * u });
   if (!o.owner) dots(ctx, players, cx, f.y + 30 * u, 8 * u, 'center');

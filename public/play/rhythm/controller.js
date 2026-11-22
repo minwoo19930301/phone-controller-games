@@ -5,12 +5,15 @@
 // 대기실에서는 폰 화면을 좌우로 밀어 큰 화면의 CD 를 넘기고, 탭하면 그 곡으로 정합니다(누가 고르는지 큰 화면에 뜸).
 // 난이도·입력·패드 배치는 공통 설정(phone-settings)의 '나만' 값이라 c2d settings 로 큰 화면에 보냅니다.
 // 판정은 큰 화면이 오디오 시계로 합니다. 폰은 누른 순간부터 보낼 때까지 걸린 시간(ago)과 왕복 시간(rtt)을 같이 보냅니다.
-// 처음이면 입력 방식마다 튜토리얼(rhythm-pad / rhythm-motion)을 띄웁니다. 모션은 자세 맞추기 다음에.
+// 튜토리얼(rhythm-pad / rhythm-motion)은 저절로 시작하지 않고 '튜토리얼 다시 하기' 링크를 누를 때만 합니다(한 단계).
+// 모션은 자세 맞추기 없이 준비 한 번으로 됩니다(자세는 감지기가 늘 스스로 읽음). 다시 맞추기는 옵션 안에 남아 있습니다.
 // 시험: &debug(센서 값·버튼), ?tut=1, 키보드 D F J K / 화살표(패드), window.__rhythmPhone
 import { haptics } from '/common/haptics.js';
 import { createPhoneSettings } from '/common/phone-settings.js';
 import { createTutorial } from '/common/tutorial.js';
 import { drawCover } from '/common/disc-picker.js';
+import { songTitle, songComposer } from '/common/music/songs.js';
+import { t, lang, mountSwitcher } from '/common/i18n.js';
 import { createStepDetector, DIRS } from './motion.js';
 import { createPad } from './pad.js';
 
@@ -25,11 +28,16 @@ const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 // ---------- 조정 값 ----------
 const SENSOR_WAIT_MS = 1500; // 이 안에 동작 센서 값이 안 오면 버튼으로 대신합니다
 const STILL_MS = 700; // 자세 맞추기: 이만큼 가만히
-const BASE_THRESHOLD = 7.5; // 모션 스텝 문턱(m/s²). 감도로 곱합니다
-// 정반대 방향이 바로 오면 '제자리로 돌아오는 동작'으로 봅니다. 어려움은 노트 간격(0.36초)이 짧아 창을 줄입니다.
-const OPPOSITE_MS = { easy: 420, normal: 400, hard: 280 };
+// 모션 스텝 문턱(m/s²). 감도로 곱합니다. 쉬움·보통은 가볍게 휙 해도 잡히게 낮춥니다(어려움은 예전 그대로 7.5).
+const THRESHOLD = { easy: 4.5, normal: 5.5, hard: 7.5 };
+// 정반대 방향이 바로 오면 '제자리로 돌아오는 동작'으로 봅니다. 쉬움·보통은 이 규칙을 끕니다(0). 어려움만 노트 간격(0.36초)에 맞춰 280ms.
+const OPPOSITE_MS = { easy: 0, normal: 0, hard: 280 };
+// 한 번 센 뒤 쉬는 시간(ms). 문턱을 낮춘 만큼 멈춤 가속이 한 번 더 세어지지 않게 쉬움·보통은 조금 더 깁니다.
+const REFRACTORY_MS = { easy: 300, normal: 300, hard: 230 };
+const PAD_SLIDE_PX = { easy: Infinity, normal: Infinity, hard: 20 }; // 패드: 손가락이 이만큼 밀려야 옆 칸으로 칩니다(Infinity = 누른 칸 고정)
 const DIR_TO = { left: '왼쪽으로', down: '아래로', up: '위로', right: '오른쪽으로' };
-const PREF_KEY = 'pcg-rhythm-pref'; // 이 폰이 고른 입력·배치·난이도(다음에 들어와도 그대로)
+const PREF_KEY = 'pcg-rhythm-pref2'; // 쉬움이 기본이 되면서 예전에 저장된 '보통'이 이기지 않게 키를 바꿨습니다.
+// 이 폰이 고른 입력·배치·난이도(다음에 들어와도 그대로)
 const SENS_KEY = 'pcg-rhythm-sens';
 const GLYPH = { 4: ['←', '↓', '↑', '→'], 5: ['↙', '↖', '●', '↗', '↘'] };
 const DIFF_LABEL = { easy: '쉬움', normal: '보통', hard: '어려움' };
@@ -41,7 +49,12 @@ const KEYMAP = {
   5: { KeyZ: 0, KeyQ: 1, KeyS: 2, KeyE: 3, KeyC: 4, KeyD: 0, KeyF: 1, Space: 2, KeyJ: 3, KeyK: 4 }
 };
 
-if (ROOM) $('room').textContent = `방 ${ROOM}`;
+if (ROOM) $('room').textContent = t('방 {c}', { c: ROOM });
+// 언어 고르기: 시작 화면에서만 보입니다(#vStart 안). 바꾸면 페이지를 다시 불러옵니다.
+mountSwitcher($('langBox'), { reload: true, compact: true });
+// 큰 화면이 보낸 곡 정보를 이 폰의 언어로(한국어는 원문, 그 밖은 영문 제목·영문 작곡가)
+const locTitle = (ko, en) => (lang() === 'ko' ? ko : en || ko);
+const songSub = (s) => (lang() === 'ko' ? `${s.en || ''} · ${s.composer || ''}` : songComposer(s));
 if (!window.isSecureContext) $('httpNote').classList.remove('hidden');
 
 let token = null;
@@ -95,7 +108,7 @@ const ps = createPhoneSettings();
 ps.attach(socket);
 const inputMode = () => (ps.get('input') === 'motion' ? 'motion' : 'pad');
 const lanesOf = () => (inputMode() === 'motion' ? 4 : Number(ps.get('lanes')) === 5 ? 5 : 4);
-const myDiff = () => ps.get('difficulty') || 'normal';
+const myDiff = () => ps.get('difficulty') || 'easy';
 let prefsPushed = false;
 ps.onChange((vals, info) => {
   // 들어온 뒤 처음 설정을 받으면, 이 폰이 전에 고른 값으로 맞춥니다.
@@ -105,7 +118,7 @@ ps.onChange((vals, info) => {
       if (pref[k] != null && String(ps.get(k)) !== String(pref[k])) ps.choose(k, pref[k]);
     }
   }
-  det.setOpposite(OPPOSITE_MS[myDiff()] || 400);
+  applyDiff();
   if (info && info.update && mode === 'in') maybeAutoTutorial();
   paint();
 });
@@ -130,6 +143,7 @@ function ensurePad() {
     onPress: (lane, info) => sendStep(lane, info.t),
     onRelease: (lane, info) => c2d('release', { lane, ago: Math.round(Math.max(0, performance.now() - info.t)), rtt: Math.round(rtt()) })
   });
+  applyDiff();
   return pad;
 }
 function sendStep(lane, t, extra = {}) {
@@ -141,7 +155,15 @@ function sendStep(lane, t, extra = {}) {
 // 모션
 // ================================================================
 let sens = Number(loadJSON(SENS_KEY, 1)) || 1;
-const det = createStepDetector({ threshold: BASE_THRESHOLD * sens, onStep: (s) => onMotionStep(s) });
+const det = createStepDetector({ threshold: THRESHOLD.easy * sens, oppositeMs: OPPOSITE_MS.easy, refractoryMs: REFRACTORY_MS.easy, onStep: (s) => onMotionStep(s), onWeak: () => onWeakMotion() });
+/** 난이도에 맞춰 문턱·되돌림 규칙·패드 밀기를 맞춥니다 */
+function applyDiff() {
+  const d = myDiff();
+  det.setThreshold((THRESHOLD[d] || THRESHOLD.easy) * sens);
+  det.setOpposite(OPPOSITE_MS[d] ?? 0);
+  det.setRefractory(REFRACTORY_MS[d] ?? 300);
+  if (pad) pad.setSlide(PAD_SLIDE_PX[d] ?? Infinity);
+}
 let sensorsOn = false;
 let gotMotion = false;
 let motionCount = 0;
@@ -216,13 +238,28 @@ function flashDir(dir) {
     el.classList.add('hit');
   }
 }
+let hintT = null;
+/** 경기 중 짧은 힌트(폰 화면 위쪽). 조용히 씹히는 입력이 없도록 */
+function hint(text, ms = 1100) {
+  const el = $('hHint');
+  el.textContent = text;
+  el.classList.add('on');
+  clearTimeout(hintT);
+  hintT = setTimeout(() => el.classList.remove('on'), ms);
+}
+/** 너무 약한 휙: 짧은 진동 + '더 크게!' */
+function onWeakMotion() {
+  if (view !== 'vPlay' || inputMode() !== 'motion') return;
+  haptics.tick({ noFlash: true, silent: true });
+  hint('더 크게!');
+}
 function onMotionStep(step) {
   if (inputMode() !== 'motion' && !tutMotion.isRunning()) return;
   lastStep = step;
   flashDir(step.dir);
   // 감지하자마자 짧게(판정은 큰 화면이 따로 보냄)
   haptics.tick({ noFlash: true, silent: true });
-  $('mbText').textContent = `${DIR_TO[step.dir]} 휙 ✓${step.sim ? '' : ` · 세기 ${step.peak}`}`;
+  $('mbText').textContent = t('{d} 휙 ✓', { d: DIR_TO[step.dir] });
   if (tutMotion.isRunning() && tutMotion.signal('step', step)) return;
   if (inputMode() !== 'motion') return;
   sendStep(step.lane, step.t, { dir: step.dir, peak: step.peak });
@@ -239,7 +276,7 @@ function openCal(after) {
   }
   calRun = { still: 0, last: performance.now(), after, started: performance.now() };
   $('calT').textContent = '폰을 세워 들어요';
-  $('calB').textContent = '화면이 나를 보게 세워 들고 잠깐 가만히 있어요.';
+  $('calB').textContent = '세워 들고 잠깐 가만히 있어요.';
   $('calFallback').classList.toggle('hidden', !DEBUG);
   setCalProg(0);
   $('cal').classList.remove('hidden');
@@ -263,7 +300,7 @@ function calTick() {
   if (upright && still) r.still += dt;
   else r.still = Math.max(0, r.still - dt * 2);
   setCalProg(r.still / STILL_MS);
-  $('calB').textContent = !upright ? '폰을 바닥과 수직으로 세워 주세요.' : !still ? '잠깐만 가만히…' : '좋아요, 그대로…';
+  $('calB').textContent = !upright ? '폰을 세워 주세요.' : !still ? '잠깐만 가만히…' : '좋아요, 그대로…';
   if (r.still >= STILL_MS) finishCal(true);
 }
 function finishCal(ok) {
@@ -301,25 +338,18 @@ function useButtons() {
 }
 $('calFallback').addEventListener('click', useButtons);
 
-/** 모션을 쓸 수 있게: 권한 → 센서 확인 → 자세 맞추기 → (처음이면) 튜토리얼. 탭 안에서 부릅니다. */
+/** 모션을 쓸 수 있게: 권한 → 센서 확인. 자세 맞추기는 하지 않습니다(감지기가 매 샘플 '위쪽'을 스스로 읽음). 탭 안에서 부릅니다. */
 function readyMotion(then) {
-  const go = () => {
-    if (!calibrated) openCal(() => afterCal(then));
-    else afterCal(then);
-  };
-  // 센서 확인(최대 1.5초)을 기다린 뒤 자세 맞추기. 값이 안 오면 버튼으로 바로 넘어갑니다.
-  enableSensors().then(go);
-}
-function afterCal(then) {
-  if (tutMotion.firstTime() && !tutMotion.isRunning() && state.phase !== 'playing') {
-    tutMotion.run().then(() => { paint(); if (then) then(); });
-    return;
-  }
-  if (then) then();
+  enableSensors().then(() => {
+    calibrated = true;
+    c2d('calibrate', { fallback });
+    paint();
+    if (then) then();
+  });
 }
 
 // ================================================================
-// 튜토리얼
+// 튜토리얼 (저절로 시작하지 않음. '튜토리얼 다시 하기' 링크를 눌렀을 때만 한 단계)
 // ================================================================
 let tutPadMini = null;
 function miniPad(stage, api, onPad) {
@@ -327,12 +357,11 @@ function miniPad(stage, api, onPad) {
   box.className = 'tut-pad';
   stage.appendChild(box);
   const lanes = lanesOf();
-  const downs = new Map();
   const m = createPad(box, {
     lanes,
     color: me ? me.color : '#ff5a5f',
-    onPress: (lane) => { downs.set(lane, performance.now()); onPad('press', lane, m); },
-    onRelease: (lane) => { const t0 = downs.get(lane); downs.delete(lane); onPad('release', lane, m, t0 ? (performance.now() - t0) / 1000 : 0); }
+    onPress: (lane) => onPad('press', lane, m),
+    onRelease: (lane) => onPad('release', lane, m)
   });
   tutPadMini = m;
   return () => { m.destroy(); if (tutPadMini === m) tutPadMini = null; };
@@ -340,63 +369,15 @@ function miniPad(stage, api, onPad) {
 const padTarget = () => (lanesOf() === 5 ? 3 : 2); // 5키: ↗, 4키: ↑
 const padSteps = [
   {
-    title: '아무 칸이나 톡',
-    body: '화면 전체가 발판이에요. 화살표가 있는 칸 아무 데나 세 번 눌러 봐요.',
-    waitFor: 'pad', count: 3, hint: '세 번 눌러요',
-    render: (stage, api) => miniPad(stage, api, (k, lane) => { if (k === 'press') api.signal('pad', { lane }); })
-  },
-  {
-    title: '화살표 = 누를 칸',
-    body: '큰 화면에 오는 화살표와 같은 쪽 칸을 눌러요. 반짝이는 칸을 눌러 봐요.',
+    title: '화살표 칸 누르기',
+    body: '반짝이는 칸을 눌러요.',
     waitFor: 'pad',
-    check: (d) => d.lane === padTarget() || `그건 ${GLYPH[lanesOf()][d.lane]} 칸이에요. 반짝이는 ${GLYPH[lanesOf()][padTarget()]} 칸!`,
+    check: (d) => d.lane === padTarget() || `${GLYPH[lanesOf()][padTarget()]} 칸!`,
     render: (stage, api) => {
       const off = miniPad(stage, api, (k, lane) => { if (k === 'press') api.signal('pad', { lane }); });
       const t = setInterval(() => tutPadMini && tutPadMini.judge(padTarget(), 'perfect'), 700);
       setTimeout(() => tutPadMini && tutPadMini.judge(padTarget(), 'perfect'), 80);
       return () => { clearInterval(t); off(); };
-    }
-  },
-  {
-    title: '두 칸 동시에',
-    body: '노트 두 개가 나란히 오면 두 손가락으로 같이 눌러요.',
-    waitFor: 'jump', hint: '두 칸을 한꺼번에',
-    render: (stage, api) => {
-      let lastAt = -1e9;
-      let lastLane = -1;
-      return miniPad(stage, api, (k, lane, m) => {
-        if (k !== 'press') return;
-        const now = performance.now();
-        const held = m.held();
-        if ((held.length >= 2) || (lane !== lastLane && now - lastAt < 160)) api.signal('jump', { lanes: held });
-        lastAt = now;
-        lastLane = lane;
-      });
-    }
-  },
-  {
-    title: '길게 누르기',
-    body: '꼬리가 달린 노트(어려움)는 꼬리가 끝날 때까지 누르고 있어요. 1초 꾹!',
-    waitFor: 'hold', hint: '1초 동안 누르고 있어요',
-    check: (d) => d.dur >= 0.9 || `${d.dur.toFixed(1)}초 · 조금 더 오래!`,
-    render: (stage, api) => {
-      const bar = document.createElement('div');
-      bar.className = 'tut-hold';
-      bar.innerHTML = '<i></i>';
-      let t0 = 0;
-      let raf = 0;
-      const tick = () => {
-        const k = t0 ? clamp((performance.now() - t0) / 1000, 0, 1) : 0;
-        bar.firstChild.style.width = `${k * 100}%`;
-        bar.classList.toggle('full', k >= 0.9);
-        if (t0) raf = requestAnimationFrame(tick);
-      };
-      const off = miniPad(stage, api, (k, lane, m, dur) => {
-        if (k === 'press') { t0 = performance.now(); cancelAnimationFrame(raf); tick(); }
-        else { t0 = 0; cancelAnimationFrame(raf); tick(); api.signal('hold', { lane, dur: dur || 0 }); }
-      });
-      stage.appendChild(bar);
-      return () => { cancelAnimationFrame(raf); off(); };
     }
   }
 ];
@@ -405,7 +386,7 @@ function motionButtons(stage, api) {
   if (!fallback && !DEBUG) return null;
   const box = document.createElement('div');
   box.className = 'tut-mo';
-  box.innerHTML = `<small>${fallback ? '동작 센서가 없어서 버튼으로 해 봐요' : '시험: 버튼으로 흉내'}</small>` +
+  box.innerHTML = `<small>${fallback ? '버튼으로 해 봐요' : '시험: 버튼으로 흉내'}</small>` +
     DIRS.map((d) => `<button type="button" data-d="${d}">${GLYPH[4][DIRS.indexOf(d)]}</button>`).join('');
   box.addEventListener('pointerdown', (e) => {
     const b = e.target.closest('button[data-d]');
@@ -416,50 +397,37 @@ function motionButtons(stage, api) {
   stage.appendChild(box);
   return () => box.remove();
 }
-const flickStep = (dir, title, body, extra = {}) => ({
-  title, body, svg: 'flick', svgOpts: { dir }, waitFor: 'step', hint: `${DIR_TO[dir]} 휙`,
-  check: (d) => d.dir === dir || `${DIR_TO[d.dir]} 갔어요. ${DIR_TO[dir]} 휙!`,
-  render: motionButtons,
-  ...extra
-});
 const motionSteps = [
-  flickStep('up', '위로 휙', '폰을 세워 든 채 위로 짧고 세게 휙. 돌아올 땐 천천히.'),
-  flickStep('down', '아래로 휙', '이번엔 아래로 휙. 손목이 아니라 팔째로 움직여요.'),
-  flickStep('left', '왼쪽으로 휙', '화면을 나에게 향한 채 왼쪽으로 휙.'),
-  flickStep('right', '오른쪽으로 휙', '오른쪽으로 휙. 큰 화면의 → 노트예요.'),
-  flickStep('right', '연달아 두 번', '휙 → 천천히 제자리 → 또 휙. 오른쪽으로 두 번 해 봐요.', { count: 2, hint: '두 번 휙' })
+  {
+    title: '화살표 쪽으로 휙', body: '폰을 위로 휙 해 봐요.', svg: 'flick', svgOpts: { dir: 'up' }, waitFor: 'step', hint: '위로 휙',
+    check: () => true, // 어느 방향이든 한 번 휙 하면 통과
+    render: motionButtons
+  }
 ];
 const tutPad = createTutorial({
   key: 'rhythm-pad', socket, title: '처음이라 패드 연습', steps: padSteps,
-  finish: { title: '패드 연습 끝!', body: '노트가 위쪽 받침에 닿을 때 같은 칸을 눌러요.\n이제 준비를 누르면 돼요.' },
   onDone: () => paint()
 });
 const tutMotion = createTutorial({
   key: 'rhythm-motion', socket, title: '처음이라 모션 연습', steps: motionSteps,
-  finish: { title: '모션 연습 끝!', body: '노트가 받침에 닿을 때 그쪽으로 휙.\n돌아올 땐 천천히. 이제 준비를 누르면 돼요.' },
   onDone: () => paint()
 });
-const linkPad = tutPad.link($('tutLinks'), { label: '튜토리얼 다시 하기 · 패드' });
+const linkPad = tutPad.link($('tutLinks'));
 const linkMotion = tutMotion.link($('tutLinks'), {
-  label: '튜토리얼 다시 하기 · 모션',
   before: () => {
-    if (calibrated) return true;
+    if (sensorsOn) return true;
     readyMotion(() => { if (!tutMotion.isRunning()) tutMotion.run().then(paint); });
     return false;
   }
 });
 const anyTut = () => tutPad.isRunning() || tutMotion.isRunning();
+/** ?tut=1 로 열었을 때만 시험용으로 시작합니다. 평소에는 아무것도 저절로 시작하지 않습니다. */
 let autoTutDone = false;
-/** 들어온 뒤 처음 한 번: 지금 입력 방식이 처음이면 연습을 띄웁니다(경기 중이면 미룸). */
 function maybeAutoTutorial() {
   if (autoTutDone || !me || !ps.state || anyTut() || state.phase === 'playing') return;
   autoTutDone = true;
   if (inputMode() === 'pad') { if (tutPad.firstTime()) tutPad.run(); return; }
-  // 모션: 권한이 필요한 폰(iPhone)은 '동작 센서 켜기' 탭을 기다립니다.
-  // 처음이면 자세 맞추기 → 연습, 아니면 센서만 켜 두고 준비를 누를 때 자세를 맞춥니다.
-  if (motionPerm === 'ask') { paint(); return; }
-  if (tutMotion.firstTime()) readyMotion(null);
-  else enableSensors();
+  if (tutMotion.firstTime()) readyMotion(() => { if (!tutMotion.isRunning()) tutMotion.run().then(paint); });
 }
 
 // ================================================================
@@ -483,10 +451,11 @@ function message(t, b, spin = false) {
   show('vMsg');
 }
 let bannerT = null;
-function banner(t, ms) {
+function banner(t, ms, big) {
   const el = $('banner');
   el.textContent = t || '';
   el.classList.toggle('hidden', !t);
+  el.classList.toggle('big', Boolean(big && t));
   clearTimeout(bannerT);
   if (t && ms) bannerT = setTimeout(() => el.classList.add('hidden'), ms);
 }
@@ -529,6 +498,7 @@ function paint() {
     b.setAttribute('aria-checked', on ? 'true' : 'false');
   }
   $('lanesRow').classList.toggle('hidden', im !== 'pad');
+  $('sensRow').classList.toggle('hidden', im !== 'motion');
   for (const b of document.querySelectorAll('#lanesSeg button')) b.classList.toggle('on', Number(b.dataset.l) === lanesOf());
   // 모션 상자
   const mo = im === 'motion';
@@ -537,11 +507,11 @@ function paint() {
     const live = gotMotion && performance.now() - lastMotionAt < 1500;
     $('mbDot').className = 'mb-dot' + (live ? ' live' : fallback ? ' off' : '');
     if (!lastStep || performance.now() - lastStep.t > 2500) {
-      $('mbText').textContent = motionPerm === 'ask' ? '동작 센서를 켜야 해요' : fallback ? '센서가 없어서 경기 때 화면 버튼으로 해요'
-        : !sensorsOn ? '준비를 누르면 센서를 켜요' : calibrated ? '위·아래·좌·우로 휙 해 보세요 · 큰 화면 카드가 켜져요' : '자세를 맞추면 시작할 수 있어요';
+      $('mbText').textContent = motionPerm === 'ask' ? '동작 센서를 켜 주세요' : motionPerm === 'denied' ? '센서가 꺼져 있어서 화면 버튼으로 해요' : fallback ? '센서가 없어서 화면 버튼으로 해요'
+        : !sensorsOn ? '준비를 누르면 센서가 켜져요' : '위·아래·좌·우로 휙';
     }
     $('btnMotionPerm').classList.toggle('hidden', !(motionPerm === 'ask' || (!sensorsOn && !fallback)));
-    $('btnMotionPerm').textContent = motionPerm === 'ask' ? '동작 센서 켜기' : '센서 켜고 자세 맞추기';
+    $('btnMotionPerm').textContent = '동작 센서 켜기';
     $('btnRecal').classList.toggle('hidden', !sensorsOn || fallback);
     for (const b of document.querySelectorAll('#sens button')) b.classList.toggle('on', Number(b.dataset.s) === sens);
   }
@@ -553,7 +523,7 @@ function paint() {
     b.classList.toggle('on', k === d);
     const ci = info && info[k];
     b.querySelector('.st').textContent = ci ? `★${ci.stars}` : '';
-    b.querySelector('.nc').textContent = ci ? `노트 ${ci.count}` : '';
+    b.querySelector('.nc').textContent = ci ? t('노트 {n}', { n: ci.count }) : '';
   }
   for (const b of document.querySelectorAll('.diff, .mode, #lanesSeg button')) b.disabled = ps.isLocked();
   paintReady();
@@ -564,7 +534,7 @@ function paintHeader() {
   const h = $('hdrMode');
   if (!me || mode !== 'in') { h.classList.add('hidden'); return; }
   const im = inputMode();
-  h.textContent = `${im === 'motion' ? '모션' : lanesOf() === 5 ? '패드 5키' : '패드 4키'} · ${DIFF_LABEL[myDiff()]}`;
+  h.textContent = t('{mode} · {diff}', { mode: im === 'motion' ? '모션' : lanesOf() === 5 ? '패드 5키' : '패드 4키', diff: DIFF_LABEL[myDiff()] });
   h.classList.remove('hidden');
 }
 let coverFor = null;
@@ -576,16 +546,16 @@ function paintSong() {
     try { $('songCover').src = drawCover(s, 240); } catch (e) {}
     $('songCard').style.setProperty('--hue', s.cover && s.cover.hue != null ? s.cover.hue : 200);
   }
-  $('songTitle').textContent = s.title;
-  $('songSub').textContent = `${s.en || ''} · ${s.composer || ''}`;
+  $('songTitle').textContent = songTitle(s);
+  $('songSub').textContent = songSub(s);
   const len = s.lengthSec ? `${Math.floor(s.lengthSec / 60)}:${String(Math.round(s.lengthSec) % 60).padStart(2, '0')}` : '';
   $('songMeta').innerHTML = [s.genre, s.bpm ? `${s.bpm} BPM` : '', len].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('');
-  $('songK').textContent = pk && pk.total ? `노래 고르기 · ${pk.index + 1}/${pk.total}` : '노래 고르기';
+  $('songK').textContent = pk && pk.total ? t('노래 고르기 · {a}/{b}', { a: pk.index + 1, b: pk.total }) : t('노래 고르기');
   const chosen = (pk && pk.chosen) || state.chosen;
   const el = $('songPicked');
   if (chosen && chosen === s.id) {
     const by = pk && pk.chosenBy;
-    el.innerHTML = by ? `<b style="--pc:${COLORS[by] || '#fff'}">${by}P</b>이 곡으로 정했어요 ✓` : '이 곡으로 정했어요 ✓';
+    el.innerHTML = by ? t('{p}이 곡으로 정했어요 ✓', { p: `<b style="--pc:${COLORS[by] || '#fff'}">${by}P</b>` }) : t('이 곡으로 정했어요 ✓');
     el.classList.remove('hidden');
   } else el.classList.add('hidden');
 }
@@ -597,11 +567,10 @@ function paintReady() {
   const others = st ? st.players.filter((s) => s !== (me && me.slot) && !st.ready.includes(s)) : [];
   if (ready) {
     $('goT').textContent = '준비 완료 ✓';
-    $('goS').textContent = others.length ? `${others.map((s) => `${s}P`).join('·')} 기다리는 중` : '곧 시작해요';
+    $('goS').textContent = others.length ? t('{who} 기다리는 중', { who: others.map((s) => `${s}P`).join('·') }) : t('곧 시작해요');
   } else {
     $('goT').textContent = '준비';
-    const need = inputMode() === 'motion' && !calibrated && !fallback;
-    $('goS').textContent = need ? '누르면 자세부터 맞춰요' : st && st.ready.length ? `${st.ready.length}명 준비 · 모두 준비하면 시작` : '모두 준비하면 시작해요';
+    $('goS').textContent = st && st.ready.length ? t('{n}명 준비 · 모두 준비하면 시작', { n: st.ready.length }) : t('모두 준비하면 시작해요');
   }
   // 누가 아직인지
   const players = (st && st.players) || roster.map((p) => p.slot);
@@ -610,7 +579,7 @@ function paintReady() {
   $('waitFor').innerHTML = players.map((s) => {
     const on = st && st.ready.includes(s);
     const away = st && st.away && st.away.includes(s);
-    const tag = on ? '✓' : away ? '끊김' : tuts[s] ? `연습 ${tuts[s]}` : '아직';
+    const tag = on ? '✓' : away ? t('끊김') : tuts[s] ? t('연습 {a}', { a: tuts[s] }) : t('아직');
     return `<span class="wf${on ? ' on' : ''}${away ? ' away' : ''}${s === (me && me.slot) ? ' me' : ''}" style="--pc:${COLORS[s] || '#fff'}"><b>${s}P</b>${esc(tag)}</span>`;
   }).join('');
 }
@@ -630,7 +599,7 @@ function paintPlay() {
     p.setEnabled(true);
     p.resize();
   }
-  $('moTip').textContent = fallback ? '센서가 없어서 화살표 버튼을 눌러요' : '폰을 세워 들고 화살표 쪽으로 휙 · 돌아올 땐 천천히';
+  $('moTip').textContent = fallback ? '화살표 버튼을 눌러요' : '화살표 쪽으로 휙';
 }
 function resetHud() {
   hud.score = 0; hud.shown = 0; hud.combo = 0; hud.life = 60;
@@ -663,9 +632,7 @@ function onJudge(d) {
   el.className = `hud-j ${j}`;
   void el.offsetWidth;
   el.classList.add('pop');
-  if (d.wrong) el.dataset.sub = '방향 봐줌';
-  else if (j === 'great' || j === 'good') el.dataset.sub = d.early ? '빨라요' : '늦어요';
-  else el.dataset.sub = '';
+  el.dataset.sub = '';
   if (pad && Number.isFinite(Number(d.lane))) pad.judge(Number(d.lane), j);
   if (inputMode() === 'motion' && j !== 'miss') flashDir(DIRS[Number(d.lane)] || 'up');
   // 진동: PERFECT·GREAT. iPhone(진동 없음)은 내 색으로 살짝 번쩍
@@ -679,6 +646,15 @@ function onJudge(d) {
       }
     }
   }
+}
+// 큰 화면이 '맞는 노트가 없다'고 알려 줄 때(박자에서 멀리 누름): 진동 + 짧은 안내
+let strayAt = 0;
+function onStray() {
+  const now = performance.now();
+  if (now - strayAt < 1500 || view !== 'vPlay') return;
+  strayAt = now;
+  haptics.tick({ noFlash: true, silent: true });
+  hint('노트가 올 때 눌러요');
 }
 let cdTimers = [];
 function countdown(inSec) {
@@ -708,7 +684,7 @@ function paintSpec() {
     $('specB').textContent = '큰 화면에서 순위를 확인해요. 곧 노래 고르기로 돌아가요.';
   } else {
     $('specT').textContent = '관전 중';
-    $('specB').textContent = s ? `‘${s.title}’${hasBatchim(s.title) ? '이' : '가'} 끝나면 같이 할 수 있어요.` : '지금 곡이 끝나면 같이 할 수 있어요.';
+    $('specB').textContent = s ? t('‘{title}’{p} 끝나면 같이 할 수 있어요.', { title: songTitle(s), p: lang() === 'ko' ? (hasBatchim(s.title) ? '이' : '가') : '' }) : t('지금 곡이 끝나면 같이 할 수 있어요.');
   }
 }
 let overTimer = null;
@@ -717,16 +693,16 @@ function paintOver() {
   if (!r) return;
   const gc = GRADE_COL[r.grade] || '#7fd4ff';
   $('vOver').style.setProperty('--gc', gc);
-  $('ovSong').textContent = r.song || '';
-  $('ovRank').innerHTML = r.late ? '<b>중간 참가</b> · 남은 노트 기준' : r.of > 1 ? `<b>${r.rank}</b>위 <span>/ ${r.of}명</span>` : '<b>혼자</b> 플레이';
+  $('ovSong').textContent = locTitle(r.song || '', r.songEn);
+  $('ovRank').innerHTML = r.late ? t('<b>중간 참가</b> · 남은 노트 기준') : r.of > 1 ? t('<b>{r}</b>위 <span>/ {of}명</span>', { r: r.rank, of: r.of }) : t('<b>혼자</b> 플레이');
   $('ovGrade').textContent = r.grade;
   const tags = [];
   if (r.pfc) tags.push('<span class="pfc">ALL PERFECT</span>');
   else if (r.fc) tags.push('<span class="fc">FULL COMBO</span>');
-  if (r.failed) tags.push('<span class="fail">클리어 실패</span>');
+  if (r.failed) tags.push(`<span class="fail">${t('클리어 실패')}</span>`);
   $('ovTags').innerHTML = tags.join('');
   $('ovScore').textContent = Number(r.score || 0).toLocaleString('en-US');
-  $('ovLine').innerHTML = `정확도 <b>${r.acc}%</b> · 최대 콤보 <b>${r.maxCombo}</b>`;
+  $('ovLine').innerHTML = t('정확도 <b>{acc}%</b> · 최대 콤보 <b>{c}</b>', { acc: r.acc, c: r.maxCombo });
   const c = r.counts || {};
   $('ovCounts').innerHTML = `<div class="p"><span>PERFECT</span><b>${c.perfect || 0}</b></div><div class="g"><span>GREAT</span><b>${c.great || 0}</b></div>` +
     `<div class="o"><span>GOOD</span><b>${c.good || 0}</b></div><div class="m"><span>MISS</span><b>${c.miss || 0}</b></div>`;
@@ -734,7 +710,7 @@ function paintOver() {
   const until = performance.now() + (r.overMs || 18000);
   const tick = () => {
     const left = Math.max(0, Math.ceil((until - performance.now()) / 1000));
-    $('ovAuto').textContent = left ? `${left}초 뒤 노래 고르기로 돌아가요` : '';
+    $('ovAuto').textContent = left ? t('{n}초 뒤 노래 고르기로 돌아가요', { n: left }) : '';
     if (!left) clearInterval(overTimer);
   };
   tick();
@@ -815,12 +791,11 @@ for (const b of document.querySelectorAll('.mode')) {
     const m = b.dataset.mode;
     haptics.unlock();
     if (inputMode() === m) {
-      if (m === 'motion' && (motionPerm === 'ask' || !calibrated)) readyMotion(null);
+      if (m === 'motion' && !sensorsOn) readyMotion(null);
       return;
     }
     if (!choose('input', m)) return;
     if (m === 'motion') readyMotion(null);
-    else if (tutPad.firstTime() && !anyTut()) tutPad.run();
   });
 }
 for (const b of document.querySelectorAll('#lanesSeg button')) b.addEventListener('click', () => choose('lanes', Number(b.dataset.l)));
@@ -829,7 +804,7 @@ for (const b of document.querySelectorAll('#sens button')) {
   b.addEventListener('click', () => {
     sens = Number(b.dataset.s) || 1;
     saveJSON(SENS_KEY, sens);
-    det.setThreshold(BASE_THRESHOLD * sens);
+    applyDiff();
     haptics.tick({ noFlash: true, silent: true });
     paint();
   });
@@ -840,10 +815,8 @@ $('btnGo').addEventListener('click', () => {
   haptics.unlock();
   if (!me || state.phase !== 'select') return;
   if (iAmReady()) { haptics.tick(); toast('준비 완료 · 다른 사람을 기다려요'); return; }
-  if (inputMode() === 'motion' && !calibrated) {
-    readyMotion(() => sendReady());
-    return;
-  }
+  // 준비 한 번이면 끝: 모션이면 센서 권한만 같이 받고(탭 안), 기다리지 않고 바로 준비를 보냅니다.
+  if (inputMode() === 'motion' && !sensorsOn) readyMotion(null);
   sendReady();
 });
 function sendReady() {
@@ -966,6 +939,7 @@ socket.on('game_state', (s) => {
   state = s && typeof s === 'object' ? s : { phase: 'select' };
   if (state.phase === 'playing' && prev !== 'playing') {
     resetHud();
+    det.reset();
     // 경기에 들어가는데 연습 화면이 떠 있으면 닫습니다(입력이 경기로 가야 함)
     if (iPlay()) { if (tutPad.isRunning()) tutPad.cancel(); if (tutMotion.isRunning()) tutMotion.cancel(); }
   }
@@ -980,10 +954,12 @@ socket.on('picker', (d) => {
 socket.on('cue', (c) => {
   if (!c) return;
   if (c.type === 'start') { countdown(Number(c.in) || 3); banner(''); }
-  else if (c.type === 'audio') banner('큰 화면을 한 번 클릭하면 노래가 시작돼요');
+  else if (c.type === 'stray') onStray();
+  else if (c.type === 'audio') banner('큰 화면을 한 번 클릭하면 노래가 시작돼요', 0, true);
   else if (c.type === 'picked') {
     const by = Number(c.by);
-    toast(by ? `<b style="--pc:${COLORS[by] || '#fff'}">${by}P</b>‘${esc(c.title)}’ 골랐어요 · 준비를 누르세요` : `‘${esc(c.title)}’ · 준비를 누르세요`, 2600);
+    const title = esc(locTitle(c.title, c.en));
+    toast(by ? t('{p}‘{title}’ 골랐어요 · 준비를 누르세요', { p: `<b style="--pc:${COLORS[by] || '#fff'}">${by}P</b>`, title }) : t('‘{title}’ · 준비를 누르세요', { title }), 2600);
   }
 });
 socket.on('judge', onJudge);

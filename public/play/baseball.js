@@ -1,6 +1,7 @@
 // 홈런 더비 폰 컨트롤러: 타자 스윙 감지, 투타 대결 투구(조준·구질), 대기실(난이도·모드·준비), 처음 하는 사람 연습.
 // 공통 모듈: 진동·번쩍임(haptics), 난이도 알약(phone-settings), 연습(tutorial). ready.js 는 이 파일보다 먼저 일반 스크립트로 붙습니다.
 import { haptics } from '/common/haptics.js';
+import { createSamples } from '/common/samples.js';
 import { createPhoneSettings } from '/common/phone-settings.js';
 import { createTutorial } from '/common/tutorial.js';
 
@@ -79,14 +80,24 @@ let actx = null;
 function audio() {
   if (!actx) {
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (AC) actx = new AC();
+    if (AC) {
+      actx = new AC();
+      samples = createSamples(actx);
+      samples.preload(['ball/bat-crack']); // 폰은 타구음 한 가지(3벌)만 미리 받습니다
+    }
   }
   if (actx && actx.state === 'suspended') actx.resume();
   return actx;
 }
+let samples = null;
+// 큰 화면과 겹치지 않게 폰 쪽 타구음은 작게 깔아 '손맛'만 줍니다. 시작·준비 탭에서 소리가 켜집니다.
+const PHONE_CRACK_GAIN = 0.3;
+window.__phoneSfx = { played: 0, fallback: 0 };
 function crack(strength) {
   const a = audio();
   if (!a) return;
+  if (a.state === 'running' && samples && samples.play('ball/bat-crack', { gain: PHONE_CRACK_GAIN + 0.3 * strength, rate: 0.95 + 0.1 * strength })) { window.__phoneSfx.played++; return; }
+  window.__phoneSfx.fallback++;
   const len = Math.floor(a.sampleRate * 0.09);
   const buf = a.createBuffer(1, len, a.sampleRate);
   const d = buf.getChannelData(0);
@@ -109,11 +120,11 @@ function flashBody() {
 
 // ---------- 스윙 감지 ----------
 // 회전 속도(도/초)가 문턱을 넘으면 스윙 시작으로 보고, 직후 90ms 동안 가장 센 값을 힘으로 씁니다.
-// 문턱은 난이도를 따라 낮아집니다(쉬울수록 작은 스윙도 스윙). 어려움이 처음 낸 값입니다. 실폰으로 맞춘 값이 아닙니다.
+// 문턱은 난이도를 따라 낮아집니다(쉬울수록 작은 스윙도 스윙). 어려움이 처음 낸 값, 보통은 예전 쉬움 값입니다. 실폰으로 맞춘 값이 아닙니다.
 // trig: 창을 여는 회전(°/s) / real: 창 안 최댓값이 이보다 작으면 준비 동작으로 보고 버림 / acc: 자이로가 없는 폰의 가속 문턱(m/s²)
 const SWING = {
-  easy: { trig: 300, real: 470, acc: 16 },
-  normal: { trig: 340, real: 560, acc: 19 },
+  easy: { trig: 220, real: 320, acc: 12 },
+  normal: { trig: 300, real: 470, acc: 16 },
   hard: { trig: 380, real: 650, acc: 22 }
 };
 const swingCfg = () => ps.pick(SWING);
@@ -154,6 +165,7 @@ function onMotion(e) {
       const real = hasGyro ? w.rot > cfg.real : w.acc > cfg.acc + 6;
       if (!real) {
         swingAt = 0;
+        weakSwing();
         return;
       }
       // 회전 1500도/초, 가속 35m/s² 정도면 아주 센 스윙입니다.
@@ -175,7 +187,36 @@ function sendSwing(power, ago, peak) {
   haptics.tick({ noFlash: true });
   if (tutBat.signal('swing', { power, at, peak })) return;
   if (tutPitch.isRunning()) return;
-  send('swing', { power, ago, rtt: rtt(), peak });
+  // 내 타석이 아니면 큰 화면이 버리는 스윙입니다. 말없이 사라지지 않게 알려 줍니다.
+  if (state.phase === 'playing' && me && state.batter !== me.slot) {
+    hintResult('내 차례가 아니에요', 1200);
+    return;
+  }
+  if (!send('swing', { power, ago, rtt: rtt(), peak })) hintResult('연결 중이에요', 1500);
+}
+// 결과 글자 자리에 짧은 안내를 잠깐 띄웁니다(경기 결과가 오면 덮어씁니다).
+let hKeep = 0;
+function hintResult(text, ms) {
+  const k = ++hKeep;
+  const rk = rKeep;
+  const el = $('result');
+  el.dataset.keep = '1';
+  el.textContent = text;
+  setTimeout(() => {
+    if (k !== hKeep || rk !== rKeep) return;
+    delete el.dataset.keep;
+    render();
+  }, ms || 1200);
+}
+// 너무 약해서 버린 스윙: 내 타석이면 '더 크게!' 와 짧은 진동으로 알려 줍니다.
+function weakSwing() {
+  if (!me || state.phase !== 'playing' || state.batter !== me.slot || tutBat.isRunning()) return;
+  haptics.tick({ noFlash: true });
+  hintResult('더 크게!', 900);
+}
+// 화면의 큰 스윙 버튼(센서 없이도, 어떤 자세로도 칠 수 있는 동등한 방법). 힘은 0.7~0.95 사이.
+function buttonSwing() {
+  sendSwing(0.7 + Math.random() * 0.25, 0, 0);
 }
 
 // ---------- 기기 축 맞추기 ----------
@@ -351,10 +392,13 @@ const PT = {
   DRAG_QUIET: 150, // 조준을 끈 뒤 이 시간(ms) 안의 약한 흔들림은 투구로 보지 않습니다
   GRIP_ROT: 250 // 조준판을 누른 동안 폰이 이보다 빨리 돌았으면 쥔 손이 닿은 것으로 보고 조준을 되돌립니다
 };
-// 난이도가 낮으면 투구로 받는 회전 문턱(TRIGGER_DEG·THROW_DEG)을 이만큼 낮춥니다.
-const throwEase = () => ps.pick({ easy: 0.82, normal: 0.9, hard: 1 });
+// 난이도가 낮으면 투구로 받는 회전·가속 문턱(TRIGGER_DEG·THROW_DEG·ACC_TRIGGER·ACC_REAL)을 이만큼 낮춥니다. 보통은 예전 쉬움 값.
+const throwEase = () => ps.pick({ easy: 0.6, normal: 0.82, hard: 1 });
+// 구질을 손목 동작으로 가리고, 팔을 뒤로 젖힌 동작·조준 중 흔들림을 버리는 것은 어려움에서만 합니다.
+// 쉬움·보통은 휘둘러 던지면 직구, 구질은 화면 버튼으로 고릅니다.
+const strictThrow = () => ps.difficulty() === 'hard';
 // 큰 화면은 난이도만큼 구속을 줄여서 던집니다(game.js pitchKmh). 투수 화면에도 같은 숫자를 보여 줍니다.
-const shownKmh = (kmh) => Math.round(clamp(kmh * ps.pick({ easy: 0.7, normal: 0.85, hard: 1 }), 70, 165));
+const shownKmh = (kmh) => Math.round(clamp(kmh * ps.pick({ easy: 0.6, normal: 0.7, hard: 1 }), 70, 165));
 // 투구 연습 단계가 던지기를 기다리는지
 const tutThrow = () => {
   const c = tutPitch.current();
@@ -367,7 +411,7 @@ const PRESET = { fastball: [140, 150], slider: [126, 136], curve: [106, 118], fo
 
 // 구질 고르기. f = throwFeatures(...) 결과. 자이로가 없는 폰은 고른 구질(pick)로 던집니다.
 function classifyThrow(f, pick) {
-  if (!f.gyro) return { type: PITCH_NAMES[pick] ? pick : 'fastball', side: 1 };
+  if (!f.gyro || !strictThrow()) return { type: PITCH_NAMES[pick] ? pick : 'fastball', side: 1 };
   const ratio = f.peak / Math.max(f.acc, 1);
   if (f.acc >= PT.FORK_ACC && (ratio < PT.FORK_RATIO || f.total < PT.FORK_ANGLE)) return { type: 'fork', side: 1 };
   const sum = Math.abs(f.ang[0]) + Math.abs(f.ang[1]) + Math.abs(f.ang[2]) || 1;
@@ -449,7 +493,7 @@ let thrownN = null;
 let gyroSeen = false; // 0 이 아닌 회전 값이 한 번이라도 들어왔는지(자이로 없는 폰은 늘 0 이나 null)
 let motionN = 0;
 let lastRot = 0;
-let pickType = 'fastball'; // 자이로 없는 폰에서 고른 구질
+let pickType = 'fastball'; // 휘둘러 던질 때 쓰는 구질(직구). 구질 버튼은 누르는 즉시 던집니다
 let dbgThrow = '';
 const aim = { x: 0, y: 0 }; // 조준판에 보이는 코스(-1~1). 큰 화면과 같은 포수 시점: 오른쪽 +, 위 +
 const aimSet = { x: 0, y: 0 }; // 던질 때 쓰는 코스. 조준판에서 손을 떼야 바뀝니다.
@@ -502,7 +546,7 @@ function onPitchMotion(e) {
   }
   // 던질 차례(또는 투구 연습)가 아니면 잡지 않습니다(&debug 면 재기만 합니다).
   if (!(canThrow() || tutThrow() || DEBUG) || now - lastThrowAt < PT.COOLDOWN) return;
-  const trig = gyroSeen ? s.rot > PT.TRIGGER_DEG * throwEase() || s.acc > PT.FORK_ACC : s.acc > PT.ACC_TRIGGER;
+  const trig = gyroSeen ? s.rot > PT.TRIGGER_DEG * throwEase() || s.acc > PT.FORK_ACC : s.acc > PT.ACC_TRIGGER * throwEase();
   if (!trig) return;
   const id = ++winSeq;
   throwWin = { id, start: now, peak: gyroSeen ? s.rot : s.acc, peakT: now, aim: { x: aimSet.x, y: aimSet.y } };
@@ -514,14 +558,14 @@ function onPitchMotion(e) {
 function rejectThrow(f, w, sure) {
   if (f.gyro) {
     if (f.peak < PT.THROW_DEG * throwEase() && f.acc < PT.FORK_ACC) return { text: `약함 ${Math.round(f.peak)}°/s`, weak: true };
-    if (sure && f.fwd <= 0) {
+    if (sure && strictThrow() && f.fwd <= 0) {
       return { text: '뒤로 젖힘', tell: f.peak >= PT.THROW_DEG ? '앞으로 던지세요 · 화면이 나를 보게 쥐어요' : null };
     }
-  } else if (f.acc < PT.ACC_REAL) {
+  } else if (f.acc < PT.ACC_REAL * throwEase()) {
     return { text: `약함 ${f.acc.toFixed(1)}m/s²`, weak: true };
   }
   const strong = f.gyro ? f.peak >= PT.STRONG_DEG : f.acc >= PT.ACC_REAL + 10;
-  if (dragAt >= w.start - PT.DRAG_QUIET && !strong) return { text: '조준 중', tell: '조준하는 중이에요 · 손을 떼고 던지세요' };
+  if (strictThrow() && dragAt >= w.start - PT.DRAG_QUIET && !strong) return { text: '조준 중', tell: '조준하는 중이에요 · 손을 떼고 던지세요' };
   return null;
 }
 
@@ -553,7 +597,11 @@ function finishThrow() {
     return;
   }
   if (why) {
-    // 버린 동작은 쿨다운을 걸지 않아 바로 이어지는 진짜 투구를 잡습니다.
+    // 버린 동작은 쿨다운을 걸지 않아 바로 이어지는 진짜 투구를 잡습니다. 너무 약했으면 바로 알려 줍니다.
+    if (why.weak && canThrow()) {
+      haptics.tick({ noFlash: true });
+      pitchMsg('더 세게!', 900);
+    }
     if (why.tell && canThrow()) {
       const at = performance.now();
       setTimeout(() => { if (lastThrowAt < at && !throwWin && canThrow()) pitchMsg(why.tell, 1800); }, 700);
@@ -753,203 +801,32 @@ function renderPitch() {
   if (!$('pState').dataset.keep) {
     $('pState').textContent = ready ? '던지세요!' : state.sub === 'pitch' ? '투구!' : '기다려요';
   }
-  // 자이로가 없는 폰은 손목으로 구질을 못 고르니 버튼으로 고르고 던집니다.
-  // (센서가 아예 없으면 버튼이 바로 던지는 버튼입니다. 그때는 btnStart 의 타이머가 버튼을 보입니다.)
-  const pick = noGyro();
-  if (gotMotion) $('pTypes').classList.toggle('hidden', !pick);
-  $('pTypes').classList.toggle('pick', pick);
-  for (const b of document.querySelectorAll('#pTypes button')) b.classList.toggle('on', pick && b.dataset.type === pickType);
-  $('pHint').textContent = pick
-    ? '이 폰은 자이로가 없어 손목으로 구질을 못 골라요. 아래에서 구질을 고르고, 폰을 쥔 채 큰 화면 쪽으로 던지세요.'
-    : '존을 누르거나 끌어 코스를 정하고 손을 떼세요. 폰을 세로로, 화면이 나를 보게 쥐고 큰 화면 쪽으로 던지세요.';
+  // 구질 버튼은 늘 보이고, 누르면 바로 던집니다(휘둘러 던지기와 동등한 방법). 안내는 한 줄.
+  $('pHint').textContent = '코스를 누르고 구질을 눌러요';
   drawPad();
   renderDbg();
 }
 
-// ---------- 처음 하는 사람 연습(튜토리얼) ----------
-// 이 폰에서 처음이면(localStorage pcg-tut-baseball) 시작하기 → 방 연결 뒤 타격 연습 4단계를 띄웁니다.
-// 투타 대결이면 투구 연습 3단계(pcg-tut-baseball-pitch)도 처음 한 번 띄웁니다. 진행 상황은 큰 화면 대기실에 뜹니다.
-// 주소로 시험: ?tut=1(늘 띄움) ?tut=0(안 띄움) &debug(단계마다 '시험: 성공 처리')
+// ---------- 연습(튜토리얼) ----------
+// 저절로 시작하지 않습니다. 대기실의 '튜토리얼 다시 하기' 링크를 눌렀을 때만(또는 주소에 ?tut=1) 열립니다.
+// 타격 연습은 1단계('휘둘러요'), 투구 연습(투타 대결)도 1단계('던져요')뿐입니다. 진행 상황은 큰 화면 대기실에 뜹니다.
 const SENSOR_WAIT = 1500;
 
-// 센서가 없는 폰·PC: 연습 단계 안에 '눌러서 스윙' 버튼을 띄웁니다(1.5초 동안 센서 값이 없을 때).
+// 연습 단계 안의 큰 '휘두르기' 버튼: 센서 없이도 늘 누를 수 있습니다.
 function swingFallback(stage, power = 0.85) {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'tutBtn';
-  b.textContent = '센서 없음 · 눌러서 스윙';
-  b.hidden = true;
+  b.textContent = '눌러서 휘두르기';
   b.addEventListener('click', () => sendSwing(power, 0, 0));
   stage.appendChild(b);
-  const t = setTimeout(() => { if (!gotMotion) b.hidden = false; }, SENSOR_WAIT);
-  return () => clearTimeout(t);
+  return () => {};
 }
 
-// 타이밍 연습: 폰 화면에서 공이 날아오고 링이 줄어듭니다(큰 화면의 타이밍 링과 같은 모양). 링이 공에 닿을 때 휘두르면 성공.
-const TT = { wait: 1000, fly: 1050, after: 750 }; // ms. 한 바퀴 = 2.8초
-const timing = { t0: 0, raf: 0, last: null };
-const ttCycle = () => TT.wait + TT.fly + TT.after;
-function ttCross(at) {
-  const k = Math.round((at - timing.t0 - TT.wait - TT.fly) / ttCycle());
-  return timing.t0 + TT.wait + TT.fly + Math.max(0, k) * ttCycle();
-}
-function judgeTiming(d) {
-  const err = (d.at - ttCross(d.at)) / 1000;
-  const tol = ps.pick({ easy: 0.3, normal: 0.24, hard: 0.17 });
-  const ok = Math.abs(err) <= tol;
-  timing.last = { err, ok, shown: performance.now() };
-  const ms = Math.round(Math.abs(err) * 1000);
-  if (ok) return { ok: true, msg: Math.abs(err) < 0.07 ? '딱! 완벽한 타이밍' : `맞았어요 · ${ms}ms ${err < 0 ? '빨랐어요' : '늦었어요'}` };
-  return err < 0 ? `${ms}ms 빨라요 · 링이 공에 닿을 때 휘둘러요` : `${ms}ms 늦어요 · 조금 더 일찍`;
-}
-function timingStage(stage) {
-  const cv = document.createElement('canvas');
-  cv.className = 'tutCv';
-  stage.appendChild(cv);
-  const off = swingFallback(stage);
-  timing.t0 = performance.now();
-  timing.last = null;
-  const col = getComputedStyle(document.documentElement).getPropertyValue('--c').trim() || '#ff5a5f';
-  const draw = () => {
-    timing.raf = requestAnimationFrame(draw);
-    const r = cv.getBoundingClientRect();
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const w = Math.round(r.width * dpr);
-    const h = Math.round(r.height * dpr);
-    if (!w || !h) return;
-    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
-    const g = cv.getContext('2d');
-    const now = performance.now();
-    const t = (now - timing.t0) % ttCycle();
-    const u = (t - TT.wait) / TT.fly; // 0 = 놓음, 1 = 홈플레이트
-    // 경기장: 위가 투수, 아래가 홈플레이트(포수 시점)
-    const sky = g.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, '#0e1a2e');
-    sky.addColorStop(0.45, '#13324a');
-    sky.addColorStop(1, '#1d5a3a');
-    g.fillStyle = sky;
-    g.fillRect(0, 0, w, h);
-    g.fillStyle = 'rgba(176,122,74,.55)';
-    g.beginPath();
-    g.ellipse(w / 2, h * 0.2, w * 0.11, h * 0.05, 0, 0, Math.PI * 2);
-    g.fill();
-    // 투수
-    g.fillStyle = 'rgba(255,255,255,.75)';
-    g.beginPath();
-    g.arc(w / 2, h * 0.11, 5 * dpr, 0, Math.PI * 2);
-    g.fill();
-    g.fillRect(w / 2 - 4 * dpr, h * 0.13, 8 * dpr, 12 * dpr);
-    // 스트라이크 존
-    const zx = w / 2;
-    const zy = h * 0.66;
-    const zw = Math.min(w * 0.2, h * 0.3);
-    const zh = zw * 1.15;
-    const near = u > 0.9 && u < 1.1;
-    g.strokeStyle = near ? '#ffd23a' : 'rgba(255,255,255,.75)';
-    g.lineWidth = 2.5 * dpr;
-    g.strokeRect(zx - zw / 2, zy - zh / 2, zw, zh);
-    g.fillStyle = 'rgba(255,255,255,.55)';
-    g.beginPath();
-    g.moveTo(zx - zw / 2, h * 0.92);
-    g.lineTo(zx + zw / 2, h * 0.92);
-    g.lineTo(zx + zw / 2, h * 0.95);
-    g.lineTo(zx, h * 0.98);
-    g.lineTo(zx - zw / 2, h * 0.95);
-    g.fill();
-    if (u >= 0 && u <= 1.25) {
-      const k = Math.min(1, u);
-      // 링: 공이 닿는 순간 공 크기로 줄어듭니다.
-      const ballR = (3 + 9 * k * k) * dpr;
-      const ringR = ballR + 3 * dpr + (1 - k) * zw * 1.1;
-      g.strokeStyle = near ? '#ffd23a' : `rgba(255,255,255,${0.4 + 0.6 * k})`;
-      g.lineWidth = (2.5 + (near ? 2 : 0)) * dpr;
-      if (u <= 1.08) {
-        g.beginPath();
-        g.arc(zx, zy, ringR, 0, Math.PI * 2);
-        g.stroke();
-      }
-      // 공(위에서 내려오며 커짐). 지나가면 아래로 빠집니다.
-      const by = h * 0.15 + (zy - h * 0.15) * u;
-      g.globalAlpha = u > 1 ? Math.max(0, 1 - (u - 1) / 0.25) : 1;
-      g.fillStyle = '#f7f4ec';
-      g.beginPath();
-      g.arc(zx, by, ballR, 0, Math.PI * 2);
-      g.fill();
-      g.strokeStyle = '#c8202f';
-      g.lineWidth = 1.2 * dpr;
-      g.beginPath();
-      g.arc(zx - ballR * 1.25, by, ballR, -0.6, 0.6);
-      g.stroke();
-      g.beginPath();
-      g.arc(zx + ballR * 1.25, by, ballR, Math.PI - 0.6, Math.PI + 0.6);
-      g.stroke();
-      g.globalAlpha = 1;
-    }
-    // 방금 휘두른 결과: 맞으면 불꽃, 아니면 빠름/늦음
-    const L = timing.last;
-    if (L && now - L.shown < 900) {
-      const a = 1 - (now - L.shown) / 900;
-      g.globalAlpha = a;
-      if (L.ok) {
-        g.strokeStyle = col;
-        g.lineWidth = 3 * dpr;
-        for (let i = 0; i < 10; i++) {
-          const th = (i / 10) * Math.PI * 2;
-          const r0 = 14 * dpr + (1 - a) * 18 * dpr;
-          g.beginPath();
-          g.moveTo(zx + Math.cos(th) * r0, zy + Math.sin(th) * r0);
-          g.lineTo(zx + Math.cos(th) * (r0 + 10 * dpr), zy + Math.sin(th) * (r0 + 10 * dpr));
-          g.stroke();
-        }
-      }
-      g.fillStyle = L.ok ? '#7ef0a0' : '#ffcf8a';
-      g.font = `900 ${16 * dpr}px "Pretendard Variable", Pretendard, system-ui, sans-serif`;
-      g.textAlign = 'center';
-      g.fillText(L.ok ? '딱!' : L.err < 0 ? '빨라요' : '늦어요', zx + zw * 1.45, zy + 6 * dpr);
-      g.globalAlpha = 1;
-    }
-  };
-  draw();
-  return () => { cancelAnimationFrame(timing.raf); off(); };
-}
-
-// 투구 연습 1단계: 조준판(실제 투구 화면과 같은 그림)을 눌렀다 떼면 성공.
-function padStage(stage, api) {
-  const box = document.createElement('div');
-  box.className = 'tutPad';
-  const cv = document.createElement('canvas');
-  box.appendChild(cv);
-  stage.appendChild(box);
-  const a = { x: 0, y: 0 };
-  let down = null;
-  const set = (e) => {
-    const r = box.getBoundingClientRect();
-    a.x = clamp(((e.clientX - r.left) / r.width) * 2 - 1, -1, 1);
-    a.y = clamp(1 - ((e.clientY - r.top) / r.height) * 2, -1, 1);
-    drawPad(cv, a);
-  };
-  box.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    down = e.pointerId;
-    try { box.setPointerCapture(e.pointerId); } catch (err) {}
-    set(e);
-  });
-  box.addEventListener('pointermove', (e) => { if (e.pointerId === down) set(e); });
-  const up = (e) => {
-    if (e.pointerId !== down) return;
-    down = null;
-    api.signal('aim', { x: a.x, y: a.y, inside: Math.abs(a.x) <= ZX && Math.abs(a.y) <= ZY });
-  };
-  box.addEventListener('pointerup', up);
-  box.addEventListener('pointercancel', up);
-  requestAnimationFrame(() => drawPad(cv, a));
-}
-
-// 센서·자이로가 없는 폰: 투구 연습 단계 안에 구질 버튼을 띄웁니다.
+// 투구 연습 단계 안의 구질 버튼(누르면 던짐). 늘 보입니다.
 function throwFallback(stage) {
   const row = document.createElement('div');
   row.className = 'tutTypes';
-  row.hidden = true;
   row.innerHTML = Object.entries(PITCH_NAMES).map(([k, v]) => `<button type="button" class="tutBtn sm" data-type="${k}">${v}</button>`).join('');
   row.addEventListener('click', (e) => {
     const b = e.target.closest('button');
@@ -958,43 +835,26 @@ function throwFallback(stage) {
     tutPitch.signal('throw', { type: b.dataset.type, side: 1, speed: Math.round(lo + Math.random() * (hi - lo)) });
   });
   stage.appendChild(row);
-  const t = setTimeout(() => { if (!gotMotion || noGyro()) row.hidden = false; }, SENSOR_WAIT);
-  return () => clearTimeout(t);
+  return () => {};
 }
 
 const tutBat = createTutorial({
   key: 'baseball',
   socket,
-  title: '처음이라 타격 연습해 봐요',
+  title: '타격 연습',
   steps: [
-    { title: '방망이처럼 쥐기', body: '폰 아래쪽을 두 손으로 세로로 꽉 쥐어요.\n화면은 나를 보게요.', svg: 'hold', next: '쥐었어요' },
-    { title: '휘둘러 보기', body: '타석에 선 것처럼 크게 휘둘러요.\n폰은 꼭 쥐고요!', svg: 'swing', waitFor: 'swing', count: 2,
-      hint: '두 번 휘둘러요', render: (st) => swingFallback(st) },
-    { title: '세게 치면 멀리', body: '세게 휘두를수록 공이 멀리 날아가요.', svg: 'swing', svgOpts: { from: -95, to: 70 }, waitFor: 'swing',
-      hint: '힘껏 휘둘러요', okText: '좋아요! 멀리 가겠어요',
-      check: (d) => d.power >= ps.pick({ easy: 0.3, normal: 0.36, hard: 0.42 }) || `조금 더 세게! (힘 ${Math.round(d.power * 100)}%)`,
-      render: (st) => swingFallback(st, 0.95) },
-    { title: '타이밍 맞추기', body: '링이 줄어들어 공에 닿는 순간 휘둘러요.', waitFor: 'swing', count: 2,
-      hint: '링이 공에 닿을 때', check: judgeTiming, render: timingStage }
-  ],
-  finish: { title: '타격 연습 끝!', body: '이제 준비를 누르면 돼요.\n큰 화면에서 공이 홈플레이트에 닿을 때 휘둘러요.', button: '좋아요' }
+    { title: '휘둘러요', svg: 'swing', waitFor: 'swing', hint: '폰을 휘둘러요', render: (st) => swingFallback(st) }
+  ]
 });
 
 const tutPitch = createTutorial({
   key: 'baseball-pitch',
   socket,
-  title: '투타 대결 · 투구 연습',
+  title: '투구 연습',
   steps: [
-    { title: '코스 정하기', body: '판을 눌러 던질 곳을 정하고 손을 떼요.\n가운데 네모 밖은 볼이에요.', waitFor: 'aim', hint: '눌렀다 떼요',
-      check: (d) => ({ ok: true, msg: d.inside ? '스트라이크 코스예요' : '볼 코스예요 · 일부러 빼도 돼요' }), render: padStage },
-    { title: '공 던지기', body: '폰을 세로로 꽉 쥔 채 큰 화면 쪽으로\n공 던지듯 팔을 휘둘러요. 폰은 놓지 마세요!', svg: 'cast', waitFor: 'throw',
-      hint: '던져 보세요', check: (d) => ({ ok: true, msg: `${pitchName(d.type, d.side)} ${shownKmh(d.speed)}km/h` }), render: throwFallback },
-    { title: '변화구 던져 보기', body: '놓는 순간 손목을 비틀면 슬라이더,\n앞으로 꺾으면 커브예요.', svg: 'twist', waitFor: 'throw',
-      hint: '손목을 써서 던져요',
-      check: (d) => (d.type !== 'fastball' ? { ok: true, msg: `${pitchName(d.type, d.side)}!` } : '직구였어요 · 손목을 비틀어 던져요'),
-      render: throwFallback }
-  ],
-  finish: { title: '투구 연습 끝!', body: '내 투구 차례가 오면 폰이 울려요.\n코스를 정하고 던지면 돼요.', button: '좋아요' }
+    { title: '코스 정하고 던져요', svg: 'cast', waitFor: 'throw', hint: '구질을 눌러요',
+      check: (d) => ({ ok: true, msg: `${pitchName(d.type, d.side)} ${shownKmh(d.speed)}km/h` }), render: throwFallback }
+  ]
 });
 
 // 이 페이지에서 이미 띄운 연습(?tut=1 일 때 끝없이 다시 뜨지 않게)
@@ -1077,7 +937,8 @@ function render() {
   }
   $('lobbyBox').classList.toggle('hidden', !pre);
   $('meter').classList.toggle('hidden', pre);
-  $('btnTest').classList.toggle('hidden', pre || !noSensor);
+  // 큰 스윙 버튼: 내 타석일 때만 보입니다(센서가 있어도 늘 같이 쓸 수 있는 방법).
+  $('btnSwing').classList.toggle('hidden', pre || !myTurn);
   $('derbyStats').classList.toggle('hidden', duel || phase === 'lobby');
   $('duelStats').classList.toggle('hidden', !duel || phase === 'lobby');
   paintReady();
@@ -1095,23 +956,19 @@ function render() {
   }
   if (phase === 'lobby') {
     if (!$('result').dataset.keep) $('result').textContent = '대기실';
-    $('hint').textContent = duel && playerCount < 2
-      ? '투타 대결은 2명부터예요.\n한 명 더 들어오면 준비하세요.'
-      : '난이도와 모드를 고르고 준비를 누르세요.';
+    $('hint').textContent = duel && playerCount < 2 ? '2명부터 할 수 있어요' : '';
   } else if (phase === 'over') {
     $('result').textContent = '경기 끝';
-    $('hint').textContent = '큰 화면에서 순위를 확인하세요.';
+    $('hint').textContent = '';
   } else if (myTurn) {
     if (!$('result').dataset.keep) $('result').textContent = '내 차례!';
-    $('hint').textContent = duel ? `${nameOf(state.pitcher)} 투수의 공이 오면 휘두르세요. 존 밖 공은 참으면 볼이에요.` : '투수가 공을 던지면 휘두르세요.';
+    $('hint').textContent = '휘둘러요';
   } else if (duel) {
     if (!$('result').dataset.keep) $('result').textContent = state.batter ? `${nameOf(state.batter)} 타석` : '대기';
-    $('hint').textContent = !(state.roles && Object.hasOwn(state.roles, me.slot))
-      ? '진행 중인 투타 대결을 관전해요. 다음 경기부터 참가합니다.'
-      : state.pitcher ? `${nameOf(state.pitcher)} 투구 중 · 내 차례를 기다려요.` : '내 차례를 기다려요.';
+    $('hint').textContent = '기다려요';
   } else {
     $('result').textContent = state.batter ? `${state.batter}P 차례` : '대기';
-    $('hint').textContent = '내 차례를 기다려요.';
+    $('hint').textContent = '기다려요';
   }
 }
 
@@ -1224,9 +1081,7 @@ $('btnStart').addEventListener('click', async () => {
     try { res = await DM.requestPermission(); } catch (e) {}
     if (res !== 'granted') {
       noSensor = true;
-      $('btnTest').textContent = '동작 권한이 없어요 · 눌러서 스윙';
       $('sensorHelp').classList.remove('hidden');
-      $('pTypes').classList.remove('hidden');
     }
   }
   window.addEventListener('devicemotion', onMotion);
@@ -1234,13 +1089,11 @@ $('btnStart').addEventListener('click', async () => {
   started = true;
   if (!ROOM) { message('방 코드가 없어요', '큰 화면의 QR을 찍어 주세요.'); return; }
   socket.connect();
-  // 1.5초 동안 센서 값이 안 들어오면(PC, http 주소) 버튼으로 스윙합니다.
-  // 투수 차례에는 구질 버튼으로 던집니다.
+  // 1.5초 동안 센서 값이 안 들어오면(PC, http 주소) 버튼 안내를 띄웁니다. 스윙·구질 버튼은 센서와 상관없이 늘 쓸 수 있습니다.
   setTimeout(() => {
     if (gotMotion) return;
     noSensor = true;
-    $('pTypes').classList.remove('hidden');
-    render();
+    $('sensorHelp').classList.remove('hidden');
   }, SENSOR_WAIT);
 });
 $('btnGo').addEventListener('click', () => {
@@ -1256,18 +1109,16 @@ $('btnGo').addEventListener('click', () => {
   haptics.play('success', 1, { noFlash: true });
   paintReady();
 });
-$('btnTest').addEventListener('click', () => sendSwing(0.85, 0, 0));
+// 큰 스윙 버튼은 누르는 순간 바로 보냅니다(지연 없음).
+$('btnSwing').addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  buttonSwing();
+});
 for (const b of document.querySelectorAll('#pTypes button')) {
   b.addEventListener('click', () => {
-    // 자이로가 없는 폰: 구질만 고르고 던지는 건 폰을 휘둘러서 합니다.
-    if (noGyro()) {
-      pickType = b.dataset.type;
-      pitchMsg(`${PITCH_NAMES[pickType]} · 던지세요`, 1500);
-      renderPitch();
-      return;
-    }
     const [lo, hi] = PRESET[b.dataset.type];
-    sendThrow(b.dataset.type, Math.round(lo + Math.random() * (hi - lo)), 1, 0, 0);
+    // 조준판을 누르고 있는 중이면 지금 보이는 코스로, 아니면 확정한 코스로 던집니다.
+    sendThrow(b.dataset.type, Math.round(lo + Math.random() * (hi - lo)), 1, 0, 0, aimTouch ? { x: aim.x, y: aim.y } : null);
   });
 }
 
@@ -1285,7 +1136,7 @@ if (DEBUG) $('dbg').classList.remove('hidden');
 window.__pitch = { PT, CAL, AXMAPS, cal, calStep, devAxes, axesSure, classifyThrow, throwSpeed, throwFeatures,
   aim, aimSet, sendThrow, state: () => state, role: () => role };
 // 시험용: 스윙·연습·설정
-window.__bat = { ps, tutBat, tutPitch, sendSwing, judgeTiming, swingCfg, timing, maybeTutorial,
+window.__bat = { ps, tutBat, tutPitch, sendSwing, weakSwing, buttonSwing, swingCfg, maybeTutorial,
   state: () => state, ready: () => ({ readyPressed, readySt }) };
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && started && navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});

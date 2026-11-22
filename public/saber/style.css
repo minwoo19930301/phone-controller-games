@@ -63,7 +63,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .badge .streak b { font-family: var(--display); font-weight: 400; font-size: clamp(18px, 5cqh, 44px); line-height: 1; }
 .badge .streak span { font-size: clamp(9px, 1.8cqh, 14px); font-weight: 800; }
 .badge.away { opacity: 0.6; }
-.badge.away::after { content: "연결 끊김"; display: grid; place-items: center; padding: 0 0.9em; font-weight: 800;
+.badge.away::after { content: var(--away, "OFFLINE"); display: grid; place-items: center; padding: 0 0.9em; font-weight: 800;
   font-size: clamp(11px, 2.2cqh, 18px); color: #ffb3b3; border-left: 1px solid var(--line); }
 @keyframes bump { 0% { transform: scale(1.45); color: var(--gold); } 100% { transform: none; } }
 @keyframes shake { 0%, 100% { transform: none; } 25% { transform: translateX(-5px); } 50% { transform: translateX(5px); } 75% { transform: translateX(-3px); } }
@@ -278,6 +278,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 @media (min-width: 1001px) {
   #lobby { justify-items: start; padding-left: clamp(40px, 5vw, 120px); }
 }
+.lang-box { position: absolute; top: 14px; right: 16px; z-index: 6; }
 .lobby-copy { flex: 1; min-width: 0; }
 .eyebrow { font-size: 14px; font-weight: 800; letter-spacing: 0.24em; color: var(--accent); margin-bottom: 14px; }
 .wordmark { margin: 0; font-family: var(--display); font-weight: 400; font-size: clamp(64px, 9vw, 132px); line-height: 0.9;
@@ -304,7 +305,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
   color: var(--fg); animation: pop 0.4s cubic-bezier(.2, 1.6, .4, 1); box-shadow: 0 0 22px color-mix(in srgb, var(--c) 25%, transparent); }
 .slot.ready small { color: var(--c); }
 .slot.away { opacity: 0.45; }
-.slot.away small::after { content: " · 연결 끊김"; }
+.slot.away small::after { content: var(--away, " · OFFLINE"); }
 .slot.ready { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 35%, transparent), 0 10px 30px color-mix(in srgb, var(--c) 22%, transparent); }
 .slot.prac small { color: var(--gold); }
 .slot.prac::after { content: ""; position: absolute; top: 9px; right: 10px; width: 8px; height: 8px; border-radius: 50%;

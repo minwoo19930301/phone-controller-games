@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { scoreArrow, rankPlayers, tally, ringOuter, RING_W, X_R, ARROW_R, FACE_R } from '../public/archery/scoring.mjs';
 import {
-  shoot, dropAt, launchSpeed, V_FULL, driftAt, mulberry32, initialWind, nextWind, tremble, beatPhase, beatIndex, fatigue, DIFFICULTY, pathAt, crossWind, metersPerDeg
+  shoot, dropAt, launchSpeed, V_FULL, driftAt, mulberry32, initialWind, nextWind, tremble, beatPhase, beatIndex, fatigue, DIFFICULTY, pathAt, crossWind, metersPerDeg, FULL_PULL, assistAim, diffOf
 } from '../public/archery/ballistics.mjs';
 
 test('center is X and counts as 10', () => {
@@ -136,4 +136,38 @@ test('tremble: steady first, then grows; breath window right after a heartbeat i
   const breath = tremble(t0 + 0.95 * 3 + 0.1, 5, lv, 2); // 심박 직후
   assert.ok(breath.breath);
   assert.ok(breath.amp < tired.amp);
+});
+
+test('round 4: easy is the default and far more forgiving than normal, normal more than hard', () => {
+  assert.equal(diffOf('nope'), DIFFICULTY.easy); // 모르는 값은 쉬움
+  const { easy, normal, hard } = DIFFICULTY;
+  assert.ok(easy.assist > normal.assist && normal.assist > hard.assist && hard.assist === 0);
+  assert.ok(easy.gain < normal.gain && normal.gain < hard.gain);
+  assert.ok(easy.steadySec > normal.steadySec && normal.steadySec > hard.steadySec);
+  assert.ok(easy.steadyRms > normal.steadyRms && normal.steadyRms > hard.steadyRms);
+  assert.ok(easy.windMax < normal.windMax && normal.windMax < hard.windMax);
+  assert.ok(easy.distance < normal.distance && normal.distance < hard.distance);
+  assert.equal(hard.distance, 70); // 어려움은 예전 그대로
+  assert.equal(hard.marker, false);
+});
+
+test('round 4: full draw is 0.8 and a short pull still flies at least 60% speed', () => {
+  assert.equal(FULL_PULL, 0.8);
+  assert.equal(launchSpeed(FULL_PULL), V_FULL);
+  assert.ok(Math.abs(launchSpeed(0) - V_FULL * 0.6) < 1e-9);
+  assert.ok(launchSpeed(0.4) > launchSpeed(0.2));
+});
+
+test('round 4: aim assist pulls toward the wind-corrected spot and 0 leaves it alone', () => {
+  assert.equal(assistAim(5, 0, 0), 5);
+  assert.ok(Math.abs(assistAim(5, 0, 0.6) - 2) < 1e-9);
+  assert.ok(Math.abs(assistAim(2, 2, 0.6) - 2) < 1e-9); // 보정 위치에 있으면 그대로
+  assert.ok(Math.abs(assistAim(5, 1, 1) - 1) < 1e-9);
+});
+
+test('round 4: a lower gain shrinks hand tremor in meters', () => {
+  const easy = DIFFICULTY.easy;
+  const a = shoot({ distance: easy.distance, aimX: 1, steady: 1, seed: 1, gain: easy.gain });
+  assert.ok(Math.abs(a.sx - metersPerDeg(easy.distance, easy.gain)) < 1e-9);
+  assert.ok(metersPerDeg(30, 0.12) < metersPerDeg(30));
 });

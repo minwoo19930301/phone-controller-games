@@ -7,7 +7,7 @@
 //   clock() → { song: 곡 진행 중인지, beat, bpm, live: 판정 중인지 }
 import {
   INSTRUMENTS, ICONS, targetAt, valvesFor, pitchForValves, valveLabel, FREE_VALVE_NOTE, STRINGS, OPEN_STRING, stringFor,
-  solfa, noteName, patternOf, PATTERNS, DIR_ARROW, DIR_KO, VOICE_FIX, PITCH_TOL,
+  solfa, noteName, patternOf, PATTERNS, DIR_ARROW, DIR_KO, VOICE_FIX, PITCH_TOL, T,
 } from '/orchestra/parts.js';
 import { createBreath, createPitch } from './audio-in.js';
 import { sensors } from './sensors.js';
@@ -37,6 +37,31 @@ function nearNote(env, sec = 0.3) {
   }
   return bd <= sec ? best : null;
 }
+// 입력이 안 먹었을 때 짧게 알려 주는 한 줄(진동 한 번 + 글자). 같은 말이 너무 자주 뜨지 않게 쉽니다.
+function createNudge(el) {
+  const n = div('ins-nudge', '');
+  el.appendChild(n);
+  let at = -1e9, tm = 0;
+  return (text, gap = 2200) => {
+    const t = now();
+    if (t - at < gap) return;
+    at = t;
+    n.textContent = text;
+    n.classList.add('show');
+    clearTimeout(tm);
+    tm = setTimeout(() => n.classList.remove('show'), 1300);
+    haptics.tick({ noFlash: true });
+  };
+}
+// 지금 불러야/불어야 할 음이 시작한 지 ms 넘게 소리가 없으면 true (곡 진행 중일 때만)
+function dueSilent(env, t, on, ms = 700) {
+  const c = env.clock(), p = env.part();
+  if (!c.song || !c.live || !p || on) return false;
+  const tg = targetAt(p, c.beat);
+  if (!tg || tg.rest || !tg.note) return false;
+  const since = ((c.beat - tg.note.b) * 60) / c.bpm * 1000;
+  return since > ms && since < ms + 500;
+}
 function metronome(env, ms = 600) {
   const drums = env.voice('drums');
   const id = setInterval(() => { try { drums.play(37, { vel: 0.45 }); } catch (e) {} }, ms);
@@ -53,19 +78,24 @@ function createDrum(env) {
       <div class="stick l"></div><div class="stick r"></div>
       <div class="drum-pow"></div>
     </div>
-    <div class="ins-hint"><b>막대기처럼 쥐고 아래로 톡!</b><span>폰을 옆으로 눕혀 치면 낮은 북(탐) 소리</span></div>
-    <div class="ins-note hidden" id="drumFb">동작 센서가 없어 화면을 눌러 쳐요</div>`);
+    <div class="ins-hint"><b>아래로 톡! 화면을 눌러도 돼요</b></div>
+    <div class="ins-note hidden" id="drumFb">센서가 없어요 · 화면을 눌러요</div>`);
   const stage = el.querySelector('.drum-stage');
-  const TH = { easy: 9, normal: 11.5, hard: 13.5 };
-  let inPeak = false, peak = 0, peakT = 0, lastHit = -1e9, peakGrav = null;
+  // 쉬움은 살짝만 흔들어도, 보통은 예전 쉬움 정도, 어려움은 예전 그대로
+  const TH = { easy: 6, normal: 9, hard: 13.5 };
+  let inPeak = false, peak = 0, peakT = 0, lastHit = -1e9, peakGrav = null, lastAny = -1e9, weakAt = 0;
+  const nudge = createNudge(el);
   const drums = env.voice('drums');
   const off = sensors.onMotion((d) => {
     const a = Math.hypot(d.lin[0], d.lin[1], d.lin[2]);
     const r = Math.hypot(d.rot[0], d.rot[1], d.rot[2]);
     const s = a + r * 0.01;
-    const thr = TH[env.diff()] || 11.5;
+    const thr = TH[env.diff()] || TH.easy;
     if (!inPeak) {
-      if (s > thr && d.t - lastHit > 90) { inPeak = true; peak = s; peakT = d.t; peakGrav = d.grav; }
+      if (s > thr && d.t - lastHit > 90 && d.t - lastAny > 90) { inPeak = true; peak = s; peakT = d.t; peakGrav = d.grav; weakAt = 0; }
+      // 흔들다 문턱을 못 넘고 멈추면 조용히 넘기지 않고 알려 줍니다
+      else if (s > thr * 0.6) weakAt = weakAt || d.t;
+      else if (weakAt && s < thr * 0.3) { if (d.t - weakAt < 600 && lastAny < weakAt) nudge('더 크게!'); weakAt = 0; }
     } else if (s > peak) { peak = s; peakT = d.t; peakGrav = d.grav; }
     else if (s < peak * 0.6 || d.t - peakT > 70) {
       inPeak = false;
@@ -76,6 +106,7 @@ function createDrum(env) {
     }
   });
   function hit(vel, tom, t = now()) {
+    lastAny = Math.max(lastAny, t);
     const near = !tom ? nearNote(env, 0.25) : null;
     let note = tom === 1 ? 45 : tom === 2 ? 48 : near ? near.m : 38;
     drums.play(note, { vel });
@@ -93,8 +124,9 @@ function createDrum(env) {
     env.signal('hit', { vel, tom: Boolean(tom) });
   }
   stage.addEventListener('pointerdown', (e) => {
-    if (!env.noSensor() && !DEBUG) return;
+    // 화면을 눌러도 늘 칩니다(센서와 겹쳐 두 번 울리지 않게 60ms 쉼)
     e.preventDefault();
+    if (now() - lastAny < 60) return;
     const r = stage.getBoundingClientRect();
     const side = (e.clientX - r.left) / r.width;
     hit(0.85, side < 0.18 ? 2 : side > 0.82 ? 1 : 0);
@@ -103,27 +135,20 @@ function createDrum(env) {
     el, kind: 'strike',
     frame() { el.querySelector('#drumFb').classList.toggle('hidden', !env.noSensor()); },
     tutorial() {
-      const fb = (stage2, api) => {
+      // 센서가 없거나 막혀도 화면 버튼으로 칠 수 있게
+      const fb = (stage2) => {
         if (!env.noSensor() && !DEBUG) return null;
         const b = document.createElement('button');
         b.className = 'tut-btn';
-        b.textContent = env.noSensor() ? '센서가 없어요 · 눌러서 치기' : '시험: 치기';
+        b.textContent = '눌러서 치기';
         b.onclick = () => hit(0.8, 0);
         stage2.appendChild(b);
-        const b2 = document.createElement('button');
-        b2.className = 'tut-btn ghost';
-        b2.textContent = '옆으로 치기(탐)';
-        b2.onclick = () => hit(0.8, 1);
-        stage2.appendChild(b2);
-        return () => { b.remove(); b2.remove(); };
+        return () => b.remove();
       };
       return [
-        { title: '막대기처럼 쥐기', body: '폰 아래쪽을 드럼 스틱처럼 한 손으로 가볍게 쥐어요. 화면은 위를 봐도 괜찮아요.', svg: 'hold' },
-        { title: '아래로 톡!', body: '손목을 써서 폰을 아래로 짧게 톡 내려쳐요. 떨어뜨리지 않게 꼭 쥐고요.', svg: 'strike', waitFor: 'hit', okText: '좋은 소리!', render: fb },
-        { title: '딸깍에 맞춰 네 번', body: '딸깍 소리에 맞춰 네 번 쳐요. 세게 치면 소리도 커져요.', svg: 'strike', waitFor: 'hit', count: 4, hint: '네 번 쳐요',
-          render: (s, api) => { const stop = metronome(env, 640); const c = fb(s, api); return () => { stop(); if (c) c(); }; } },
-        { title: '옆으로 눕혀 치면 탐', body: '폰을 옆으로 눕힌 채 치면 낮은 북(탐) 소리가 나요.', svg: 'tilt', waitFor: 'hit',
-          check: (d) => d.tom || '폰을 옆으로 더 눕혀서 쳐 봐요', render: fb },
+        { title: '아래로 톡!', svg: 'strike', waitFor: 'hit', okText: '좋은 소리!', render: fb },
+        { title: '딸깍에 맞춰 네 번', svg: 'strike', waitFor: 'hit', count: 4, hint: '네 번 쳐요',
+          render: (s, api) => { const stop = metronome(env, 640); const c = fb(s); return () => { stop(); if (c) c(); }; } },
       ];
     },
     destroy() { off(); },
@@ -139,7 +164,7 @@ function createCastanets(env) {
       <div class="shell top"><i></i></div><div class="shell bot"><i></i></div>
       <div class="cast-cord"></div>
     </div>
-    <div class="ins-hint"><b>화면을 톡톡!</b><span>두 손가락으로 같이 두드리면 드르륵</span></div>`);
+    <div class="ins-hint"><b>톡톡!</b></div>`);
   const stage = el.querySelector('.cast-stage');
   const cast = env.voice('castanets');
   let lastRoll = -1e9;
@@ -188,7 +213,7 @@ function createCastanets(env) {
   }
   const unbind = bindPad(el);
   const miniPad = (s) => {
-    const p = div('tut-pad', `<div class="cast-stage mini"><div class="shell top"><i></i></div><div class="shell bot"><i></i></div></div><span>여기를 톡</span>`);
+    const p = div('tut-pad', `<div class="cast-stage mini"><div class="shell top"><i></i></div><div class="shell bot"><i></i></div></div><span>톡!</span>`);
     s.appendChild(p);
     const u = bindPad(p);
     return () => { u(); p.remove(); };
@@ -198,9 +223,7 @@ function createCastanets(env) {
     frame() {},
     tutorial() {
       return [
-        { title: '톡 두드리기', body: '손가락으로 톡 두드리면 딱! 소리가 나요.', waitFor: 'tap', count: 3, hint: '세 번 두드려요', render: miniPad },
-        { title: '딸깍에 맞춰', body: '딸깍 소리에 맞춰 네 번 두드려요.', waitFor: 'tap', count: 4, render: (s) => { const stop = metronome(env, 600); const c = miniPad(s); return () => { stop(); c(); }; } },
-        { title: '두 손가락 = 드르륵', body: '두 손가락으로 동시에 두드리면 드르륵 굴리기예요. 어려움 악보에 나와요.', waitFor: 'roll', render: miniPad },
+        { title: '화면을 톡!', waitFor: 'tap', count: 3, hint: '세 번 두드려요', render: miniPad },
       ];
     },
     destroy() { unbind(); },
@@ -209,7 +232,7 @@ function createCastanets(env) {
 }
 
 // ═════════════════════ 피아노(진짜 건반) ═════════════════════
-function mountKeyboard(host, { lo, hi, mini = false, onDown, onUp }) {
+function mountKeyboard(host, { lo, hi, mini = false, vis: vis0 = 0, onDown, onUp }) {
   // 흰 건반 경계(C·F)로 넓히고, 최소 1.5옥타브(18반음)를 보장합니다.
   let a = Math.floor(lo), b = Math.ceil(hi);
   while (b - a < 18) { a -= 1; b += 1; }
@@ -227,12 +250,12 @@ function mountKeyboard(host, { lo, hi, mini = false, onDown, onUp }) {
   host.appendChild(root);
   const keys = new Map();
   for (let m = a; m <= b; m++) {
-    const k = div('key ' + (isBlack(m) ? 'blk' : 'wht'), isBlack(m) ? '' : `<span>${((m % 12) === 0) ? '도' + (Math.floor(m / 12) - 1) : ''}</span>`);
+    const k = div('key ' + (isBlack(m) ? 'blk' : 'wht'), isBlack(m) ? '' : `<span>${((m % 12) === 0) ? solfa(m) + (Math.floor(m / 12) - 1) : ''}</span>`);
     k.dataset.m = m;
     track.appendChild(k);
     keys.set(m, k);
   }
-  let vis = mini ? whites.length : Math.min(whites.length, window.innerWidth > window.innerHeight ? 17 : 10);
+  let vis = mini ? whites.length : Math.min(whites.length, vis0 || (window.innerWidth > window.innerHeight ? 17 : 10));
   let off = 0, ww = 40, userAt = 0;
   function layout() {
     const W = view.clientWidth || 360;
@@ -335,7 +358,7 @@ function mountKeyboard(host, { lo, hi, mini = false, onDown, onUp }) {
     },
     flash(m) { const k = keys.get(m); if (!k) return; k.classList.remove('flash'); void k.offsetWidth; k.classList.add('flash'); },
     follow(m) {
-      if (m == null || now() - userAt < 2500 || mini) return;
+      if (m == null || now() - userAt < 600 || mini) return;
       const i = whiteIdx(m);
       if (i < off + 1.5 || i > off + vis - 2.5) setOff(off + ((i - vis / 2) - off) * 0.18);
     },
@@ -347,6 +370,7 @@ function mountKeyboard(host, { lo, hi, mini = false, onDown, onUp }) {
 function createPiano(env) {
   const el = div('ins piano', `<canvas class="fall" id="fallCv"></canvas><div class="kb-host"></div><div class="ins-mini-hint" id="pianoHint"></div>`);
   const piano = env.voice('piano');
+  const nudge = createNudge(el);
   const voices = new Map(); // pointerId -> { v, m }
   const played = new Set();
   let partRef = null;
@@ -360,19 +384,22 @@ function createPiano(env) {
     if (kb) kb.destroy();
     const lo = p && p.notes.length ? p.lo : 60;
     const hi = p && p.notes.length ? p.hi : 76;
-    kb = mountKeyboard(el.querySelector('.kb-host'), { lo, hi, onDown: (m, id, vel) => down(m, id, vel), onUp: (m, id) => up(m, id) });
+    // 쉬움·보통은 건반을 크게(흰 건반 7개, 가로 11개). 어려움은 예전 그대로
+    const big = env.diff() !== 'hard' ? (window.innerWidth > window.innerHeight ? 11 : 7) : 0;
+    kb = mountKeyboard(el.querySelector('.kb-host'), { lo, hi, vis: big, onDown: (m, id, vel) => down(m, id, vel), onUp: (m, id) => up(m, id) });
     const first = p && p.notes[0] ? p.notes[0].m : 64;
     kb.centerOn(first);
   }
   function target(beat, bpm) {
     const p = env.part();
     if (!p) return null;
-    const win = env.diff() === 'easy' ? 0.45 : 0.32;
+    const d0 = env.diff();
+    const win = d0 === 'easy' ? 0.55 : d0 === 'normal' ? 0.45 : 0.32;
     for (const n of p.notes) {
       if (played.has(n.i) || n.chord) continue;
       const dt = (n.b - beat) * 60 / bpm;
       if (dt < -win) { played.add(n.i); continue; }
-      if (dt <= (env.diff() === 'easy' ? 1.1 : win)) return n;
+      if (dt <= (d0 === 'hard' ? win : d0 === 'easy' ? 1.4 : 1.1)) return n;
       return null;
     }
     return null;
@@ -383,8 +410,8 @@ function createPiano(env) {
     let m = key, tgt = null;
     if (c.song && env.part()) {
       tgt = target(c.beat, c.bpm);
-      if (tgt && (diff === 'easy' || (diff === 'normal' && key === tgt.m))) {
-        if (diff === 'easy') m = tgt.m;
+      if (tgt && diff !== 'hard') {
+        m = tgt.m; // 쉬움·보통은 아무 건반이나 눌러도 맞는 음
         played.add(tgt.i);
         // 묶인 음을 이어서 칩니다(빠른 대목을 한 번에)
         const spb = 60 / c.bpm;
@@ -392,6 +419,7 @@ function createPiano(env) {
       } else if (tgt && diff === 'hard') {
         const chord = env.part().notes.filter((n) => Math.abs(n.b - tgt.b) < 0.01 && n.m === key);
         if (chord.length) played.add(chord[0].i);
+        else if (tgt.m !== key) nudge(`${solfa(tgt.m)} 건반!`, 1500); // 다른 건반이면 어느 건반인지 알려 줌
       }
     }
     const v = piano.noteOn(m, { vel: vel * env.dyn() });
@@ -428,7 +456,7 @@ function createPiano(env) {
     fg.clearRect(0, 0, W, H);
     const showFall = c.song && p && diff !== 'hard';
     el.classList.toggle('hard', diff === 'hard' || !c.song);
-    el.querySelector('#pianoHint').textContent = !c.song ? '자유 연습 · 마음껏 쳐 보세요' : diff === 'easy' ? '쉬움 · 막대가 닿을 때 아무 건반이나 눌러도 맞는 음' : diff === 'normal' ? '보통 · 빛나는 건반을 눌러요' : '어려움 · 악보를 보고 쳐요';
+    el.querySelector('#pianoHint').textContent = c.song && diff !== 'hard' ? T('아무 건반이나 톡') : '';
     if (showFall) {
       const ahead = 2.4;
       const col = env.color();
@@ -467,7 +495,7 @@ function createPiano(env) {
       const seq = [60, 64, 67];
       let k = 0;
       return [
-        { title: '빛나는 건반 누르기', body: '반짝이는 건반을 차례로 눌러요. 도 · 미 · 솔', waitFor: 'key', count: 3, hint: '빛나는 건반을 눌러요',
+        { title: '빛나는 건반을 눌러요', waitFor: 'key', count: 3, hint: '도 · 미 · 솔',
           check: (d) => (d.key === seq[k] ? (k++, true) : `${solfa(seq[k])} 건반이 빛나요`),
           render: (s) => {
             k = 0;
@@ -476,16 +504,6 @@ function createPiano(env) {
             const mk = mountKeyboard(box, { lo: 60, hi: 72, mini: true, onDown: (m, id, vel) => down(m, 'tut' + id, vel), onUp: (m, id) => up(m, 'tut' + id) });
             const tm = setInterval(() => mk.highlight(new Map([[seq[Math.min(k, 2)], 'next']])), 120);
             return () => { clearInterval(tm); mk.destroy(); box.remove(); };
-          } },
-        { title: '내려오는 막대 보기', body: '연주할 때는 위에서 막대가 내려와요. 건반에 닿을 때 누르면 돼요. 쉬움은 아무 건반이나 눌러도 맞는 음이 나요.',
-          svg: '<svg class="pcgt-svg" viewBox="0 0 200 160"><rect x="30" y="112" width="140" height="40" rx="5" fill="#f4f1e8"/><g fill="#1a1d26"><rect x="52" y="112" width="12" height="24"/><rect x="80" y="112" width="12" height="24"/><rect x="122" y="112" width="12" height="24"/></g><rect x="96" y="20" width="18" height="30" rx="5" fill="var(--pcgt-c)"><animate attributeName="y" values="10;80;10" dur="1.6s" repeatCount="indefinite"/></rect><path d="M30 110h140" stroke="#fff" stroke-opacity=".5" stroke-width="2"/></svg>' },
-        { title: '두 건반 같이', body: '어려움에서는 화음이 나와요. 두 건반을 동시에 눌러 봐요.', waitFor: 'chord',
-          render: (s) => {
-            const box = div('tut-kb');
-            s.appendChild(box);
-            const mk = mountKeyboard(box, { lo: 60, hi: 72, mini: true, onDown: (m, id, vel) => down(m, 'tut' + id, vel), onUp: (m, id) => up(m, 'tut' + id) });
-            mk.highlight(new Map([[60, 'next'], [64, 'next']]));
-            return () => { mk.destroy(); box.remove(); };
           } },
       ];
     },
@@ -539,10 +557,11 @@ function createWind(env) {
   const el = div('ins wind' + (horn ? ' horn' : ''), `
     <div class="wind-top"><div class="wind-meter"></div><div class="wind-side"><div class="wind-now" id="windNow"></div><div class="wind-next" id="windNext"></div></div></div>
     <div class="valve-host"></div>
-    <button type="button" class="blowbtn hidden" id="blowBtn">누르는 동안 불기</button>
-    <div class="ins-hint" id="windHint"><b>마이크에 후~ 불어요</b><span>${horn ? '호른은 둘째 성부(화음)를 맡아요' : '폰 아래쪽 마이크를 입 가까이'}</span></div>
+    <button type="button" class="blowbtn" id="blowBtn">눌러서 불기</button>
+    <div class="ins-hint" id="windHint"><b>후~ 불어요</b></div>
     <div class="ins-note hidden" id="micNote"></div>`);
   const synthInst = env.voice(horn ? 'horn' : 'trumpet');
+  const nudge = createNudge(el);
   const meter = ringMeter();
   el.querySelector('.wind-meter').appendChild(meter.el);
   let mask = 0, lastMask = 0, voice = null, curM = null, lastSend = 0, button = false;
@@ -569,7 +588,7 @@ function createWind(env) {
     if (c.song && p && p.notes.length) {
       const tg = targetAt(p, c.beat);
       const t = tg ? tg.m : 67;
-      return { m: env.diff() === 'easy' ? t : pitchForValves(mask, t), want: tg ? valvesFor(tg.m) : null, tg };
+      return { m: env.diff() !== 'hard' ? t : pitchForValves(mask, t), want: tg ? valvesFor(tg.m) : null, tg };
     }
     const base = FREE_VALVE_NOTE[mask] ?? 67;
     return { m: horn ? base - 7 : base, want: null, tg: null };
@@ -579,10 +598,12 @@ function createWind(env) {
     if (breath) st = breath.read(t);
     else st = { on: button, onset: button && !wasOn, level: button ? 0.8 : 0 };
     if (button && breath && !st.on) st = { on: true, onset: !wasOn, level: 0.8 };
-    blowBtn.classList.toggle('hidden', micState === 'on' || micState === 'sim');
+    // 큰 버튼은 마이크와 똑같이 먹습니다(늘 보임)
     const note = el.querySelector('#micNote');
     note.classList.toggle('hidden', micState !== 'denied');
-    note.textContent = '마이크를 못 써서 버튼으로 불어요';
+    note.textContent = T('버튼으로 불어요');
+    // 불 차례인데 소리가 안 나면 알려 줍니다(시끄러운 방·마이크 막힘)
+    if (dueSilent(env, t, st.on)) nudge(micState === 'denied' ? '버튼을 눌러요' : '더 세게 후~');
     const pn = pitchNow();
     const lv = st.level;
     const d = env.diff();
@@ -590,8 +611,8 @@ function createWind(env) {
     valves.hint(env.clock().song && d === 'normal' && pn.want != null ? pn.want : null);
     el.querySelector('#windNow').innerHTML = `<b>${solfa(pn.m)}</b><span>${noteName(pn.m)}</span>`;
     const nx = pn.tg && pn.tg.next;
-    el.querySelector('#windNext').textContent = env.clock().song && nx ? (d === 'easy' ? `다음 ${solfa(nx.m)}` : `다음 ${solfa(nx.m)} · 밸브 ${valveLabel(valvesFor(nx.m))}`) : env.clock().song ? '' : '밸브를 바꿔 누르면 음이 바뀌어요';
-    meter.set(lv, st.on ? '후~' : '', st.on ? '' : '불어요');
+    el.querySelector('#windNext').textContent = env.clock().song && nx ? (d !== 'hard' ? T('다음 {n}', { n: solfa(nx.m) }) : T('다음 {n} · 밸브 {v}', { n: solfa(nx.m), v: valveLabel(valvesFor(nx.m)) })) : '';
+    meter.set(lv, st.on ? T('후~') : '', st.on ? '' : T('불어요'));
     for (const f of meters) f(lv, st.on, pn.m);
     if (st.on) {
       if (!voice || st.onset) {
@@ -634,25 +655,23 @@ function createWind(env) {
         box.appendChild(st);
         const b2 = document.createElement('button');
         b2.className = 'tut-btn ghost';
-        b2.textContent = '마이크 없이: 누르는 동안 불기';
+        b2.textContent = '눌러서 불기';
         b2.addEventListener('pointerdown', (e) => { e.preventDefault(); button = true; });
         b2.addEventListener('pointerup', () => { button = false; });
         b2.addEventListener('pointerleave', () => { button = false; });
         box.appendChild(b2);
         s.appendChild(box);
         const f = (lv, on, m) => {
-          m2.set(lv, on ? solfa(m) : '', on ? noteName(m) : '후~');
-          st.textContent = micState === 'on' ? '마이크 켜짐 · 숨소리를 듣는 중' : micState === 'sim' ? '마이크 흉내(시험)' : micState === 'opening' ? '마이크 여는 중…' : '마이크를 못 써요 · 아래 버튼으로 해요';
+          m2.set(lv, on ? solfa(m) : '', on ? noteName(m) : T('후~'));
+          st.textContent = micState === 'denied' ? T('버튼으로 불어요') : micState === 'opening' ? T('마이크 여는 중…') : '';
         };
         meters.add(f);
         return () => { meters.delete(f); setMask('tut', 0); button = false; if (v2) v2.destroy(); box.remove(); };
       };
       return [
-        { title: horn ? '호른처럼 들기' : '트럼펫처럼 들기', body: '폰 아래쪽(마이크)을 입 가까이 대고, 폰을 옆으로 눕혀 앞으로 쭉 들어요.', svg: 'blow' },
-        { title: '후~ 불어 보기', body: '목소리 말고 숨만 마이크에 후~ 불어요. 부는 동안 소리가 나요.', waitFor: 'blow', okText: '소리가 났어요!', render: (s) => meterStage(s, false) },
-        { title: '밸브 누르며 불기', body: '1번 밸브를 누른 채 불면 음이 바뀌어요. 보통·어려움에서는 악보 위 숫자대로 눌러요.', waitFor: ['valve', 'blow'],
-          check: (d) => (d.mask === 1 ? true : '1번 밸브만 누른 채 불어요'), render: (s) => meterStage(s, true) },
-        { title: '끊어서 세 번', body: '후, 후, 후 — 숨을 끊어서 세 번 불어요. 끊을 때마다 새 음이에요.', waitFor: 'blow', count: 3, render: (s) => meterStage(s, false) },
+        { title: '마이크에 후~ 불어요', waitFor: 'blow', okText: '소리가 났어요!', render: (s) => meterStage(s, false) },
+        { title: '밸브를 누르며 불어요', waitFor: ['valve', 'blow'],
+          check: (d) => (d.mask ? true : '밸브를 눌러요'), render: (s) => meterStage(s, true) },
       ];
     },
     destroy() { if (voice) voice.off(); valves.destroy(); },
@@ -661,17 +680,22 @@ function createWind(env) {
 }
 
 // ═════════════════════ 바이올린(옆으로 들고 활 긋기) ═════════════════════
-function mountBowPad(host, { onStroke, onMove, onStop }, cls = '') {
-  const pad = div('bowpad ' + cls, `<div class="bow"><i class="bow-stick"></i><i class="bow-hair"></i></div><div class="bowpad-hint">← 좌우로 쓱쓱 →</div>`);
+// 활 패드: 손가락을 대자마자 한 음(터치만 해도 됨), 방향을 바꿀 때마다 새 음. minSpeed 는 새 방향으로 인정하는 빠르기(px/초).
+function mountBowPad(host, { onStroke, onMove, onStop, minSpeed = () => 140 }, cls = '') {
+  const pad = div('bowpad ' + cls, `<div class="bow"><i class="bow-stick"></i><i class="bow-hair"></i></div><div class="bowpad-hint">← 쓱쓱 →</div>`);
   host.appendChild(pad);
   const bow = pad.querySelector('.bow');
-  let id = null, lx = 0, ly = 0, lt = 0, vx = 0, vy = 0, dir = 0, axis = null, moved = 0, speed = 0, stopTimer = null;
+  let id = null, lx = 0, ly = 0, lt = 0, vx = 0, vy = 0, dir = 0, axis = null, moved = 0, speed = 0, stopTimer = null, touched = false, tdir = 1;
   pad.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     if (id != null) return;
     id = e.pointerId;
     try { pad.setPointerCapture(id); } catch (err) {}
     lx = e.clientX; ly = e.clientY; lt = e.timeStamp || now(); vx = vy = 0; dir = 0; axis = null; moved = 0;
+    // 대자마자 첫 음(움직임을 기다리지 않음)
+    touched = true;
+    tdir = -tdir; // 연습 음계가 한쪽으로만 가지 않게 번갈아
+    onStroke(tdir, 0.6, lt);
   });
   pad.addEventListener('pointermove', (e) => {
     if (e.pointerId !== id) return;
@@ -689,19 +713,21 @@ function mountBowPad(host, { onStroke, onMove, onStop }, cls = '') {
     const v = axis === 'x' ? vx : vy;
     speed = Math.hypot(vx, vy);
     const sgn = Math.sign(v);
-    if (speed > 140 && sgn && sgn !== dir) {
+    if (speed > minSpeed() && sgn && sgn !== dir) {
       dir = sgn;
-      onStroke(dir, clamp(speed / 1600, 0.25, 1), t);
+      // 방금 터치로 낸 첫 음이 있으면 첫 움직임은 새 음으로 세지 않음
+      if (touched) touched = false;
+      else onStroke(dir, clamp(speed / 1600, 0.25, 1), t);
     }
     if (dir) onMove(clamp(speed / 1500, 0.12, 1));
     clearTimeout(stopTimer);
-    stopTimer = setTimeout(() => { if (dir) { dir = 0; onStop(); } }, 160);
+    stopTimer = setTimeout(() => { if (dir) { dir = 0; onStop(); touched = false; } }, 160);
   });
   const up = (e) => {
     if (e.pointerId !== id) return;
     id = null;
     clearTimeout(stopTimer);
-    if (dir) { dir = 0; onStop(); }
+    if (dir || touched) { dir = 0; touched = false; onStop(); }
   };
   pad.addEventListener('pointerup', up);
   pad.addEventListener('pointercancel', up);
@@ -763,7 +789,8 @@ function createViolin(env) {
     if (voice) { voice.off(); voice = null; env.send('release', {}); env.action('rest', {}); }
     if (strokeAt && now() - strokeAt > 900) env.signal('long', {});
   }
-  const pad = mountBowPad(el.querySelector('.bow-host'), { onStroke: stroke, onMove: move, onStop: stop });
+  const minSpeed = () => (env.diff() === 'hard' ? 140 : env.diff() === 'easy' ? 70 : 90);
+  const pad = mountBowPad(el.querySelector('.bow-host'), { onStroke: stroke, onMove: move, onStop: stop, minSpeed });
   function frame(t = now()) {
     const c = env.clock();
     const hard = env.diff() === 'hard';
@@ -777,8 +804,8 @@ function createViolin(env) {
     }
     const pn = c.song && env.part() ? targetAt(env.part(), c.beat) : null;
     const showM = voice ? curM : pn ? pn.m : SCALE[scaleI];
-    el.querySelector('#vioNow').innerHTML = `<b>${solfa(showM)}</b><span>${noteName(showM)}${hard && pn ? ` · ${STRINGS[stringFor(pn.m)]}현` : ''}</span>`;
-    el.querySelector('#vioNext').textContent = !c.song ? '현 버튼을 누르고 그으면 그 현 소리' : pn && pn.next ? `다음 ${solfa(pn.next.m)}${hard ? ` · ${STRINGS[stringFor(pn.next.m)]}현` : ''}` : '';
+    el.querySelector('#vioNow').innerHTML = `<b>${solfa(showM)}</b><span>${noteName(showM)}${hard && pn ? ` · ${T('{s}현', { s: STRINGS[stringFor(pn.m)] })}` : ''}</span>`;
+    el.querySelector('#vioNext').textContent = !c.song ? '' : pn && pn.next ? (hard ? T('다음 {n} · {s}현', { n: solfa(pn.next.m), s: STRINGS[stringFor(pn.next.m)] }) : T('다음 {n}', { n: solfa(pn.next.m) })) : '';
   }
   return {
     el, kind: 'bow', frame,
@@ -786,27 +813,11 @@ function createViolin(env) {
       const mini = (s) => {
         const box = div('tut-bow');
         s.appendChild(box);
-        const pp = mountBowPad(box, { onStroke: stroke, onMove: move, onStop: stop }, 'mini');
+        const pp = mountBowPad(box, { onStroke: stroke, onMove: move, onStop: stop, minSpeed }, 'mini');
         return () => { pp.destroy(); box.remove(); };
       };
       return [
-        { title: '바이올린처럼 들기', body: '폰을 옆으로 눕혀 한 손으로 받쳐요. 다른 손 손가락이 활이에요.', svg: 'bow' },
-        { title: '활 긋기', body: '화면을 좌우로 쓱쓱 문질러요. 방향을 바꿀 때마다 새 음이에요.', waitFor: 'stroke', count: 4, hint: '네 번 그어요', render: mini },
-        { title: '길게 끌기', body: '한 방향으로 천천히 1초 넘게 끌면 음이 길게 이어져요.', waitFor: 'long', render: mini },
-        { title: '현 고르기 (어려움)', body: '어려움에서는 악보 위 글자(G·D·A·E) 현 버튼을 엄지로 누른 채 그어요. A 현을 누르고 그어 봐요.', waitFor: 'string',
-          check: (d) => (d.str === 2 ? true : 'A 현 버튼을 누른 채 그어요'),
-          render: (s) => {
-            const box = div('tut-bow');
-            const sb = div('vio-strbtns mini', STRINGS.map((x, i) => `<button type="button" class="strbtn${i === 2 ? ' want' : ''}" data-i="${i}">${x}</button>`).join(''));
-            box.appendChild(sb);
-            s.appendChild(box);
-            sb.querySelectorAll('.strbtn').forEach((b) => b.addEventListener('pointerdown', (e) => { e.preventDefault(); try { b.releasePointerCapture(e.pointerId); } catch (err) {} strSrc.set('t' + e.pointerId, Number(b.dataset.i)); strPaint(); sb.querySelectorAll('.strbtn').forEach((x) => x.classList.toggle('on', x === b)); }));
-            const u = () => { for (const k of [...strSrc.keys()]) if (String(k).startsWith('t')) strSrc.delete(k); strPaint(); sb.querySelectorAll('.strbtn').forEach((x) => x.classList.remove('on')); };
-            sb.addEventListener('pointerup', u);
-            sb.addEventListener('pointercancel', u);
-            const pp = mountBowPad(box, { onStroke: stroke, onMove: move, onStop: stop }, 'mini');
-            return () => { u(); pp.destroy(); box.remove(); };
-          } },
+        { title: '화면을 좌우로 쓱쓱', waitFor: 'stroke', count: 3, hint: '세 번 그어요', render: mini },
       ];
     },
     destroy() { if (voice) voice.off(); pad.destroy(); },
@@ -826,9 +837,10 @@ function createVoice(env) {
     <canvas class="pitch-cv"></canvas>
     <div class="voice-top"><div class="wind-now" id="voNow"></div><div class="fixbadge" id="voFix"></div></div>
     <div class="voice-lv"><i></i></div>
-    <button type="button" class="blowbtn hidden" id="humBtn">누르는 동안 노래(마이크 없음)</button>
-    <div class="ins-hint"><b>마이크에 노래해요</b><span id="voHint">음정이 조금 틀려도 맞게 고쳐서 불러 줘요</span></div>`);
+    <button type="button" class="blowbtn hidden" id="humBtn">눌러서 노래</button>
+    <div class="ins-hint"><b>노래해요</b><span id="voHint"></span></div>`);
   const choir = env.voice('choir');
+  const nudge = createNudge(el);
   const cv = el.querySelector('.pitch-cv');
   const g = cv.getContext('2d');
   let pitch = null, micState = 'opening', voice = null, curM = null, unv = 0, lastSend = 0, hum = false;
@@ -847,6 +859,7 @@ function createVoice(env) {
   humBtn.addEventListener('pointerleave', hUp);
   let matchSince = 0, voicedSince = 0;
   let tutTarget = null;
+  const voiced0 = (rd) => rd.midi != null && rd.midi > 35 && rd.midi < 96;
   function correct(raw, target, diff) {
     if (target == null) return Math.round(raw);
     const tOct = target + 12 * Math.round((raw - target) / 12);
@@ -868,8 +881,10 @@ function createVoice(env) {
     const tg = c.song && p && p.notes.length ? targetAt(p, c.beat) : null;
     const target = tutTarget != null ? tutTarget : tg ? tg.m : null;
     if (hum && rd.midi == null) rd = { midi: target != null ? target : 67, level: 0.75 };
-    humBtn.classList.toggle('hidden', micState === 'on' || micState === 'sim');
-    const voiced = rd.midi != null && rd.midi > 35 && rd.midi < 96;
+    // 쉬움·보통은 큰 버튼이 늘 보이고 마이크와 똑같이 먹습니다. 어려움은 마이크를 못 쓸 때만(버튼은 음정이 늘 맞아서)
+    humBtn.classList.toggle('hidden', diff === 'hard' && (micState === 'on' || micState === 'sim'));
+    if (dueSilent(env, t, voiced0(rd))) nudge(micState === 'denied' ? '버튼을 눌러요' : '더 크게 불러요');
+    const voiced = voiced0(rd);
     let fix = null;
     if (voiced) {
       unv = 0;
@@ -901,9 +916,9 @@ function createVoice(env) {
     while (trace.length && trace[0].t < t - 4200) trace.shift();
     el.style.setProperty('--lv', (voiced ? rd.level : 0).toFixed(2));
     for (const f of meters) f(voiced ? rd.midi : null, fix, target);
-    el.querySelector('#voNow').innerHTML = target != null ? `<b>${solfa(target)}</b><span>${noteName(target)}</span>` : `<b>${voiced ? solfa(fix) : '아~'}</b><span>${voiced ? noteName(fix) : '편하게 불러 봐요'}</span>`;
-    el.querySelector('#voFix').textContent = c.song ? `보정 ${Math.round((VOICE_FIX[diff] ?? 0.75) * 100)}%` : '보정 켜짐';
-    el.querySelector('#voHint').textContent = micState === 'denied' ? '마이크를 못 써서 버튼을 누르는 동안 노래로 쳐요' : micState === 'opening' ? '마이크 여는 중…' : '음정이 조금 틀려도 맞게 고쳐서 불러 줘요';
+    el.querySelector('#voNow').innerHTML = target != null ? `<b>${solfa(target)}</b><span>${noteName(target)}</span>` : `<b>${voiced ? solfa(fix) : T('아~')}</b><span>${voiced ? noteName(fix) : T('편하게 불러 봐요')}</span>`;
+    el.querySelector('#voFix').textContent = c.song ? T('보정 {n}%', { n: Math.round((VOICE_FIX[diff] ?? 0.75) * 100) }) : T('보정 켜짐');
+    el.querySelector('#voHint').textContent = micState === 'denied' ? T('버튼으로 노래해요') : micState === 'opening' ? T('마이크 여는 중…') : '';
     drawPitch(cv, g, trace, t, env.color());
   }
   return {
@@ -914,7 +929,7 @@ function createVoice(env) {
         const box = div('tut-voice', `<div class="tv-row"><div class="tv-k">내 목소리</div><b class="tv-raw">–</b></div><div class="tv-row"><div class="tv-k">맞춘 음</div><b class="tv-fix">–</b></div>${tgt != null ? `<div class="tv-row"><div class="tv-k">목표</div><b class="tv-tgt">${solfa(tgt)} · ${noteName(tgt)}</b></div><div class="tv-bar"><i></i><em></em></div>` : ''}<div class="tut-mic"></div>`);
         const b2 = document.createElement('button');
         b2.className = 'tut-btn ghost';
-        b2.textContent = '마이크 없이: 누르는 동안 노래';
+        b2.textContent = '눌러서 노래';
         b2.addEventListener('pointerdown', (e) => { e.preventDefault(); hum = true; });
         b2.addEventListener('pointerup', () => { hum = false; });
         b2.addEventListener('pointerleave', () => { hum = false; });
@@ -923,7 +938,7 @@ function createVoice(env) {
         const f = (raw, fix, target) => {
           box.querySelector('.tv-raw').textContent = raw != null ? `${solfa(raw)} ${noteName(raw)}` : '–';
           box.querySelector('.tv-fix').textContent = fix != null ? `${solfa(fix)} ${noteName(fix)}` : '–';
-          box.querySelector('.tut-mic').textContent = micState === 'on' ? '마이크 켜짐 · 듣는 중' : micState === 'sim' ? '마이크 흉내(시험)' : micState === 'opening' ? '마이크 여는 중…' : '마이크를 못 써요 · 버튼으로 해요';
+          box.querySelector('.tut-mic').textContent = micState === 'denied' ? T('버튼으로 노래해요') : micState === 'opening' ? T('마이크 여는 중…') : '';
           if (tgt != null) {
             const bar = box.querySelector('.tv-bar em');
             const dev = raw != null ? clamp(raw - (tgt + 12 * Math.round((raw - tgt) / 12)), -4, 4) : null;
@@ -936,9 +951,7 @@ function createVoice(env) {
         return () => { meters.delete(f); tutTarget = null; hum = false; box.remove(); };
       };
       return [
-        { title: '아~ 소리 내기', body: '폰을 입 앞 한 뼘에 두고, 편한 높이로 "아~" 하고 1초 넘게 불러요.', waitFor: 'voiced', okText: '잘 들려요!', render: (s) => meterStage(s, null) },
-        { title: '솔 음에 맞추기', body: '"솔~" 하고 불러요. 남자는 한 옥타브 낮아도 괜찮아요. 가까우면 맞춰 줘요.', waitFor: 'match', okText: '딱 맞았어요!', render: (s) => meterStage(s, 67) },
-        { title: '보정이 도와줘요', body: '조금 틀려도 폰이 맞는 음의 합창 소리로 같이 불러 줘요. 쉬움일수록 많이 도와줘요. 큰 소리로 자신 있게!', svg: 'check' },
+        { title: '마이크에 아~ 불러요', waitFor: 'voiced', okText: '잘 들려요!', render: (s) => meterStage(s, null) },
       ];
     },
     destroy() { if (voice) voice.off(); },
@@ -1011,8 +1024,8 @@ function createBaton(env) {
   const el = div('ins baton', `
     <canvas class="bat-cv"></canvas>
     <div class="bat-info"><div><span>빠르기</span><b id="batTempo">–</b></div><div><span>셈여림</span><b id="batDyn">mf</b></div><div><span>박</span><b id="batBeat">–</b></div></div>
-    <button type="button" class="recal" id="batRecal">기준 다시 맞추기</button>
-    <div class="ins-hint"><b>지휘봉처럼 박자를 저어요</b><span id="batHint">크게 저으면 크게, 빨리 저으면 빨라져요</span></div>`);
+    <button type="button" class="recal" id="batRecal">다시 맞추기</button>
+    <div class="ins-hint"><b>박자를 저어요</b><span id="batHint">화면을 톡 쳐도 박이에요</span></div>`);
   const cv = el.querySelector('.bat-cv');
   const g = cv.getContext('2d');
   let yaw0 = null;
@@ -1023,6 +1036,10 @@ function createBaton(env) {
   const hits = []; // { t, dir, n }
   let lastPose = 0, beatInBar = 0, dynWord = 'mf', tempoPct = null;
   const tick = env.voice('drums');
+  const nudge = createNudge(el);
+  let wasSong = false;
+  // 쉬움·보통은 살짝만 저어도 박으로 잡습니다(시작 문턱, 최소 세기). 어려움은 예전 그대로
+  const thr = () => (env.diff() === 'hard' ? { start: 55, peak: 85 } : { start: 38, peak: 55 });
   function pos(o) {
     const top = topVector(o);
     const yaw = Math.atan2(top[0], -top[2]) / RD;
@@ -1057,10 +1074,14 @@ function createBaton(env) {
     const beatMs = c.song ? (60000 / c.bpm) : 600;
     const refr = Math.max(170, beatMs * 0.42);
     if (!inStroke) {
-      if (sp > 55 && t - lastIctus > refr * 0.6) { inStroke = true; peak = sp; peakV = [vx, vy]; strokeLen = 0; }
+      if (sp > thr().start && t - lastIctus > refr * 0.6) { inStroke = true; peak = sp; peakV = [vx, vy]; strokeLen = 0; }
     } else {
       if (sp > peak) { peak = sp; peakV = [vx, vy]; }
-      else if (sp < peak * 0.38 && peak > 85) {
+      else if (sp < peak * 0.38 && peak <= thr().peak) {
+        // 저었는데 모자라서 박으로 못 잡았을 때: 조용히 넘기지 않고 알려 줍니다
+        inStroke = false;
+        if (peak > thr().start * 0.8) nudge('더 크게 저어요');
+      } else if (sp < peak * 0.38) {
         inStroke = false;
         if (t - lastIctus < refr) return;
         const avg = recent.length ? recent.reduce((a, b) => a + b, 0) / recent.length : peak;
@@ -1102,7 +1123,11 @@ function createBaton(env) {
     const dx = e.clientX - sw.x, dy = sw.y - e.clientY;
     const len = Math.hypot(dx, dy);
     sw = null;
-    if (len < 18) return;
+    if (len < 18) {
+      // 톡 치기: 쉬움·보통은 화면을 톡 쳐도 박(아래)으로 인정. 어려움은 방향이 있어야 해서 안 먹음
+      if (env.diff() !== 'hard') { trail.push({ t: now(), x: 0, y: -6 }); ictus(now(), 'down', 30); } else nudge('저어요');
+      return;
+    }
     const d = dirOf([dx, dy]);
     trail.push({ t: now(), x: dx / 6, y: dy / 6 });
     ictus(now(), d, len / 5);
@@ -1110,6 +1135,9 @@ function createBaton(env) {
   el.querySelector('#batRecal').addEventListener('click', () => { yaw0 = null; trail.length = 0; });
   function frame(t = now()) {
     const c = env.clock();
+    // 곡이 시작될 때마다 기준 방향을 저절로 다시 잡습니다(따로 맞추는 단계 없음)
+    if (c.song && !wasSong) { yaw0 = null; trail.length = 0; }
+    wasSong = c.song;
     const song = env.song && env.song();
     const pat = c.song && song ? patternOf(song) : PATTERNS['4/4'];
     if (c.song) {
@@ -1122,7 +1150,7 @@ function createBaton(env) {
     el.querySelector('#batTempo').textContent = tempoPct == null ? (c.song ? `${Math.round(c.bpm)}` : '–') : `${tempoPct > 0 ? '+' : ''}${tempoPct}%`;
     el.querySelector('#batDyn').textContent = dynWord;
     el.querySelector('#batBeat').textContent = c.song ? `${beatInBar}/${pat.length}` : hits.length ? DIR_ARROW[hits[hits.length - 1].dir] : '–';
-    el.querySelector('#batHint').textContent = env.noSensor() ? '센서가 없어 화면을 그 방향으로 밀면 박이에요' : '크게 저으면 크게, 빨리 저으면 빨라져요';
+    el.querySelector('#batHint').textContent = env.diff() === 'hard' ? '' : T('화면을 톡 쳐도 박이에요');
     drawBaton(cv, g, pat, trail, hits, t, env.color(), c.song ? beatInBar : null);
   }
   return {
@@ -1130,10 +1158,9 @@ function createBaton(env) {
     setTempo(pct) { tempoPct = pct; },
     calibrate() { yaw0 = null; trail.length = 0; },
     tutorial() {
-      let want = ['left', 'right'];
       const swipe = (s) => {
         if (!env.noSensor() && !DEBUG) return null;
-        const p = div('tut-swipe', '<span>센서가 없으면 여기를 그 방향으로 밀어요</span>');
+        const p = div('tut-swipe', '<span>여기를 밀어요</span>');
         s.appendChild(p);
         let st = null;
         p.addEventListener('pointerdown', (e) => { e.preventDefault(); st = { x: e.clientX, y: e.clientY }; });
@@ -1141,16 +1168,10 @@ function createBaton(env) {
         return () => p.remove();
       };
       return [
-        { title: '지휘봉 쥐는 법', body: '엄지와 검지로 폰 아래쪽을 잡고 나머지 손가락은 가볍게 받쳐요. 폰 윗부분이 지휘봉 끝이에요. 끝을 큰 화면 쪽으로 향하고 다음을 눌러요.', svg: 'point' },
-        { title: '1박: 아래로', body: '지휘봉 끝을 위에서 아래로 툭 떨어뜨렸다 살짝 튕겨요.', svg: 'conduct', waitFor: 'beat', check: (d) => (d.dir === 'down' ? true : `${DIR_KO[d.dir]} 움직였어요. 아래로 툭!`), render: swipe },
-        { title: '2박 왼쪽, 3박 오른쪽', body: '왼쪽으로 한 번, 이어서 오른쪽으로 크게 한 번 저어요.', svg: 'conduct', waitFor: 'beat', count: 2, hint: '왼쪽 → 오른쪽',
-          check: (d) => { if (d.dir === want[0]) { want = want.slice(1).concat(want[0]); return true; } return `이번엔 ${DIR_KO[want[0]]}`; },
-          render: (s) => { want = ['left', 'right']; return swipe(s); } },
-        { title: '4박: 위로', body: '위로 올려 다시 1박 자리로 돌아가요.', svg: 'conduct', waitFor: 'beat', check: (d) => (d.dir === 'up' ? true : '위로 올려요'), render: swipe },
-        { title: '이어서 한 마디', body: '아래 → 왼쪽 → 오른쪽 → 위. 크게 저으면 소리가 커지고, 빨리 저으면 빨라져요.', svg: 'conduct', waitFor: 'bar', okText: '멋진 지휘!', render: swipe },
+        { title: '위에서 아래로 툭!', svg: 'conduct', waitFor: 'beat', check: (d) => (env.diff() !== 'hard' || d.dir === 'down' ? true : `${DIR_KO[d.dir]} 움직였어요. 아래로 툭!`), render: swipe },
+        { title: '아래 · 왼쪽 · 오른쪽 · 위', svg: 'conduct', waitFor: 'bar', okText: '멋진 지휘!', render: swipe },
       ];
     },
-    onTutStep(i) { if (i === 1) this.calibrate(); },
     destroy() { offO(); },
     test: { beat: (dir, size = 30) => ictus(now(), dir, size), get trail() { return trail; } },
   };

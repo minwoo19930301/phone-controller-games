@@ -5,7 +5,7 @@
 //   sc.setPart(part, song, 'trumpet', '#ff5a5f', 'normal');
 //   sc.mark(i, 'perfect');                 // 판정 표시
 //   sc.draw(beat, { bpm, level, trace });  // 매 프레임
-import { INSTRUMENTS, valveLabel, STRINGS, solfa, DIR_ARROW } from './parts.js';
+import { INSTRUMENTS, valveLabel, STRINGS, solfa, DIR_ARROW, T } from './parts.js';
 
 const FLAT_KEYS = ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Dm', 'Gm', 'Cm', 'Fm', 'Bbm', 'Ebm'];
 const SHARP_MAP = [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0], [3, 0], [3, 1], [4, 0], [4, 1], [5, 0], [5, 1], [6, 0]];
@@ -306,7 +306,7 @@ export function createScore(canvas, opts = {}) {
     if (kind === 'wind' && diff !== 'easy' && n.valves != null) return { text: valveLabel(n.valves), top: true, pill: true };
     if (kind === 'bow' && diff === 'hard' && n.str != null) return { text: STRINGS[n.str], top: true, pill: true };
     if ((kind === 'keys' || kind === 'voice') && diff !== 'hard' && !n.chord && n.m) return { text: solfa(n.m), top: false };
-    if (kind === 'tap' && n.roll) return { text: '드르륵', top: true, pill: true };
+    if (kind === 'tap' && n.roll) return { text: T('드르륵'), top: true, pill: true };
     return null;
   }
 

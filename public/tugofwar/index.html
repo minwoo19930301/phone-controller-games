@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
+<script src="/common/i18n-wait.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#7fb6ea">
 <link rel="icon" href="data:,">
@@ -74,7 +75,8 @@
       <div class="lb-title">
         <div class="eyebrow">1~8인 · 두 팀 · 3판 2선승</div>
         <h1 class="wordmark">줄다리기</h1>
-        <p class="lede">구령에 맞춰 폰을 두 손으로 가슴까지 확 당겨요.<br>다 같이 박자가 맞으면 <b>한 몸!</b></p>
+        <p class="lede">박자에 맞춰 폰을 확 당겨요!</p>
+        <div class="lang-box" id="langBox"></div>
       </div>
       <div class="teams" id="teams"></div>
       <div class="qr-card">
@@ -87,10 +89,11 @@
     <footer class="lb-foot">
       <div class="setbox" id="setBox"></div>
       <div class="tutbox" id="tutBox"></div>
-      <div class="hint"><span>폰에서 모두 <b>준비</b>를 누르면 시작해요</span><span class="dot"></span><kbd>D</kbd><span>난이도</span></div>
+      <div class="hint"><span id="hintGo"></span></div>
     </footer>
   </div>
   <div class="msg" id="msg"></div>
+  <div class="sound-chip" id="soundChip">화면을 한 번 눌러 소리 켜기</div>
 </section>
 
 <!-- 결과 -->
@@ -105,7 +108,7 @@
     <div class="ov-table" id="ovTable"></div>
     <div class="over-foot">
       <div class="setbox" id="setBoxOver"></div>
-      <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 새 경기</span><span class="dot"></span><kbd>D</kbd><span>난이도</span></div>
+      <div class="hint"><span id="hintAgain"></span></div>
     </div>
     <div class="tutbox" id="tutBoxOver"></div>
   </div>
@@ -117,6 +120,8 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
+<script type="module" src="/tugofwar/i18n.js"></script>
 <script type="module" src="game.js"></script>
 </body>
 </html>

@@ -1,30 +1,41 @@
 // 탁구 컨트롤러. 폰이 탁구채입니다.
 // 폰 방향(pose)을 계속 큰 화면으로 흘려보내고, 스윙은 폰에서 직접 잡아 swing 으로 보냅니다.
 // 좌표는 '준비' 때 정한 기준축으로 보냅니다: r = 내 오른쪽, u = 위, f = 화면이 TV(탁구대)를 보던 방향.
-// 대기 화면: 난이도·슬로우(큰 화면이 정한 값, 공통 phone-settings), 준비 버튼(모두 준비하면 시작), 처음이면 연습(공통 tutorial).
+// 대기 화면: 난이도·슬로우(큰 화면이 정한 값, 공통 phone-settings), 준비 버튼(모두 준비하면 시작), 연습은 링크로만(공통 tutorial).
+// 기본(쉬움·보통)은 한 가지 동작만 씁니다: 공이 오면 휘두르거나 화면을 누르기. 포·백핸드, 회전, 세기, 좌우 위치는 자동이고 어려움에서만 직접 합니다.
 // 진동: 휘두르는 순간 폰이 스스로 울리고, 큰 화면이 맞혔다고 확인하면 d2c haptic 으로 한 번 더(220ms 안이면 한 번만).
 import { haptics } from '/common/haptics.js';
+import { createSamples } from '/common/samples.js';
 import { createPhoneSettings } from '/common/phone-settings.js';
 import { createTutorial } from '/common/tutorial.js';
+import '/pingpong/i18n.js';
+import { mountSwitcher } from '/common/i18n.js';
 import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steering.mjs';
 
 (() => {
   const $ = (id) => document.getElementById(id);
+  // 번역 모듈이 있으면 그걸로, 없으면 {이름} 자리만 채웁니다.
+  const tr = (k, v) => (window.PCG && window.PCG.t ? window.PCG.t(k, v) : String(k).replace(/\{(\w+)\}/g, (m, n) => (v && n in v ? v[n] : m)));
   const RD = Math.PI / 180;
   const G = 9.81;
   const params = new URLSearchParams(location.search);
   const ROOM = (params.get('room') || '').toUpperCase();
   const DEBUG = params.has('debug');
-  $('room').textContent = ROOM ? `방 ${ROOM}` : '';
+  $('room').textContent = ROOM ? tr('방 {code}', { code: ROOM }) : '';
+  mountSwitcher($('langBox'), { reload: true, compact: true });
 
   // ---------- 조정 값 (실폰 검증 전이라 바뀔 수 있습니다) ----------
   const POSE_MS = 25; // pose 전송 간격, 약 40Hz
-  const TRIGGER_DPS = 300; // 회전 속도(도/초)가 이 값을 넘으면 스윙 시작
+  // 회전 속도(도/초)가 이 값을 넘으면 스윙 시작. 쉬움·보통은 살짝 휘둘러도 잡히게 낮췄습니다.
+  const TRIGGER_DPS = { easy: 150, normal: 210, hard: 300 };
   // 스윙 사이 최소 간격. 쉬움·보통은 너무 일찍 휘둘렀을 때 다시 휘두를 수 있게 조금 짧습니다.
   const COOLDOWN = { easy: 380, normal: 420, hard: 500 };
   const WINDOW_MS = 100; // 시작 뒤 값을 모으는 시간
   const PRE_MS = 60; // 회전 판별에는 시작 직전 값도 씁니다(가속은 회전보다 먼저 붙습니다)
-  const ROT_FULL_DPS = 1200; // 이 회전 속도면 회전 쪽 힘이 만점
+  const ROT_FULL_DPS = 1200; // 이 회전 속도면 회전 쪽 힘이 만점(어려움만 힘을 가립니다)
+  const POWER_EASY = [0.5, 0.75]; // 쉬움·보통은 힘을 이 안으로 모읍니다(세게 쳐도 약하게 쳐도 안전한 가운데 깊이)
+  const TAP_GAP_MS = 220; // 누르기 스윙은 이 간격 안에 다시 보내지 않습니다(두 번 인식 방지)
+  const HINT_MS = 1600; // 힌트 문구 유지 시간
   const ACC_FULL = 26; // 이 가속(m/s²)이면 가속 쪽 힘이 만점
   const VERT_MIN = 0.5; // 위아래 속도 변화(m/s)가 이 이상이어야 드라이브/커트
   const VERT_RATIO = 0.45; // 그리고 수평 속도 변화의 이 비율 이상이어야 '분명히' 위아래
@@ -39,14 +50,13 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
   const LAT_MIN = 0.35; // 비틀기 방향을 기준축으로 가릴 수 없을 만큼 애매한 자세의 문턱
   // 회전이 문턱을 넘어도 바로 스윙이 아닙니다. 모은 값으로 탁구대 쪽(f)이나 치는 면 쪽으로 이만큼(m/s) 움직였어야 스윙이고,
   // 아니면 뒤로 빼는 동작(백스윙)이라 버립니다. 버리면 쿨다운도 걸지 않아 바로 이어지는 앞스윙을 잡습니다.
-  const FWD_MIN = 0.1;
+  const FWD_MIN = { easy: 0.03, normal: 0.06, hard: 0.1 };
   const AIM_MAX = 60; // 조준 각도 한계(도)
-  const CUE_MS = 1800; // '지금!' 표시 유지 시간
+  const CUE_MS = 3200; // '지금!' 표시 유지 시간(슬로우로 느려진 시간까지 덮도록 예전 1800 보다 늘림)
   const CAL_GUARD_MS = 400; // 자세를 맞춘 직후 흔들림은 스윙으로 보지 않습니다
   const SENSOR_WAIT_MS = 1500; // 이 시간 안에 동작 센서 값이 없으면 버튼 모드
 
   const PLAY_URL = { baseball: '/play/', golf: '/play/golf/', pingpong: '/play/pingpong/' };
-  const SPIN_NAME = { none: '플랫', top: '드라이브', back: '커트', side: '사이드' };
   const PRESETS = {
     flat: { power: 0.75, spin: 'none', spinAmt: 0 },
     top: { power: 0.8, spin: 'top', spinAmt: 0.8 },
@@ -72,17 +82,15 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
   let fallback = false;
   let permDenied = false;
   let pendingCal = false;
-  let sensorDiscoveryDone = false;
-  let initialSetupDone = false;
-  let setupPreReady = false;
   let dominantHand = 'right';
   let handOverride = 'auto';
-  // Each phone keeps its own calibration. Automatic correction remains available.
-  const steering = { mode: 'auto', configured: false, stage: 0, center: 0, left: null, right: null, value: 0, raw: null, lastT: 0, freezeUntil: 0, awaitCenter: false };
+  // 좌우 위치는 기본이 자동(공 쪽으로 라켓이 따라감)입니다. 맞추기 화면은 대기실의 작은 '고급' 안에서만 엽니다.
+  const steering = { mode: 'auto', configured: true, stage: 0, center: 0, left: null, right: null, value: 0, raw: null, lastT: 0, freezeUntil: 0, awaitCenter: false };
 
   function show(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('on', v.id === id);
     $('btnRecal').classList.toggle('hidden', !(id === 'vPlay' && gotOri && !fallback));
+    if (id !== 'vPlay') hideHint();
   }
   function message(t, b) {
     mode = 'msg';
@@ -196,6 +204,7 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     const rg = rr.beta || 0;
     const rot = Math.hypot(rr.alpha || 0, rg, rr.gamma || 0);
     if (mode === 'play' && rot > 160) steering.freezeUntil = t + 400;
+    if (mode === 'play' && cueOn) cueMaxRot = Math.max(cueMaxRot, rot);
     const ag = e.accelerationIncludingGravity;
     const hasAg = ag && ag.x != null;
     const agDev = hasAg ? [ag.x || 0, ag.y || 0, ag.z || 0] : null;
@@ -229,10 +238,10 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     // 백스윙을 버린 뒤에는 회전이 한 번 잦아들어야(방향이 바뀌는 순간) 다시 잽니다.
     // 그래야 다음 창이 백스윙 끝이 아니라 앞스윙 시작에서 열립니다.
     if (rearm) {
-      if (rot < TRIGGER_DPS) rearm = false;
+      if (rot < ps.pick(TRIGGER_DPS)) rearm = false;
       return;
     }
-    if (rot > TRIGGER_DPS && t - lastTrig > ps.pick(COOLDOWN) && canSwing(t)) {
+    if (rot > ps.pick(TRIGGER_DPS) && t - lastTrig > ps.pick(COOLDOWN) && canSwing(t)) {
       swingWin = { t0: t, prevTrig: lastTrig, position: steering.mode === 'auto' ? null : round(steering.value, 3) };
       lastTrig = t;
       setTimeout(finishSwing, WINDOW_MS);
@@ -244,6 +253,9 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
   let lastTrig = -1e9;
   let rearm = false;
   let lastSwing = null; // { data, at }
+  let lastTapAt = -1e9;
+  let cueMaxRot = 0; // 이번 '지금!' 동안 가장 컸던 회전(휘둘렀는데 안 잡혔는지 가르는 데 씁니다)
+  let cueStartAt = 0;
 
   function canSwing(t) {
     if (!me) return false;
@@ -269,10 +281,12 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     const hasAcc = all.some((m) => m.accOk);
 
     // 힘: 회전 최고값과 가속 최고값
-    const rotN = clamp01((rotPeak - TRIGGER_DPS) / (ROT_FULL_DPS - TRIGGER_DPS));
+    const rotN = clamp01((rotPeak - 300) / (ROT_FULL_DPS - 300));
     const accN = clamp01(accPeak / ACC_FULL);
     // 가속 값을 주지 않는 기기는 회전만으로 힘을 정합니다.
-    const power = clamp(0.12 + 0.88 * (hasAcc ? 0.6 * rotN + 0.4 * accN : rotN), 0.1, 1);
+    let power = clamp(0.12 + 0.88 * (hasAcc ? 0.6 * rotN + 0.4 * accN : rotN), 0.1, 1);
+    // 쉬움·보통: 세게든 약하게든 안전한 가운데 깊이로 모읍니다(힘 조절을 가르칠 필요가 없게).
+    if (!isHard()) power = POWER_EASY[0] + (POWER_EASY[1] - POWER_EASY[0]) * clamp01((power - 0.12) / 0.88);
 
     // 기준축. 아직 자세를 안 맞췄으면 지금 방향으로 임시 기준을 만듭니다.
     const b = basis || (ori ? makeBasis(ori.top, ori.face) : null);
@@ -344,10 +358,12 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     const vertOk = Math.abs(vUp) >= VERT_MIN && Math.abs(vUp) >= VERT_RATIO * vH;
     // 백스윙: 세계 좌표 가속이 있는데(방향을 알 수 있는데) 탁구대 쪽으로도, 치는 면 쪽으로도 나가지 않았음.
     // 손목 비틀기는 원래 거의 제자리라 빼고 봅니다. 가속을 못 주는 기기는 가릴 수 없어 그대로 보냅니다.
-    if (nDir >= 2 && !twistOk && Math.max(vF, hitN ? vN : -Infinity) < FWD_MIN) {
+    if (nDir >= 2 && !twistOk && Math.max(vF, hitN ? vN : -Infinity) < ps.pick(FWD_MIN)) {
       lastTrig = w.prevTrig;
       rearm = true;
       debug(`backswing 무시: vF ${vF.toFixed(2)} vN ${vN.toFixed(2)} rot ${rotPeak.toFixed(0)}`);
+      // 뒤로 빼는 동작이면 정상이지만, 이어서 앞스윙이 없으면 알려 줍니다(조용히 씹히지 않게).
+      expectSwing(650, '더 크게!');
       return;
     }
     let spin = 'none';
@@ -377,21 +393,24 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
 
   // 센서 스윙과 버튼 스윙이 같은 길로 나갑니다.
   function deliverSwing(data) {
-    data = { ...data, hand: handOverride === 'auto' ? data.hand : handOverride, dominantHand, position: 'position' in data ? data.position : steering.mode === 'auto' ? null : round(steering.value, 3) };
+    // 쉬움·보통: 포·백핸드, 회전, 조준은 자동입니다. 어려움만 폰이 가린 값(또는 고른 손)을 그대로 보냅니다.
+    const hard = isHard();
+    if (!hard) data = { ...data, hand: 'auto', spin: 'none', spinAmt: 0, aim: ps.difficulty() === 'easy' ? 0 : data.aim };
+    data = { ...data, hand: !hard ? 'auto' : handOverride === 'auto' ? data.hand : handOverride, dominantHand, position: 'position' in data ? data.position : steering.mode === 'auto' ? null : round(steering.value, 3) };
     steering.freezeUntil = performance.now() + 550;
     if (steering.mode === 'tilt') steering.awaitCenter = true;
     lastSwing = { data, at: performance.now() };
     swish(data.power);
-    const label = swingLabel(data);
+    clearTimeout(expectTimer);
     // 연습 중이면 게임으로 보내지 않고 연습 판정에만 씁니다.
     if (tut.isRunning()) {
       haptics.hit(0.45 + 0.4 * data.power);
-      if (tutLive && tutLive.isConnected) tutLive.textContent = `감지: ${label}`;
       tut.signal('swing', { ...data, at: performance.now() - (data.ago || 0) });
       return;
     }
     const live = state.phase === 'playing' && myInfo();
     if (live && socket.connected) socket.emit('c2d', { event: 'swing', data });
+    const cueWas = cueOn;
     if (mode === 'play') {
       // 휘두르는 순간 바로 진동(지연 없음). 큰 화면이 맞혔다고 알려 오면 haptics 가 같은 진동을 한 번으로 합칩니다.
       haptics.hit(0.55 + 0.4 * data.power);
@@ -400,19 +419,44 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
       orb.classList.remove('hit');
       void orb.offsetWidth;
       orb.classList.add('hit');
-      setChips([['감지', label]]);
+      // 공이 오지 않았는데 휘두른 경우: 소리 없이 지나가지 않게 알려 줍니다.
+      if (!cueWas && state.phase === 'playing') giveHint('아직이에요');
     } else if (mode === 'wait') {
       haptics.tick();
-      $('practice').textContent = `연습 스윙: ${label}`;
+      $('practice').textContent = '좋아요!';
     }
   }
-  function swingLabel(d) {
-    let s = SPIN_NAME[d.spin] || '플랫';
-    if (d.spin === 'side') s += d.side > 0 ? '(오른쪽)' : '(왼쪽)';
-    const hand = d.hand === 'back' ? '백핸드' : d.hand === 'auto' ? '버튼' : '포핸드';
-    return `${s} · ${hand} · 힘 ${Math.round(d.power * 100)}%`;
+  // 누르기 스윙: 화면(원이나 '치기' 버튼)을 누르면 센서 없이도 같은 길로 칩니다. 모션 스윙과 두 번 잡히지 않게 간격을 둡니다.
+  function tapSwing() {
+    if (mode !== 'play') return;
+    const now = performance.now();
+    if (now - lastTapAt < TAP_GAP_MS || now - lastTrig < TAP_GAP_MS) return;
+    lastTapAt = now;
+    lastTrig = now;
+    audio();
+    presetSwing('flat');
   }
-  // 버튼 스윙: 손을 가릴 수 없으니 'auto'(공 쪽 손)로 보냅니다. 연습에서는 손을 정해 보냅니다.
+  // 힌트: 입력이 무시됐을 때 짧은 글과 진동 한 번
+  let hintTimer = null;
+  function giveHint(text) {
+    const el = $('hint');
+    el.textContent = text;
+    el.classList.remove('hidden');
+    haptics.tick();
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(hideHint, HINT_MS);
+  }
+  function hideHint() {
+    clearTimeout(hintTimer);
+    $('hint').classList.add('hidden');
+  }
+  // ms 안에 스윙이 나가지 않으면 힌트를 띄웁니다(공이 오는 중일 때만).
+  let expectTimer = null;
+  function expectSwing(ms, text) {
+    clearTimeout(expectTimer);
+    expectTimer = setTimeout(() => { if (mode === 'play' && cueOn) giveHint(text); }, ms);
+  }
+  // 버튼 스윙: 손을 가릴 수 없으니 'auto'(공 쪽 손)로 보냅니다.
   function presetSwing(kind, hand = 'auto') {
     const p = PRESETS[kind];
     if (!p) return;
@@ -439,14 +483,24 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
 
   // ---------- 소리·진동 ----------
   let actx = null;
+  let sfx = null;
   function audio() {
     if (!actx) {
       const AC = window.AudioContext || window.webkitAudioContext;
-      if (AC) actx = new AC();
+      if (AC) {
+        actx = new AC();
+        // 폰은 휘두를 때 나는 바람 소리 하나만 녹음으로 냅니다(미리 받는 파일 3개). 타구음은 큰 화면이 냅니다.
+        const out = actx.createGain();
+        out.gain.value = PHONE_GAIN;
+        out.connect(actx.destination);
+        sfx = createSamples(actx, out);
+        sfx.preload(['swing/swoosh-light']);
+      }
     }
     if (actx && actx.state === 'suspended') actx.resume();
     return actx;
   }
+  const PHONE_GAIN = 0.8; // 폰 효과음 전체 크기
   function tone(freq, dur, gain, type) {
     const a = audio();
     if (!a) return;
@@ -485,7 +539,12 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     noise(0.03, 3200, 1.4, 0.6);
   }
   const thud = () => tone(190, 0.18, 0.35, 'triangle');
-  const swish = (power) => noise(0.12, 900 + 900 * power, 0.7, 0.15 + 0.3 * power);
+  // 휘두르는 소리: 세게 휘두를수록 크고 높게. 녹음을 못 받았으면 예전 합성 바람 소리.
+  const swish = (power) => {
+    audio();
+    if (sfx && actx.state === 'running' && sfx.play('swing/swoosh-light', { gain: 0.5 + 0.5 * power, rate: 0.9 + 0.25 * power })) return;
+    noise(0.12, 900 + 900 * power, 0.7, 0.15 + 0.3 * power);
+  };
   // 진동 무늬(안드로이드). iPhone·PC 는 공통 haptics 가 화면 번쩍임 + 작은 소리로 바꿉니다.
   const buzz = (pattern) => haptics.buzz(pattern);
 
@@ -495,29 +554,26 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     clearInterval(countTimer);
     mode = 'cal';
     $('calN').classList.add('hidden');
-    $('calLegend').classList.remove('hidden');
     $('btnReady').classList.remove('hidden');
-    // 돌아갈 곳이 있을 때만 취소할 수 있습니다(경기 중인데 기준이 없으면 꼭 맞춰야 합니다).
-    $('btnCalCancel').classList.toggle('hidden', !(basis || state.phase !== 'playing' || !myInfo()));
-    $('calT').textContent = basis ? '다시 맞춥니다' : '탁구채처럼 쥡니다';
+    $('btnCalCancel').classList.remove('hidden');
+    $('calT').textContent = '자세 맞추기';
     $('btnReady').textContent = '자세 확인';
-    $('calB').textContent = '폰 아래쪽을 탁구채 손잡이처럼 쥐고,\n화면이 TV를 보게 한 뒤 자세 확인을 누릅니다.';
+    $('calB').textContent = '화면이 TV를 보게 쥐고 누르세요.';
     show('vCal');
   }
   function startCountdown() {
     if (!gotOri) {
-      $('calB').textContent = '방향 센서 값이 들어오지 않습니다.\n잠시 뒤 다시 눌러 주십시오.';
+      $('calB').textContent = '센서 값이 없어요. 잠시 뒤 다시 눌러요.';
       return;
     }
     mode = 'count';
     let n = 3;
     $('calN').textContent = n;
     $('calN').classList.remove('hidden');
-    $('calLegend').classList.add('hidden');
     $('btnReady').classList.add('hidden');
     $('btnCalCancel').classList.add('hidden');
-    $('calT').textContent = '그대로 멈추십시오';
-    $('calB').textContent = '탁구채를 쥔 자세 그대로, 화면이 TV를 보게 둡니다.';
+    $('calT').textContent = '그대로!';
+    $('calB').textContent = '';
     tick();
     haptics.tick();
     clearInterval(countTimer);
@@ -541,7 +597,7 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     if (!src.length) {
       if (quiet) return false;
       openCal();
-      $('calB').textContent = '방향 센서 값이 끊겼습니다.\n다시 준비를 눌러 주십시오.';
+      $('calB').textContent = '센서 값이 끊겼어요. 다시 눌러요.';
       return false;
     }
     const top = norm(src.reduce((a, o) => add(a, o.top), [0, 0, 0]));
@@ -557,12 +613,6 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     if (quiet) return true;
     buzz([30, 40, 30]);
     mode = 'idle';
-    if (setupPreReady) { setupPreReady = false; openSteering(); return true; }
-    // Ready first calibrates the paddle, then each player chooses lateral control.
-    if (pendingReady) {
-      if (!steering.configured) { openSteering(); return true; }
-      pendingReady = false; sendReady();
-    }
     render();
     return true;
   }
@@ -581,7 +631,7 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
       '좌우로 기울여 보고 움직임을 확인해요. 괜찮으면 적용을 눌러요.'
     ];
     const labels = ['가운데 확인', '왼쪽 확인', '오른쪽 확인', '적용'];
-    $('steerTitle').textContent = `좌우 조작 맞추기 ${Math.min(steering.stage + 1, 4)}/4`;
+    $('steerTitle').textContent = tr('좌우 조작 맞추기 {n}/4', { n: Math.min(steering.stage + 1, 4) });
     $('steerText').textContent = text[steering.stage];
     $('steerNext').textContent = labels[steering.stage];
     let value = 0;
@@ -618,7 +668,6 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     $('touchPosition').value = 0;
     emitPosition();
     mode = 'idle';
-    if (pendingReady) { pendingReady = false; sendReady(); }
     render();
   }
 
@@ -663,7 +712,7 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     $('scOpp').textContent = sc[1] != null ? sc[1] : 0;
     $('oppName').textContent = info.opp || '상대';
     $('scOpp').style.color = colorOf(info.opp) || '';
-    $('tableL').textContent = info.table ? `${info.table} 테이블` : '';
+    $('tableL').textContent = info.table ? tr('{table} 테이블', { table: info.table }) : '';
     $('ruleL').textContent = done ? '경기 끝' : info.serving ? '내 서브' : '상대 서브';
     $('srvMe').classList.toggle('on', !done && !!info.serving);
     $('srvOpp').classList.toggle('on', !done && !info.serving);
@@ -681,9 +730,7 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     const orb = $('orb');
     orb.classList.remove('cue');
     setOrb(info && info.serving ? '내 서브' : '준비');
-    $('status').textContent = info && info.serving
-      ? (state.slow ? '공이 떠올랐다 내려오며 느려질 때 휘두릅니다.' : '공이 떠올랐다 내려올 때 휘두릅니다.')
-      : (state.slow ? '공이 느려지면 타이밍을 맞춰 휘두릅니다.' : '공이 오면 링이 닫힐 때 휘두릅니다.');
+    $('status').textContent = '링이 닫힐 때 휘둘러요';
   }
   function clearCue() {
     clearTimeout(cueTimer);
@@ -693,8 +740,11 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
 
   function showPlay() {
     mode = 'play';
-    $('fallback').classList.toggle('hidden', !fallback);
+    $('fallbackHint').classList.toggle('hidden', !fallback);
     $('fallbackHint').textContent = fallbackReason();
+    // 회전 버튼은 센서가 없고 어려움일 때만, 포·백핸드 고르기는 어려움에서만 보입니다.
+    $('fallback').classList.toggle('hidden', !(fallback && isHard()));
+    $('handButtons').classList.toggle('hidden', !isHard());
     $('touchSteer').classList.toggle('hidden', steering.mode !== 'touch');
     idleOrb();
     show('vPlay');
@@ -702,7 +752,6 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
 
   // ---------- 준비(모두 준비하면 시작) ----------
   let readySt = null; // 서버 ready_state { ready, players, away, need }
-  let pendingReady = false; // 준비를 눌렀는데 자세를 먼저 맞추는 중
   let readySent = false; // 눌렀고 서버의 ready_state 를 아직 못 받음(바로 '준비 완료'로 보이게)
   const iAmReady = () => readySent || Boolean(me && readySt && Array.isArray(readySt.ready) && readySt.ready.includes(me.slot));
   function sendReady() {
@@ -719,7 +768,12 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     const over = state.phase === 'over';
     const done = iAmReady();
     btn.classList.toggle('done', done);
-    if (done) btn.innerHTML = '준비 완료 ✓<small>다른 사람을 기다려요</small>';
+    if (done) {
+      btn.textContent = tr('준비 완료 ✓');
+      const sm = document.createElement('small');
+      sm.textContent = tr('다른 사람을 기다려요');
+      btn.append(sm);
+    }
     else btn.textContent = over ? '다시 하기' : '준비';
     const row = $('readyRow');
     const st = readySt;
@@ -733,7 +787,7 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     row.innerHTML = list.map((x) => {
       const on = st.ready.includes(x);
       return `<span class="rp${on ? ' on' : ''}${away.includes(x) ? ' off' : ''}${x === me.slot ? ' self' : ''}" style="--pc:${COLORS[x] || '#fff'}">${x}P${on ? ' ✓' : ''}</span>`;
-    }).join('') + `<span class="rt">${notYet.length ? `아직 준비 전: ${notYet.map((x) => `${x}P`).join(' · ')}` : '모두 준비 완료'}</span>`;
+    }).join('') + `<span class="rt">${notYet.length ? tr('아직 준비 전: {list}', { list: notYet.map((x) => `${x}P`).join(' · ') }) : tr('모두 준비 완료')}</span>`;
     row.classList.remove('hidden');
   }
 
@@ -741,9 +795,8 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     mode = 'wait';
     const phase = state.phase;
     const chips = [];
-    if (roster.length) chips.push(['참가', `${roster.length}명`]);
+    if (roster.length) chips.push([tr('참가'), tr('{n}명', { n: roster.length })]);
     if (fallback) chips.push(['조작', '버튼']);
-    else if (gotOri) chips.push(['탁구채 자세', basis ? '맞춤' : '아직', basis ? 'ok' : '']);
     $('btnGo').style.display = '';
     $('setBox').classList.remove('hidden');
     // 내 경기는 끝났는데 다른 테이블이 아직 치는 중이면 결과를 보여 주고 기다립니다.
@@ -753,7 +806,7 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
       const tail = doneWaiting ? '다른 경기가 끝나기를 기다립니다.' : '모두 다시 하기를 누르면 한 판 더 합니다.';
       if (sc) {
         $('waitT').textContent = sc[0] > sc[1] ? '승리!' : sc[0] < sc[1] ? '패배' : '경기 끝';
-        $('waitB').textContent = `${sc[0]} : ${sc[1]}${info.opp ? ` (vs ${info.opp})` : ''}\n${tail}`;
+        $('waitB').textContent = `${sc[0]} : ${sc[1]}${info.opp ? ` (vs ${info.opp})` : ''}\n${tr(tail)}`;
       } else {
         $('waitT').textContent = '경기 끝';
         $('waitB').textContent = tail;
@@ -764,25 +817,21 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
       }
     } else if (phase === 'playing') {
       $('waitT').textContent = '관전 중';
-      $('waitB').textContent = '빈 자리가 있으면 다음 점수부터 합류해요. 자리가 모두 차면 다음 경기를 기다려요.';
+      $('waitB').textContent = '자리가 나면 다음 점수부터 합류해요.';
       $('btnGo').style.display = 'none';
       $('setBox').classList.add('hidden');
     } else {
       $('waitT').textContent = '대기실';
-      $('waitB').textContent = basis || fallback || !gotOri
-        ? '모두 준비를 누르면 시작합니다.'
-        : '모두 준비를 누르면 시작합니다.\n준비를 누르면 탁구채 자세부터 맞춥니다.';
+      $('waitB').textContent = '모두 준비를 누르면 시작해요.';
     }
     paintReady();
     setChips(chips, 'waitChips');
     const canCal = gotOri && !fallback;
     $('btnCalLobby').classList.toggle('hidden', !canCal || phase === 'playing');
-    $('btnCalLobby').textContent = basis ? '탁구채 자세 다시 맞추기' : '탁구채 자세 맞추기';
     $('btnSteerLobby').classList.toggle('hidden', phase === 'playing');
-    $('btnSteerLobby').textContent = steering.configured ? '좌우 조작 다시 맞추기' : '좌우 조작 맞추기';
-    const p = $('practice');
+    $('adv').classList.toggle('hidden', phase === 'playing');
     const recent = lastSwing && performance.now() - lastSwing.at < 4000;
-    if (!recent) p.textContent = basis && gotMotion && phase !== 'playing' ? '휘둘러 보면 감지한 스윙이 여기 뜹니다.' : '';
+    if (!recent) $('practice').textContent = '';
     show('vWait');
   }
 
@@ -793,10 +842,8 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     drawScore(info);
     if (mode === 'cal' || mode === 'count' || mode === 'steer') return;
     if (state.phase === 'playing' && info && !matchDone(info)) {
-      if (!basis && gotOri && !fallback) {
-        openCal();
-        return;
-      }
+      // 기준축은 따로 맞추지 않습니다. 비어 있으면 지금 자세로 조용히 잡습니다(다시 맞추기는 선택).
+      if (!basis && gotOri && !fallback) captureBasis(true);
       showPlay();
       return;
     }
@@ -804,21 +851,19 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
   }
 
   function fallbackReason() {
-    let why = '동작 센서가 없어 버튼으로 칩니다.';
-    if (!window.isSecureContext) why = 'https 주소가 아니라 동작 센서가 꺼져 있습니다. 버튼으로 칩니다.';
-    else if (permDenied) why = '동작 권한이 거절돼 버튼으로 칩니다.';
-    return `${why} (키보드: Space · T · B)`;
+    return '버튼으로 칩니다.';
   }
 
   function sensorsChanged() {
-    if (mode === 'play') $('fallback').classList.toggle('hidden', !fallback);
+    if (mode === 'play') { $('fallback').classList.toggle('hidden', !(fallback && isHard())); $('fallbackHint').classList.toggle('hidden', !fallback); }
     maybeTutorial();
-    maybeInitialSetup();
     render();
   }
 
   // ---------- 난이도·슬로우(큰 화면이 정하고, 아무 폰이나 바꿀 수 있음) ----------
   const ps = createPhoneSettings();
+  // 어려움에서만 포·백핸드, 회전, 조준을 직접 합니다(쉬움·보통은 자동).
+  const isHard = () => ps.difficulty() === 'hard';
   ps.attach(socket);
   ps.mount($('setBox'));
   // 슬로우 모드를 아직 아무도 안 정했으면 준비 버튼을 막고 질문 카드를 흔듭니다.
@@ -828,94 +873,7 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
 
   // ---------- 처음 하는 사람 연습(튜토리얼) ----------
   const HAND_KO = { fore: '포핸드', back: '백핸드' };
-  let tutLive = null; // 연습 단계 안의 '감지: …' 줄
   let tutChecked = false; // 처음 연습을 띄울지 이미 따져 봤는지
-  // 위에서 내려다본 그림: 탁구대 앞쪽 반, 나(머리·어깨), 탁구채(폰 옆면, 칠하는 쪽 = 공을 치는 면)
-  function strokeArt(hand) {
-    const fore = hand === 'fore';
-    const from = fore ? [152, 114, -34] : [58, 108, 38];
-    const to = fore ? [114, 70, 0] : [88, 70, 0];
-    const shoulder = [116, 132];
-    const ball0 = [96, 12];
-    const hit = [to[0] + (fore ? -2 : 2), to[1] - 8];
-    const kt = 'keyTimes="0;.36;.64;1" calcMode="spline" keySplines=".5 0 .3 1;0 0 1 1;.45 0 .45 1"';
-    const loop = 'dur="2s" repeatCount="indefinite"';
-    // 칠하는 면: 포핸드는 화면(내 색), 백핸드는 폰 뒷면(검은 고무)
-    const faceUp = fore ? 'fill="var(--pcgt-c)"' : 'fill="#3a4253"';
-    const faceDown = fore ? 'fill="#3a4253"' : 'fill="var(--pcgt-c)" opacity=".55"';
-    const arc = fore ? 'M158 122 Q154 80 120 66' : 'M52 116 Q54 80 82 66';
-    const end = fore ? [120, 66, -0.95, -0.35] : [82, 66, 0.95, -0.35];
-    const a = Math.atan2(end[3], end[2]);
-    const hd = (k) => `${(end[0] - 10 * Math.cos(a + k)).toFixed(1)} ${(end[1] - 10 * Math.sin(a + k)).toFixed(1)}`;
-    return `<svg class="pcgt-svg" viewBox="0 0 200 160" aria-hidden="true">` +
-      `<rect x="44" y="8" width="112" height="54" rx="3" fill="#1f4fa3" stroke="#fff" stroke-width="2"/>` +
-      `<path d="M100 10v50" stroke="#fff" stroke-width="1.2" opacity=".6"/>` +
-      `<path d="M34 8h132" stroke="#e8eef8" stroke-width="4" stroke-linecap="round"/>` +
-      `<text x="100" y="4" text-anchor="middle" fill="#9aa8bf" font-size="8" font-weight="800" letter-spacing="1">TV 쪽</text>` +
-      `<path class="pcgt-arc" d="${arc}"/><path class="pcgt-arrow" d="M${hd(0.5)} L${end[0]} ${end[1]} L${hd(-0.5)}"/>` +
-      `<circle r="4.2" fill="#fff"><animate attributeName="cx" values="${ball0[0]};${hit[0]};${ball0[0] - 14};${ball0[0] - 14}" ${kt} ${loop}/>` +
-      `<animate attributeName="cy" values="${ball0[1]};${hit[1]};${ball0[1] - 6};${ball0[1] - 6}" ${kt} ${loop}/>` +
-      `<animate attributeName="opacity" values="1;1;0;0" keyTimes="0;.36;.62;1" ${loop}/></circle>` +
-      `<ellipse cx="100" cy="138" rx="34" ry="12" fill="#26324a" stroke="rgba(255,255,255,.25)" stroke-width="1.5"/>` +
-      `<line x1="${shoulder[0]}" y1="${shoulder[1]}" stroke="#e2ae86" stroke-width="7" stroke-linecap="round">` +
-      `<animate attributeName="x2" values="${from[0]};${to[0]};${to[0]};${from[0]}" ${kt} ${loop}/>` +
-      `<animate attributeName="y2" values="${from[1] + 6};${to[1] + 6};${to[1] + 6};${from[1] + 6}" ${kt} ${loop}/></line>` +
-      `<circle cx="100" cy="133" r="12.5" fill="#e2ae86"/><path d="M90 128q10-8 20 0" stroke="#5a3a28" stroke-width="5" fill="none" stroke-linecap="round"/>` +
-      `<g><animateTransform attributeName="transform" type="translate" values="${from[0]} ${from[1]};${to[0]} ${to[1]};${to[0]} ${to[1]};${from[0]} ${from[1]}" ${kt} ${loop}/>` +
-      `<g><animateTransform attributeName="transform" type="rotate" values="${from[2]};${to[2]};${to[2]};${from[2]}" ${kt} ${loop}/>` +
-      `<rect x="-21" y="-6" width="42" height="12" rx="4" fill="#0b0f17" stroke="#fff" stroke-width="2.4"/>` +
-      `<rect x="-17" y="-6" width="34" height="4.2" rx="2" ${faceUp}/><rect x="-17" y="1.8" width="34" height="4.2" rx="2" ${faceDown}/>` +
-      `</g></g></svg>`;
-  }
-  // 탁구채처럼 쥐고 화면이 TV를 보게(옆에서 본 그림)
-  const gripArt = () => `<svg class="pcgt-svg" viewBox="0 0 200 160" aria-hidden="true">` +
-    `<rect x="132" y="22" width="56" height="38" rx="4" class="pcgt-tv"/><path d="M160 60v10M148 72h24" class="pcgt-tvs"/>` +
-    `<text x="160" y="46" text-anchor="middle" fill="#fff" font-size="12" font-weight="900">TV</text>` +
-    `<path class="pcgt-beam" d="M70 70L128 48"/>` +
-    `<g transform="translate(52 70)"><rect x="-12" y="-46" width="24" height="88" rx="7" class="pcgt-ph"/>` +
-    `<rect x="12" y="-40" width="5" height="70" rx="2" fill="var(--pcgt-c)"/>` +
-    `<path d="M-20 22c-7 7-7 26 3 34h28c8-8 8-27 0-34z" class="pcgt-hand"/></g>` +
-    `<text x="52" y="152" text-anchor="middle" fill="#9aa8bf" font-size="10" font-weight="800">손잡이처럼 아래를 쥐기</text>` +
-    `<circle cx="52" cy="70" r="30" class="pcgt-ring"><animate attributeName="r" values="30;52" dur="2.2s" repeatCount="indefinite"/>` +
-    `<animate attributeName="opacity" values=".6;0" dur="2.2s" repeatCount="indefinite"/></circle></svg>`;
-
-  // 회전 걸기(옆에서 본 그림): 왼쪽 = 드라이브(아래에서 위로 쓸어 올림, 공이 앞으로 구름),
-  // 오른쪽 = 커트(위에서 아래로 깎음, 공이 뒤로 돎). 왼쪽이 탁구대(상대) 쪽이고, 치는 면(내 색)이 공을 봅니다.
-  function spinArt() {
-    const loop = 'dur="1.8s" repeatCount="indefinite"';
-    const head = (x, y, dx, dy, len = 6) => {
-      const a = Math.atan2(dy, dx);
-      const p = (k) => `${(x - len * Math.cos(a + k)).toFixed(1)} ${(y - len * Math.sin(a + k)).toFixed(1)}`;
-      return `M${p(0.55)} L${x} ${y} L${p(-0.55)}`;
-    };
-    const panel = (ox, drive) => {
-      const col = drive ? '#ff9a4d' : '#8fd8ff';
-      const path = drive ? 'M80 140Q60 95 48 40' : 'M80 36Q62 78 46 132';
-      const tip = drive ? [48, 40, -12, -55] : [46, 132, -16, 54];
-      // 공 둘레 회전 화살표: 드라이브는 윗부분이 탁구대 쪽(왼쪽)으로, 커트는 반대로 돕니다.
-      const spin = drive
-        ? `<path d="M10 -6.6A12 12 0 0 0 -10 -6.6" fill="none" stroke="${col}" stroke-width="2.6" stroke-linecap="round"/>` +
-          `<path d="${head(-10, -6.6, -0.55, 0.84, 5)}" fill="none" stroke="${col}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`
-        : `<path d="M-10 -6.6A12 12 0 0 1 10 -6.6" fill="none" stroke="${col}" stroke-width="2.6" stroke-linecap="round"/>` +
-          `<path d="${head(10, -6.6, 0.55, 0.84, 5)}" fill="none" stroke="${col}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`;
-      return `<g transform="translate(${ox} 0)">` +
-        `<rect x="0" y="98" width="34" height="5" rx="1.5" fill="#1f4fa3" stroke="#fff" stroke-width="1.5"/>` +
-        `<path d="M12 104v32" stroke="#5a6478" stroke-width="3" stroke-linecap="round"/>` +
-        `<path d="${path}" fill="none" stroke="${col}" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="3 8" opacity=".85"/>` +
-        `<path d="${head(tip[0], tip[1], tip[2], tip[3], 8)}" fill="none" stroke="${col}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>` +
-        `<circle cx="50" cy="86" r="7" fill="#fff"/>` +
-        `<g transform="translate(50 86)"><g><animateTransform attributeName="transform" type="rotate" from="0" to="${drive ? -360 : 360}" dur=".9s" repeatCount="indefinite"/>${spin}</g></g>` +
-        `<g><animateMotion path="${path}" keyPoints="0;1;1" keyTimes="0;.55;1" calcMode="linear" ${loop}/>` +
-        `<animate attributeName="opacity" values="1;1;.15;1" keyTimes="0;.55;.9;1" ${loop}/>` +
-        `<g transform="rotate(${drive ? -24 : 30})"><rect x="-5" y="-22" width="10" height="44" rx="3.5" fill="#0b0f17" stroke="#fff" stroke-width="2"/>` +
-        `<rect x="-6.6" y="-17" width="3.2" height="30" rx="1.6" fill="var(--pcgt-c)"/>` +
-        `<rect x="-7.5" y="11" width="15" height="15" rx="5.5" fill="#e2ae86"/></g></g>` +
-        `<text x="50" y="157" text-anchor="middle" fill="${col}" font-size="13" font-weight="900">${drive ? '드라이브' : '커트'}</text></g>`;
-    };
-    return `<svg class="pcgt-svg" viewBox="0 0 200 160" aria-hidden="true">` +
-      `<path d="M100 16V146" stroke="rgba(255,255,255,.12)" stroke-width="1.5" stroke-dasharray="3 5"/>${panel(0, true)}${panel(100, false)}</svg>`;
-  }
-
   // 버튼 모드(센서 없음)에서 연습 단계를 마칠 수 있는 버튼들
   function fallbackButtons(stage, list) {
     const row = document.createElement('div');
@@ -933,11 +891,6 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
       row.append(b);
     }
     stage.append(row);
-  }
-  function liveLine(stage) {
-    tutLive = document.createElement('div');
-    tutLive.className = 'tut-live';
-    stage.append(tutLive);
   }
   // 링 타이밍 연습: 공이 다가오고 링이 줄어들어 공에 닿는 순간이 치는 순간입니다.
   const timing = { closeAt: 0, lastClose: -1e9 };
@@ -991,137 +944,34 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     return () => cancelAnimationFrame(raf);
   }
   function timingCheck(d) {
-    const tol = ps.pick({ easy: 340, normal: 250, hard: 150 });
+    const tol = ps.pick({ easy: 450, normal: 340, hard: 150 });
     const at = Number(d.at) || performance.now();
     const err = Math.abs(at - timing.closeAt) < Math.abs(at - timing.lastClose) ? at - timing.closeAt : at - timing.lastClose;
-    if (Math.abs(err) <= tol) return { ok: true, msg: Math.abs(err) <= tol / 3 ? 'PERFECT 타이밍!' : '좋은 타이밍이에요' };
-    return err < 0 ? '조금 빨라요 · 링이 공에 닿을 때 휘둘러요' : '조금 늦어요 · 링이 닫히는 순간이에요';
+    if (Math.abs(err) <= tol) return { ok: true, msg: Math.abs(err) <= tol / 3 ? 'PERFECT' : 'GOOD' };
+    return err < 0 ? '조금 빨라요' : '조금 늦어요';
   }
 
+  // 연습은 저절로 시작하지 않습니다. 대기실의 '튜토리얼 다시 하기' 링크로만 열고, 한 줄짜리 한 단계뿐입니다.
   const tut = createTutorial({
     key: 'pingpong',
     socket,
-    title: '처음이라 탁구 연습해 봐요',
+    title: '처음이라 연습해 봐요',
     steps: [
       {
-        title: '탁구채처럼 쥐기',
-        body: '폰 아래쪽을 손잡이처럼 쥐고 화면이 TV를 보게 들어요.',
-        svg: gripArt,
-        waitFor: 'calibrated',
-        hint: '자세를 맞추면 넘어가요',
-        okText: '기준을 맞췄어요',
-        render(stage, api) {
-          if (fallback || !gotOri) {
-            stage.innerHTML = '<p class="tut-note">이 폰은 동작 센서를 쓸 수 없어 버튼으로 칩니다.</p>';
-            const row = document.createElement('div');
-            row.className = 'tut-row';
-            const b = document.createElement('button');
-            b.type = 'button';
-            b.className = 'tut-btn';
-            b.textContent = '버튼으로 할게요';
-            b.addEventListener('click', () => api.ok('버튼으로 칩니다'));
-            row.append(b);
-            stage.append(row);
-            return null;
-          }
-          stage.innerHTML = '<div class="tut-count hidden"></div><div class="tut-row"><button type="button" class="tut-btn">이 자세로 맞추기</button></div>';
-          const cnt = stage.querySelector('.tut-count');
-          const row = stage.querySelector('.tut-row');
-          let timer = null;
-          stage.querySelector('.tut-btn').addEventListener('click', () => {
-            audio();
-            row.classList.add('hidden');
-            cnt.classList.remove('hidden');
-            let n = 3;
-            cnt.textContent = n;
-            tick();
-            haptics.tick();
-            timer = setInterval(() => {
-              n -= 1;
-              if (n > 0) {
-                cnt.textContent = n;
-                tick();
-                haptics.tick();
-                return;
-              }
-              clearInterval(timer);
-              cnt.classList.add('hidden');
-              if (captureBasis(true)) api.signal('calibrated', {});
-              else {
-                row.classList.remove('hidden');
-                api.fail('방향 센서 값이 끊겼어요. 다시 눌러 주세요');
-              }
-            }, 1000);
-          });
-          return () => clearInterval(timer);
-        }
-      },
-      {
-        title: '포핸드',
-        body: '화면 쪽 면으로 앞으로 휘둘러 포핸드를 연습해요.',
-        svg: () => strokeArt('fore'),
-        waitFor: 'swing',
-        hint: '포핸드로 휘둘러 보세요',
-        check: (d) => d.hand !== 'back' || '뒷면으로 쳤어요 · 화면이 TV 쪽을 보게 휘둘러요',
-        render(stage) {
-          if (fallback) fallbackButtons(stage, [['포핸드 스윙', 'flat', 'fore']]);
-          else liveLine(stage);
-          return null;
-        }
-      },
-      {
-        title: '백핸드',
-        body: '폰을 뒤집어 뒷면으로 밀어 백핸드를 연습해요.',
-        svg: () => strokeArt('back'),
-        waitFor: 'swing',
-        hint: '백핸드로 휘둘러 보세요',
-        check: (d) => d.hand === 'back' || '화면 쪽으로 쳤어요 · 손등이 TV를 보게 뒤집어요',
-        render(stage) {
-          if (fallback) fallbackButtons(stage, [['백핸드 스윙', 'flat', 'back']]);
-          else liveLine(stage);
-          return null;
-        }
-      },
-      {
         title: '링이 닫힐 때',
-        body: '링이 줄어들어 공에 닿는 순간 휘둘러요.',
+        body: '링이 닫힐 때 휘둘러요.',
         waitFor: 'swing',
-        hint: '링이 닫힐 때 휘두르기',
-        okText: '타이밍 좋아요!',
+        hint: '휘두르거나 치기를 눌러요',
+        okText: '좋아요!',
         check: (d) => timingCheck(d),
         render(stage) {
           const stop = timingStage(stage);
-          if (fallback) fallbackButtons(stage, [['스윙', 'flat', 'fore']]);
-          else liveLine(stage);
+          fallbackButtons(stage, [['치기', 'flat', 'auto']]);
           return stop;
-        }
-      },
-      {
-        title: '회전 걸기 (선택)',
-        body: '쓸어 올리면 드라이브, 깎아 내리면 커트예요.',
-        svg: spinArt,
-        waitFor: 'swing',
-        hint: '쓸어 올리거나 깎아 보세요',
-        check: (d) => (d.spin && d.spin !== 'none' ? { ok: true, msg: `${SPIN_NAME[d.spin]}! 회전이 걸렸어요` } : '회전 없이 쳤어요 · 아래에서 위로 쓸어 올려요'),
-        render(stage) {
-          if (fallback) fallbackButtons(stage, [['드라이브', 'top', 'fore'], ['커트', 'back', 'fore', true]]);
-          else liveLine(stage);
-          const skip = document.createElement('button');
-          skip.type = 'button';
-          skip.className = 'tut-skipone';
-          skip.textContent = '이번 건 넘어가기';
-          skip.addEventListener('click', () => tut.next());
-          stage.append(skip);
-          return null;
         }
       }
     ],
-    finish: { title: '연습 끝!', body: '이제 좌우 조작을 맞춘 뒤 준비해요.\n경기 중 공이 오면 폰에 "지금!"과 칠 손이 떠요.', button: '좋아요' },
-    onDone: () => {
-      tutLive = null;
-      maybeInitialSetup();
-      render();
-    }
+    onDone: () => render()
   });
   tut.link($('tutLink'), {
     // 내가 치는 경기 중에는 열지 않습니다(대기 화면에만 있는 링크라 보통은 안 보임).
@@ -1132,21 +982,10 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     if (tutChecked || !me || !(gotMotion || fallback)) return;
     if (mode === 'start' || mode === 'connecting' || mode === 'msg') return;
     tutChecked = true;
-    if (!tut.firstTime()) return;
-    // 경기 중인 내 자리로 다시 들어온 경우는 건너뜁니다(대기 화면의 링크로 언제든 할 수 있음).
+    if (!tut.firstTime()) return; // 주소에 ?tut=1 이 있을 때만(시험용)
     if (state.phase === 'playing' && myInfo() && !matchDone(myInfo())) return;
     clearCue();
     tut.run();
-  }
-  // Finish each player's setup before showing the lobby and its Ready button.
-  function maybeInitialSetup() {
-    if (!me || initialSetupDone || tut.isRunning() || mode === 'start' || mode === 'connecting' || mode === 'msg') return;
-    if (state.phase === 'playing') { initialSetupDone = true; return; }
-    if (!gotMotion && !sensorDiscoveryDone) return;
-    if (!gotOri && !sensorDiscoveryDone) return;
-    initialSetupDone = true;
-    if (gotOri && !fallback && !basis) { setupPreReady = true; openCal(); }
-    else openSteering();
   }
 
   // ---------- 소켓 ----------
@@ -1176,7 +1015,6 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     emitPosition();
     if (mode === 'connecting' || mode === 'msg') mode = 'idle';
     maybeTutorial();
-    maybeInitialSetup();
     render();
   });
   socket.on('players', (payload) => {
@@ -1214,7 +1052,6 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
       setChips([]);
       cueOn = false;
       clearTimeout(cueTimer);
-      pendingReady = false;
       if (mode === 'steer') mode = 'idle';
       // 내가 치는 경기가 시작됐는데 연습 화면이 떠 있으면 닫습니다(스윙이 경기로 가야 함).
       if (myInfo() && tut.isRunning()) tut.cancel();
@@ -1225,16 +1062,17 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
   socket.on('cue', (c) => {
     const kind = c && c.kind;
     // 칠 손: 몸 가운데로 오는 공(zone any)과 서브는 손을 따지지 않습니다.
-    const hand = c && kind !== 'serve' && c.zone !== 'any' && HAND_KO[c.hand] ? c.hand : null;
+    // 어려움에서만 칠 손을 알려 줍니다.
+    const hand = isHard() && c && kind !== 'serve' && c.zone !== 'any' && HAND_KO[c.hand] ? c.hand : null;
     cueOn = true;
+    cueMaxRot = 0;
+    cueStartAt = performance.now();
     clearTimeout(cueTimer);
     cueTimer = setTimeout(clearCue, CUE_MS);
     const orb = $('orb');
     setOrb('지금!', hand === 'back' ? '← 백핸드' : hand === 'fore' ? '포핸드 →' : '');
     orb.classList.add('cue');
-    $('status').textContent = kind === 'serve'
-      ? '서브! 공이 내려오는 타이밍에 휘두릅니다.'
-      : hand ? `공이 옵니다! 링이 닫힐 때 ${HAND_KO[hand]}로 휘두릅니다.` : '공이 옵니다! 링이 닫힐 때 휘두릅니다.';
+    $('status').textContent = hand ? tr('링이 닫힐 때 {hand}', { hand: HAND_KO[hand] }) : '링이 닫힐 때 휘둘러요';
     buzz(kind === 'serve' ? [25, 40, 25] : [45]);
     tick();
   });
@@ -1242,7 +1080,12 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
   socket.on('result', (r) => {
     r = r || {};
     const t = $('resT');
-    t.textContent = r.text || '';
+    // 큰 화면이 보낸 한국어 원문 조각(parts·reason·me·op)을 이 폰의 언어로 옮겨 붙입니다. 없으면 text 를 그대로 둡니다(DOM 이 번역).
+    if (r.kind === 'point' && r.reason != null) {
+      t.textContent = r.good ? tr('득점! {me} : {op}', { me: r.me, op: r.op }) : tr('실점 · {reason} {me} : {op}', { reason: r.reason, me: r.me, op: r.op });
+    } else if (Array.isArray(r.parts)) {
+      t.textContent = r.parts.map((x) => tr(x, r.vars || undefined)).join(' · ');
+    } else t.textContent = r.text || '';
     t.className = `t ${r.good ? 'good' : 'bad'}`;
     if (r.kind === 'early') {
       // 쉬움·보통: 너무 일찍 휘두른 스윙은 헛스윙이 아니라서 한 번 더 휘두르면 됩니다.
@@ -1251,7 +1094,7 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
       cueTimer = setTimeout(clearCue, CUE_MS);
       $('orb').classList.add('cue');
       setOrb('다시!', $('orbH').textContent);
-      $('status').textContent = '조금 빨랐어요. 링이 닫힐 때 한 번 더 휘두릅니다.';
+      $('status').textContent = '링이 닫힐 때 한 번 더';
       haptics.play('warn', 0.4);
       return;
     }
@@ -1259,15 +1102,18 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     const chips = [];
     const SPIN_KO = { top: '드라이브', back: '커트', side: '사이드 스핀', smash: '스매시' };
     if (r.spin) chips.push([SPIN_KO[r.spin] || r.spin, '']);
-    if (lastSwing && performance.now() - lastSwing.at < 1500) chips.push(['감지', swingLabel(lastSwing.data)]);
     setChips(chips);
+    // 휘두르지 않았거나 센서가 못 잡은 채 지나갔으면 다음엔 어떻게 하면 되는지 알려 줍니다.
+    if (r.kind === 'miss' && !(lastSwing && lastSwing.at >= cueStartAt)) {
+      giveHint(cueMaxRot > 40 ? '더 크게!' : '화면을 눌러도 쳐요');
+    }
     if (r.kind === 'point') {
       // 득점·실점: 진동 무늬로 바로 알 수 있게
       if (r.good) haptics.success();
       else haptics.fail();
     } else if (r.kind === 'hit') {
-      // 맞힌 진동은 큰 화면의 haptic 이 줍니다. 여기서는 '똑' 소리만.
-      pock();
+      // 맞힌 진동은 큰 화면의 haptic 이 줍니다. 타구음은 큰 화면의 실제 녹음이 내므로 폰은 녹음이 있으면 조용히 두고, 없을 때만 합성 '똑'.
+      if (!(sfx && sfx.has('swing/swoosh-light'))) pock();
     } else {
       thud();
     }
@@ -1302,7 +1148,6 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     show('vMsg');
     socket.connect();
     setTimeout(() => {
-      sensorDiscoveryDone = true;
       if (!gotMotion) {
         fallback = true;
         debug('동작 센서 값이 들어오지 않아 버튼으로 칩니다');
@@ -1318,20 +1163,12 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
       haptics.tick();
       return;
     }
-    if (!basis && gotOri && !fallback && state.phase !== 'playing') {
-      pendingReady = true;
-      openCal();
-      return;
-    }
-    if (!steering.configured && state.phase !== 'playing') {
-      pendingReady = true;
-      openSteering();
-      return;
-    }
+    // 자세는 따로 맞추지 않고 준비를 누른 그 자세로 잡습니다.
+    if (!basis && gotOri && !fallback && state.phase !== 'playing') captureBasis(true);
     sendReady();
   });
   $('dominantHand').addEventListener('change', (e) => { dominantHand = e.target.value === 'left' ? 'left' : 'right'; emitPosition(); });
-  $('btnSteerLobby').addEventListener('click', () => { pendingReady = false; openSteering(); });
+  $('btnSteerLobby').addEventListener('click', () => openSteering());
   $('steerNext').addEventListener('click', () => {
     if (steering.stage === 3) { finishSteering('tilt'); return; }
     const tilt = currentTilt();
@@ -1371,12 +1208,17 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
   });
   $('btnCalCancel').addEventListener('click', () => {
     clearInterval(countTimer);
-    pendingReady = false;
-    if (setupPreReady) { setupPreReady = false; openSteering(); return; }
     mode = 'idle';
     render();
   });
-  // 버튼 스윙은 손을 뗄 때가 아니라 누르는 순간 보냅니다(타이밍).
+  // 누르기 스윙(원·무대 어디든, 큰 '치기' 버튼): 모션과 같은 무게의 또 하나의 길입니다. 누르는 순간 보냅니다(타이밍).
+  for (const el of [document.querySelector('#vPlay .stage'), $('btnSwing')]) {
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      tapSwing();
+    });
+  }
+  // 센서 없는 어려움: 회전 버튼
   for (const btn of document.querySelectorAll('#fallback button')) {
     btn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
@@ -1385,8 +1227,10 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     });
   }
   document.addEventListener('keydown', (e) => {
-    if (!fallback || mode !== 'play' || e.repeat) return;
-    const k = e.code === 'Space' ? 'flat' : e.key === 't' || e.key === 'T' ? 'top' : e.key === 'b' || e.key === 'B' ? 'back' : null;
+    if (mode !== 'play' || e.repeat) return;
+    if (e.code === 'Space') { e.preventDefault(); tapSwing(); return; }
+    if (!fallback || !isHard()) return;
+    const k = e.key === 't' || e.key === 'T' ? 'top' : e.key === 'b' || e.key === 'B' ? 'back' : null;
     if (!k) return;
     e.preventDefault();
     audio();
@@ -1396,8 +1240,6 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
     if (!document.hidden && mode !== 'start' && navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
   });
 
-  if (!window.isSecureContext) $('httpNote').classList.remove('hidden');
-
   // ---------- 디버그 (&debug) ----------
   function debug(t) {
     if (DEBUG) $('debug').textContent = t;
@@ -1406,7 +1248,7 @@ import { tiltOffset, deltaAngle, validRange, positionFromAngle } from './steerin
   // 시험용: 콘솔·헤드리스에서 상태 보기와 스윙 넣기
   window.__ppc = {
     tut, ps, haptics, timing,
-    state: () => ({ mode, phase: state.phase, me: me && me.slot, basis: Boolean(basis), fallback, ready: iAmReady(), cue: cueOn, tut: tut.isRunning() ? tut.current() && tut.current().title : null, steering: { ...steering }, dominantHand, handOverride }),
+    state: () => ({ mode, hint: $('hint').textContent, phase: state.phase, me: me && me.slot, basis: Boolean(basis), fallback, ready: iAmReady(), cue: cueOn, tut: tut.isRunning() ? tut.current() && tut.current().title : null, steering: { ...steering }, dominantHand, handOverride }),
     swing: (o = {}) => deliverSwing({ power: 0.7, ago: 0, rtt: Math.round(rtt()), spin: 'none', spinAmt: 0, side: 1, aim: 0, hand: 'fore', ...o })
   };
   if (DEBUG) window.__ppc.debugOrientation = (alpha, beta, gamma) => onOrientation({ alpha, beta, gamma });

@@ -86,7 +86,7 @@ canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block;
 .chip.bot .st::after { content: " · BOT"; font-size: 11px; font-weight: 800; color: var(--dim); letter-spacing: 0.06em; }
 .chip.bot.s-bite .st::after, .chip.bot.s-fight .st::after { content: none; }
 .chip.away { opacity: 0.55; }
-.chip.away .st::after { content: " · 연결 끊김"; font-size: 12px; color: var(--dim); font-weight: 700; }
+.chip.away .st::after { content: " · " attr(data-away); font-size: 12px; color: var(--dim); font-weight: 700; }
 .chip.nib { border-color: var(--accent); }
 .chip.nib .st { color: var(--accent); animation: nibble 0.28s 3; }
 .chip.s-bite { background: rgba(214, 38, 32, 0.92); border-color: #fff; padding: 10px 22px 10px 10px; animation: pulse 0.32s infinite alternate; }
@@ -169,3 +169,14 @@ canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block;
   .board .bh .cols i, .board .row > span:not(.badge) { width: 50px; }
   .catch-fish { width: 220px; height: 130px; }
 }
+
+/* 언어 고르기: 아무도 없을 때만 오른쪽 아래에 */
+.langbox { position: fixed; right: 22px; bottom: 18px; zoom: var(--ui); z-index: 5; }
+/* 영어·일본어·중국어는 글자가 길어 왼쪽 난이도 칸(330px)에서 알약이 넘치므로 조금 더 촘촘하게 */
+html:not(:lang(ko)) .setbox .pcgs-panel { padding-right: 10px; }
+html:not(:lang(ko)) .setbox .pcgs-panel .pcgs-label { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html:not(:lang(ko)) .setbox .pcgs-panel .pcgs-pill { padding: 6px 6px; gap: 3px; font-size: 13px; white-space: nowrap; }
+html:not(:lang(ko)) .setbox .pcgs-panel kbd { margin-left: 3px; flex: none; }
+html:not(:lang(ko)) .chip .st { white-space: nowrap; }
+html:not(:lang(ko)) .setbox .pcgs-panel .pcgs-lv { display: none; }
+html:not(:lang(ko)) .setbox .pcgs-panel .pcgs-seg { min-width: 0; }

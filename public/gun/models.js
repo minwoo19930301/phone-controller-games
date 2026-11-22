@@ -1,6 +1,8 @@
 // 좀비 건 아케이드 모델: 좀비(걷는 사람·달리는 사람·덩치·변이체 보스)와 세 구역(폐허 거리 · 버려진 쇼핑몰 · 지하 주차장).
 // 외부 파일 없이 전부 기본 도형과 캔버스 그림으로 만듭니다. 길(레일)은 -Z 방향으로 곧게 뻗어 있습니다.
 import * as THREE from 'three';
+import { t as tr } from '/common/i18n.js';
+import './i18n.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
@@ -151,11 +153,17 @@ function textures() {
   return TX;
 }
 // 네온 간판: 글자를 빛나게 그린 판
-function signTex(text, color) {
+function signTex(ko, color) {
+  const text = tr(ko); // 간판 글자는 만들 때의 언어로 굽습니다(언어를 바꾸면 페이지를 새로 고칩니다)
   return canvasTex(512, 160, (g, w, h) => {
     g.fillStyle = '#07080c';
     g.fillRect(0, 0, w, h);
-    g.font = '800 92px "Pretendard Variable", Pretendard, sans-serif';
+    // 긴 영어 낱말도 판 안에 들어오게 글자 크기를 줄입니다
+    let px = 92;
+    g.font = `800 ${px}px "Pretendard Variable", Pretendard, sans-serif`;
+    const tw = g.measureText(text).width;
+    if (tw > w - 56) px = Math.max(40, Math.floor((px * (w - 56)) / tw));
+    g.font = `800 ${px}px "Pretendard Variable", Pretendard, sans-serif`;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.shadowColor = color;

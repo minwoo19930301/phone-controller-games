@@ -1,7 +1,7 @@
 // 줄다리기 시뮬레이션 단위 시험: node --test scripts/test-tugofwar.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Round, Match, assignTeams, CFG, mulberry32 } from '../public/tugofwar/sim.mjs';
+import { Round, Match, assignTeams, CFG, DIFF, mulberry32 } from '../public/tugofwar/sim.mjs';
 
 // 팀 구성을 직접 지정한 판(사람 3 대 사람 3, CPU 없음)
 function sixHumans(opts = {}) {
@@ -181,10 +181,11 @@ test('CPU: CPU 끼리 한 판이 끝까지 가고, 어려움이 쉬움보다 정
     const r = new Round({ seed: 3, difficulty: d, teams: assignTeams([]) });
     run(r, () => {}, 70);
     assert.equal(r.phase, 'done');
-    const s = r.teamStats('blue');
-    stats[d] = s.perfect / Math.max(1, s.pulls);
+    // 판정 창이 난이도마다 달라 PERFECT 비율로는 비교할 수 없으므로, 박에서 벗어난 평균 시간(작을수록 정확)으로 비교
+    const offs = r.events.filter((e) => e.type === 'judge' && !e.spam).map((e) => Math.abs(e.off)).filter((x) => x < 1);
+    stats[d] = offs.reduce((s2, x) => s2 + x, 0) / Math.max(1, offs.length);
   }
-  assert.ok(stats.hard > stats.easy, JSON.stringify(stats));
+  assert.ok(stats.hard < stats.easy, JSON.stringify(stats));
 });
 
 test('경기: 3판 2선승, 판마다 자리 교대', () => {
@@ -196,4 +197,31 @@ test('경기: 3판 2선승, 판마다 자리 교대', () => {
   assert.equal(m.sideOf('blue'), 'left');
   const e = m.endRound('white');
   assert.deepEqual([e.done, e.winner], [true, 'white']);
+});
+
+test('난이도 표: 쉬움이 가장 넉넉하고 어려움은 예전 값 그대로', () => {
+  assert.deepEqual(DIFF.easy.win, { perfect: 0.14, good: 0.26, off: 0.4 });
+  assert.deepEqual(DIFF.normal.win, { perfect: 0.1, good: 0.19, off: 0.3 });
+  assert.deepEqual(DIFF.hard.win, { perfect: 0.055, good: 0.12, off: 0.22 });
+  assert.ok(DIFF.easy.cost.spam < DIFF.hard.cost.spam && DIFF.easy.cost.miss < DIFF.hard.cost.miss);
+  assert.ok(DIFF.easy.recover > DIFF.hard.recover);
+  assert.equal(DIFF.hard.braceDanger, 0.6);
+  assert.equal(DIFF.hard.bpmSprint, 114);
+  // 기본(난이도를 안 주면)은 쉬움
+  assert.equal(new Round({ seed: 1 }).difficulty, 'easy');
+});
+
+test('쉬움: 연타해도 콤보가 끊기지 않고 체력이 덜 깎임', () => {
+  const mk = (d) => new Round({ seed: 7, difficulty: d, teams: { blue: [1, 2, 3], white: [4, 5, 6], size: 3, cpu: { blue: 0, white: 0 } } });
+  const e = mk('easy');
+  const n = mk('normal');
+  for (const r of [e, n]) {
+    const c = r.cycles[0];
+    r.t = c.pullAt;
+    r.pull('p1', c.pullAt, 1);
+    r.pull('p1', c.pullAt + 0.05, 1);
+  }
+  assert.equal(e.parts.get('p1').combo, 1);
+  assert.equal(n.parts.get('p1').combo, 0);
+  assert.ok(e.parts.get('p1').stamina > n.parts.get('p1').stamina);
 });

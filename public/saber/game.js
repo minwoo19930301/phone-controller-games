@@ -13,8 +13,11 @@ import { ROBOT_Z } from './robot.js';
 import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
 import { createTutorialBoard } from '/common/tutorial-board.js';
 import { sendHaptic } from '/common/haptics.js';
+import { t as tr, mountSwitcher } from '/common/i18n.js';
 
 const $ = (id) => document.getElementById(id);
+const scoreText = (n) => tr('{score}점', { score: n.toLocaleString('ko-KR') }); // 점수 한 줄(숫자 + 점)
+mountSwitcher($('langBox'), { reload: true, compact: true }); // 언어 고르기(대기실에서만 보임)
 const params = new URLSearchParams(location.search);
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const num = (v, d) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
@@ -25,8 +28,8 @@ const AUTOSTART = params.has('autostart');
 // 큰 화면이 값을 갖고(localStorage 'pcg-settings-saber'), 폰 대기 화면에도 같은 알약이 뜹니다. 경기 중에는 잠깁니다.
 // 주소로 시험: ?mode=duel|drone, ?difficulty=easy|normal|hard
 const MODES = {
-  duel: { label: '로봇 검투', lede: '폰을 칼자루처럼 쥐고, 로봇 검객이 예고한 쪽을 막은 뒤 비틀거릴 때 베세요.', eyebrow: 'DUEL COMPLETE', title: '검투 결과' },
-  drone: { label: '드론 훈련', lede: '폰을 칼자루처럼 쥐고 날아오는 광탄을 쳐내세요. 휘둘러 되받으면 드론이 떨어져요.', eyebrow: 'TRAINING COMPLETE', title: '훈련 결과' }
+  duel: { label: '로봇 검투', lede: '폰을 칼자루처럼 쥐고, 예고된 쪽으로 기울여 막고 비틀거리면 휘두르세요.', eyebrow: 'DUEL COMPLETE', title: '검투 결과' },
+  drone: { label: '드론 훈련', lede: '날아오는 광탄을 칼로 쳐내세요.', eyebrow: 'TRAINING COMPLETE', title: '훈련 결과' }
 };
 let booted = false; // 장면·상태가 다 만들어지기 전(글꼴 기다리는 중)에 설정이 바뀌어도 무시
 const settings = createSettings({
@@ -44,12 +47,12 @@ const settings = createSettings({
 // goodAng: 그냥 막기만 해도 튕긴 광탄이 드론으로 끌려가는 각도(쉬움은 넓게 = 거의 자동 조준, 방향은 어느 드론인지 고르는 정도)
 const DRONE_LEVEL = {
   easy: {
-    hitR: 0.3, guardR: 0.55, guardMs: 280, preMs: 820, postMs: 420, swingKill: 220, goodAng: 60, assistAng: 180,
+    hitR: 0.3, guardR: 0.55, guardMs: 280, preMs: 820, postMs: 420, swingKill: 180, goodAng: 90, assistAng: 180,
     speed: 0.7, charge: 1.4, gap: 1.4, dmg: 0.55, maxDrones: 3, slow: 0.28, slowLead: 0.56
   },
   normal: {
-    hitR: 0.21, guardR: 0.32, guardMs: 170, preMs: 650, postMs: 300, swingKill: 290, goodAng: 30, assistAng: 120,
-    speed: 0.85, charge: 1.15, gap: 1.15, dmg: 0.8, maxDrones: 4, slow: 0.32, slowLead: 0.48
+    hitR: 0.21, guardR: 0.45, guardMs: 240, preMs: 650, postMs: 300, swingKill: 240, goodAng: 30, assistAng: 120,
+    speed: 0.85, charge: 1.15, gap: 1.15, dmg: 0.65, maxDrones: 4, slow: 0.32, slowLead: 0.48
   },
   hard: {
     hitR: 0.13, guardR: 0, guardMs: 0, preMs: 500, postMs: 220, swingKill: 380, goodAng: 13, assistAng: 80,
@@ -165,7 +168,7 @@ socket.on('room', async (r) => {
   serverPlayers = r.players || [];
   // 서버가 다시 떠서 방이 새로 만들어졌으면 하던 경기는 이어 갈 수 없으니 대기실로 돌아갑니다.
   // (처음 받은 방은 늘 새 방이라 건너뜁니다. ?autostart 봇 경기가 먼저 시작돼 있을 수 있습니다.)
-  if (r.fresh && hadRoom && game.phase !== 'lobby') backToLobby('서버가 다시 시작돼서 대기실로 돌아왔어요');
+  if (r.fresh && hadRoom && game.phase !== 'lobby') backToLobby(tr('서버가 다시 시작돼서 대기실로 돌아왔어요'));
   hadRoom = true;
   $('code').textContent = r.code;
   $('codeMini').textContent = r.code;
@@ -340,6 +343,14 @@ function onSwing(d, local) {
   const speed = clamp(num(d.speed, 0), 0, 4000);
   P.swings.push({ real: now - lag, speed });
   if (P.swings.length > 12) P.swings.shift();
+  // 너무 약하게 휘두르면 조용히 무시하지 않고 폰에 '더 크게' 를 알립니다(0.8초에 한 번).
+  if (!local && !P.demo && !P.bot && game.phase === 'playing' && game.stage === 'live') {
+    const need = isDuel() ? (DUEL_LEVEL[levelOf(P)] || DUEL_LEVEL.normal).strikeMin : dl(P).swingKill;
+    if (speed < need && now - (P.weakAt || 0) > 800) {
+      P.weakAt = now;
+      send('hit', { kind: 'weak' }, P.slot);
+    }
+  }
   P.swingFx = Math.min(1, P.swingFx + speed / 900);
   // 이미 튕겨 나간 광탄 중 아직 격추 여부를 정하지 않은 것을 올려 줍니다.
   const L = dl(P);
@@ -366,7 +377,7 @@ function onCalibrate(d) {
     P.calibrated = true;
     P.qInit = false;
     P.pose = null;
-    if (game.phase === 'playing') hudNote(P, '칼 방향을 맞췄어요', 1400);
+    if (game.phase === 'playing' && game.stage === 'live') hudNote(P, tr('칼 방향을 맞췄어요'), 1400);
   }
   renderLobby();
 }
@@ -779,8 +790,8 @@ function deflect(P, b, cBolt, cBlade, tBlade, dtR, now) {
   if (P.demo) return;
   sfx.deflect(b.kill === true);
   P.shake = Math.max(P.shake, 0.35);
-  const lines = ['막기!', '튕겨냈어요!', '좋아요!', '막기!'];
-  hudCall(P, P.streak >= 3 ? `${P.streak} 연속!` : lines[P.deflects % lines.length], `+${DEFLECT_PTS}`, P.streak >= 5 ? 'streak' : 'good', 800);
+  const lines = ['막기!', '튕겨냈어요!', '좋아요!', '막기!']; // 쓸 때 t() 로 옮깁니다
+  hudCall(P, P.streak >= 3 ? tr('{n} 연속!', { n: P.streak }) : tr(lines[P.deflects % lines.length]), `+${DEFLECT_PTS}`, P.streak >= 5 ? 'streak' : 'good', 800);
   if (!P.bot) sendHit(P.slot, { kind: 'deflect' });
   pushState();
 }
@@ -799,7 +810,7 @@ function hurt(P, b, now) {
   hudHurt(P);
   if (!P.bot) sendHit(P.slot, { kind: 'hurt' });
   if (P.hp <= 0 && !P.down) knockDown(P, now);
-  else hudCall(P, '맞았어요', `체력 ${Math.ceil(P.hp)}`, 'bad', 700);
+  else hudCall(P, tr('맞았어요'), tr('체력 {hp}', { hp: Math.ceil(P.hp) }), 'bad', 700);
   pushState();
 }
 
@@ -817,8 +828,8 @@ function knockDown(P, now) {
   const i = viewIndex(P);
   if (isDuel()) {
     P.result = 'ko';
-    if (i >= 0) hud.banner(i, '패배', `${P.score.toLocaleString('ko-KR')}점`, `막기 ${P.parries} · 베기 ${P.strikes}`, 'bad');
-  } else if (i >= 0) hud.banner(i, '쓰러졌어요', `${P.score.toLocaleString('ko-KR')}점`, `막기 ${P.deflects} · 격추 ${P.kills}`, 'bad');
+    if (i >= 0) hud.banner(i, tr('패배'), scoreText(P.score), tr('막기 {a} · 베기 {b}', { a: P.parries, b: P.strikes }), 'bad');
+  } else if (i >= 0) hud.banner(i, tr('쓰러졌어요'), scoreText(P.score), tr('막기 {a} · 격추 {b}', { a: P.deflects, b: P.kills }), 'bad');
   pushState(true);
   if (allOut(now)) endRound(now);
 }
@@ -849,7 +860,7 @@ function killDrone(P, dr, b) {
   P.kills += 1;
   P.score += KILL_BONUS;
   sfx.kill();
-  hudToast(P, '격추!', `+${DEFLECT_PTS + KILL_BONUS}점 · ${P.kills}대째`, 'kill');
+  hudToast(P, tr('격추!'), tr('+{pts}점 · {n}대째', { pts: DEFLECT_PTS + KILL_BONUS, n: P.kills }), 'kill');
   if (!P.bot) sendHit(P.slot, { kind: 'kill' });
   pushState();
 }
@@ -1032,8 +1043,8 @@ const duel = createDuel({
   setBotDir, botSwing,
   onWin: (P, bonus) => {
     const i = viewIndex(P);
-    const t = Math.round(P.winAt);
-    if (i >= 0) hud.banner(i, '승리!', `${P.score.toLocaleString('ko-KR')}점`, `${t}초 만에 쓰러뜨림 · 보너스 +${bonus}`, 'good');
+    const sec = Math.round(P.winAt);
+    if (i >= 0) hud.banner(i, tr('승리!'), scoreText(P.score), tr('{t}초 만에 쓰러뜨림 · 보너스 +{b}', { t: sec, b: bonus }), 'good');
     sfx.win();
     if (allOut(performance.now())) endRound(performance.now());
   }
@@ -1045,7 +1056,7 @@ const mouse = { x: 0, y: 0, at: 0, cell: -1 };
 function takeOver(P) {
   // 폰 자세가 살아 있으면 폰이 우선입니다.
   if (!P || (P.pose && !P.pose.local && performance.now() - P.pose.at < 1000)) return false;
-  if (!P.manual) hudNote(P, '마우스로 조종 중 · Space 휘두르기 · A 자동 막기', 2200);
+  if (!P.manual) hudNote(P, tr('마우스로 조종 중 · Space 휘두르기 · A 자동 막기'), 2200);
   P.manual = true;
   P.manualAt = performance.now();
   return true;
@@ -1125,7 +1136,7 @@ window.addEventListener('keydown', (e) => {
     // 방향키: 칼을 그 쪽으로 세워 막기(← → 옆으로 기울이기, ↑ 눕혀서 위 막기, ↓ 가운데 세우기). 1.2초 동안 유지합니다.
     e.preventDefault();
     if (P.pose && !P.pose.local && performance.now() - P.pose.at < 1000) return;
-    if (!P.keyDir || P.keyUntil < performance.now()) hudNote(P, '방향키로 막는 중 · Space 휘두르기', 1600);
+    if (!P.keyDir || P.keyUntil < performance.now()) hudNote(P, tr('방향키로 막는 중 · Space 휘두르기'), 1600);
     P.keyDir = KEY_DIR[e.code];
     P.keyUntil = performance.now() + 1200;
     P.manual = false;
@@ -1133,7 +1144,7 @@ window.addEventListener('keydown', (e) => {
     // 자동 막기(봇)로 돌리기
     P.manual = false;
     P.autoplay = !P.autoplay || P.bot;
-    hudNote(P, P.autoplay ? '자동 막기 켜짐' : '자동 막기 꺼짐', 1200);
+    hudNote(P, tr(P.autoplay ? '자동 막기 켜짐' : '자동 막기 꺼짐'), 1200);
   }
 });
 
@@ -1240,7 +1251,7 @@ function startGame() {
   if (!settings.requireAnswered()) return;
   const list = lobbyPlayers().filter((p) => p.connected).slice(0, 4);
   if (!list.length) {
-    lobbyMessage('폰을 먼저 연결해 주세요. QR을 찍고 시작하기를 누르면 자리가 생겨요.');
+    lobbyMessage(tr('폰을 먼저 연결해 주세요. QR을 찍고 시작하기를 누르면 자리가 생겨요.'));
     return;
   }
   audio();
@@ -1300,8 +1311,8 @@ function goLive(now) {
   }
   sfx.go();
   sfx.ignite();
-  showCount('시작!', true);
-  if (isDuel()) for (const P of game.players) hudCall(P, (DUEL_TEXT[P.level] || DUEL_TEXT.normal), '예고된 쪽을 막고, 비틀거리면 베요', 'duelcall', 1800);
+  showCount(tr('시작!'), true);
+  if (isDuel()) for (const P of game.players) hudCall(P, tr(DUEL_TEXT[P.level] || DUEL_TEXT.normal), '', 'duelcall', 1800);
   pushState(true);
 }
 const DUEL_TEXT = { easy: '검투 · 쉬움', normal: '검투 시작', hard: '검투 · 어려움' };
@@ -1317,8 +1328,8 @@ function endRound(now) {
       duel.timeUp(P);
       if (!had && i >= 0) {
         const left = P.duel ? Math.ceil(P.duel.hp) : 0;
-        if (P.result === 'tw') hud.banner(i, '판정승', `${P.score.toLocaleString('ko-KR')}점`, `시간 끝 · 로봇 체력 ${left} 남음`, 'good');
-        else hud.banner(i, '판정패', `${P.score.toLocaleString('ko-KR')}점`, `시간 끝 · 로봇 체력 ${left} 남음`, 'bad');
+        if (P.result === 'tw') hud.banner(i, tr('판정승'), scoreText(P.score), tr('시간 끝 · 로봇 체력 {n} 남음', { n: left }), 'good');
+        else hud.banner(i, tr('판정패'), scoreText(P.score), tr('시간 끝 · 로봇 체력 {n} 남음', { n: left }), 'bad');
       }
       continue;
     }
@@ -1327,10 +1338,10 @@ function endRound(now) {
       dr.charge = 0;
       if (dr.alive) dr.d.setCharge(0);
     }
-    if (!P.down && i >= 0) hud.banner(i, '훈련 끝!', `${P.score.toLocaleString('ko-KR')}점`, `막기 ${P.deflects} · 격추 ${P.kills}`, 'good');
+    if (!P.down && i >= 0) hud.banner(i, tr('훈련 끝!'), scoreText(P.score), tr('막기 {a} · 격추 {b}', { a: P.deflects, b: P.kills }), 'good');
   }
   sfx.retract();
-  showCount('끝!', false);
+  showCount(tr('끝!'), false);
   pushState(true);
 }
 
@@ -1348,8 +1359,8 @@ function showResults() {
     result: P.result, parries: P.parries, strikes: P.strikes, robotHp: P.duel ? Math.ceil((P.duel.hp / P.duel.max) * 100) : null
   }));
   const m = MODES[game.mode] || MODES.duel;
-  $('overMeta').textContent = `${m.eyebrow} · ${DIFF_LABEL[settings.difficulty()] || ''}`;
-  $('overTitle').textContent = m.title;
+  $('overMeta').textContent = `${m.eyebrow} · ${tr(DIFF_LABEL[settings.difficulty()] || '')}`;
+  $('overTitle').textContent = tr(m.title);
   const box = $('podium');
   box.innerHTML = '';
   rows.forEach((P, k) => {
@@ -1362,17 +1373,17 @@ function showResults() {
       const r = P.result || 'tl';
       const rh = P.duel ? Math.ceil(P.duel.hp) : 0;
       e.innerHTML = who +
-        `<span class="res ${r}">${RESULT_TEXT[r]}${r === 'win' ? `<small>${Math.round(P.winAt)}초</small>` : ''}</span>` +
-        `<span class="num"><b>${P.parries}</b><span>막기</span></span>` +
-        `<span class="num"><b>${P.strikes}</b><span>베기</span></span>` +
-        `<span class="num"><b>${r === 'win' ? Math.ceil(P.hp) : r === 'ko' ? 'KO' : rh}</b><span>${r === 'win' ? '남은 체력' : r === 'ko' ? '쓰러짐' : '로봇 체력'}</span></span>` +
-        `<span class="num big"><b>${P.score.toLocaleString('ko-KR')}</b><span>점수</span></span>`;
+        `<span class="res ${r}">${tr(RESULT_TEXT[r])}${r === 'win' ? `<small>${tr('{n}초', { n: Math.round(P.winAt) })}</small>` : ''}</span>` +
+        `<span class="num"><b>${P.parries}</b><span>${tr('막기')}</span></span>` +
+        `<span class="num"><b>${P.strikes}</b><span>${tr('베기')}</span></span>` +
+        `<span class="num"><b>${r === 'win' ? Math.ceil(P.hp) : r === 'ko' ? 'KO' : rh}</b><span>${tr(r === 'win' ? '남은 체력' : r === 'ko' ? '쓰러짐' : '로봇 체력')}</span></span>` +
+        `<span class="num big"><b>${P.score.toLocaleString('ko-KR')}</b><span>${tr('점수')}</span></span>`;
     } else {
       e.innerHTML = who +
-        `<span class="num"><b>${P.deflects}</b><span>막기</span></span>` +
-        `<span class="num"><b>${P.kills}</b><span>격추</span></span>` +
-        `<span class="num"><b>${P.down ? 'KO' : Math.ceil(P.hp)}</b><span>${P.down ? '쓰러짐' : '남은 체력'}</span></span>` +
-        `<span class="num big"><b>${P.score.toLocaleString('ko-KR')}</b><span>점수</span></span>`;
+        `<span class="num"><b>${P.deflects}</b><span>${tr('막기')}</span></span>` +
+        `<span class="num"><b>${P.kills}</b><span>${tr('격추')}</span></span>` +
+        `<span class="num"><b>${P.down ? 'KO' : Math.ceil(P.hp)}</b><span>${tr(P.down ? '쓰러짐' : '남은 체력')}</span></span>` +
+        `<span class="num big"><b>${P.score.toLocaleString('ko-KR')}</b><span>${tr('점수')}</span></span>`;
     }
     box.appendChild(e);
     if (!P.bot) {
@@ -1495,20 +1506,21 @@ function renderLobby() {
   const box = $('slots');
   if (!box) return;
   const list = lobbyPlayers();
+  const away = ` · ${tr('연결 끊김')}`; // CSS 가닥(::after)에 쓰는 번역 글자
   const st = readyState;
   const practicing = new Set(board.practicing ? board.practicing() : []);
   let html = '';
   for (let s = 1; s <= 4; s++) {
     const p = list.find((x) => x.slot === s);
     if (!p) {
-      html += `<div class="slot">${s}P 비어 있음</div>`;
+      html += `<div class="slot">${tr('{s}P 비어 있음', { s })}</div>`;
       continue;
     }
     const ready = p.bot || Boolean(st && Array.isArray(st.ready) && st.ready.includes(s));
     const prac = !p.bot && !ready && practicing.has(s);
-    const sub = p.bot ? 'BOT' : ready ? '준비 완료 ✓' : prac ? '연습 중' : '준비 전';
+    const sub = p.bot ? 'BOT' : tr(ready ? '준비 완료 ✓' : prac ? '연습 중' : '준비 전');
     const cls = 'slot on' + (!p.connected ? ' away' : '') + (ready ? ' ready' : '') + (prac ? ' prac' : '');
-    html += `<div class="${cls}" style="--c:${p.color}"><b>${p.name}</b><small>${sub}</small></div>`;
+    html += `<div class="${cls}" style="--c:${p.color};--away:'${away}'"><b>${p.name}</b><small>${sub}</small></div>`;
   }
   if (box.innerHTML !== html) box.innerHTML = html;
 }
@@ -1758,7 +1770,7 @@ function tick() {
         sfx.wave();
         for (const P of game.players) {
           if (P.down) continue;
-          hudCall(P, `WAVE ${wave}`, '드론이 더 빨라져요', 'wavecall', 1600);
+          hudCall(P, `WAVE ${wave}`, '', 'wavecall', 1600);
           const i = viewIndex(P);
           if (i >= 0) hud.wave(i);
           topUpDrones(P);
@@ -1793,7 +1805,7 @@ function tick() {
     const humans = game.players.filter((P) => !P.bot);
     if (humans.length && !anyHuman && !game.players.some((P) => P.bot)) {
       if (!game.allGoneSince) game.allGoneSince = now;
-      if (now - game.allGoneSince > 20000) backToLobby('모든 폰의 연결이 끊겨 대기실로 돌아왔어요');
+      if (now - game.allGoneSince > 20000) backToLobby(tr('모든 폰의 연결이 끊겨 대기실로 돌아왔어요'));
     } else game.allGoneSince = 0;
   }
 
@@ -1833,7 +1845,7 @@ function tick() {
       const P = game.players.find((x) => x.key === v.key);
       hud.player(i, {
         score: P.score, hp: P.hp, streak: P.streak, wave: game.wave, time: timeText, urgent: game.stage === 'live' && left <= 10, away: P.away, down: P.down,
-        tag: P.duel ? `DUEL · ${DIFF_LABEL[P.level] || ''}` : null
+        tag: P.duel ? `DUEL · ${tr(DIFF_LABEL[P.level] || '')}` : null
       });
       const slowAmt = clamp((1 - P.clock.scale) / (1 - SLOW), 0, 1);
       hud.slow(i, slowAmt);
@@ -1842,7 +1854,7 @@ function tick() {
       // 아직 폰 자세가 안 들어오는 사람에게 안내
       if (!P.bot && !P.autoplay && !P.manual && game.stage !== 'end' && !P.down) {
         const fresh = P.pose && now - P.pose.at < 1500;
-        hud.hint(i, P.away ? '연결이 끊겼어요. 폰을 다시 켜 주세요' : fresh || P.keyUntil > now ? '' : '폰을 칼자루처럼 쥐면 칼이 폰을 따라 움직여요');
+        hud.hint(i, P.away ? tr('연결이 끊겼어요. 폰을 다시 켜 주세요') : fresh || P.keyUntil > now ? '' : tr('폰을 움직여 보세요'));
       } else hud.hint(i, '');
     });
   }
@@ -1853,8 +1865,6 @@ booted = true;
 applyModeCopy();
 startDemo();
 renderLobby();
-const roundEl = $('ruleRound');
-if (roundEl) roundEl.textContent = String(ROUND_S);
 requestAnimationFrame(tick);
 // ?autostart 는 봇만 있고 폰이 없을 때만(폰이 있으면 모두 준비로만 시작)
 if (AUTOSTART && BOTS > 0) setTimeout(() => { if (!serverPlayers.length) startGame(); }, 1500);

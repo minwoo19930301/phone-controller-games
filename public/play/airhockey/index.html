@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0b0918">
 <title>에어하키 컨트롤러</title>
+<script src="/common/i18n-wait.js"></script>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
 <style>
@@ -16,14 +17,14 @@
   body { display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top) + 8px) 14px calc(env(safe-area-inset-bottom) + 12px);
     background: radial-gradient(120% 55% at 50% 0%, color-mix(in srgb, var(--c) 20%, transparent), transparent 70%),
       radial-gradient(90% 40% at 50% 100%, rgba(124, 92, 255, .18), transparent 70%), var(--bg); }
-  header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none; }
+  header { display: flex; align-items: center; gap: 10px; height: 52px; flex: none; }
   .me { font-family: Anton, Impact, sans-serif; font-size: 26px; padding: 2px 14px; border-radius: 999px; background: var(--c); color: #0b0f17; }
   .room { flex: 1; color: var(--dim); font-size: 13px; letter-spacing: .1em; }
-  .flip { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); color: var(--fg); border: 1.5px solid var(--line);
-    font-size: 13px; font-weight: 800; }
+  .flip { min-height: 48px; min-width: 48px; padding: 10px 16px; border-radius: 14px; background: rgba(255,255,255,.07); color: var(--fg); border: 1.5px solid var(--line);
+    font-size: 15px; font-weight: 800; }
   .flip.on { border-color: var(--c); color: var(--c); }
   .hidden { display: none !important; }
-  .banner { margin: 6px 0 0; padding: 9px 12px; border-radius: 12px; background: rgba(255,90,95,.14); color: #ffb3b5; font-size: 13px; text-align: center; flex: none; }
+  .banner { margin: 6px 0 0; padding: 9px 12px; border-radius: 12px; background: rgba(255,90,95,.14); color: #ffb3b5; font-size: 14px; text-align: center; flex: none; }
   main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
   .view.on { display: flex; }
@@ -47,7 +48,7 @@
   .score { flex: none; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 6px; margin: 6px 0 8px;
     padding: 8px 12px; border-radius: 18px; background: rgba(255,255,255,.05); border: 1px solid var(--line); }
   .score .s { display: flex; flex-direction: column; align-items: center; gap: 1px; }
-  .score .s span { font-size: 12px; color: var(--dim); font-weight: 800; white-space: nowrap; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; }
+  .score .s span { font-size: 14px; color: var(--dim); font-weight: 800; white-space: nowrap; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; }
   .score .s b { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 40px; line-height: 1.05; }
   .score .s.mine b { color: var(--t); }
   .score .s.opp b { color: var(--o); }
@@ -62,10 +63,10 @@
   .over b { font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 84px; color: #fff; letter-spacing: .02em;
     text-shadow: 0 0 24px var(--c), 0 6px 30px rgba(0,0,0,.6); -webkit-text-stroke: 2px var(--c); }
   .over.bad b { -webkit-text-stroke: 0; color: #e8e6f2; font-family: inherit; font-weight: 900; font-size: 56px; text-shadow: 0 6px 30px rgba(0,0,0,.7); }
-  .status { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px;
-    background: rgba(11,9,24,.78); border: 1px solid var(--line); font-weight: 800; font-size: 14px; white-space: nowrap; pointer-events: none; }
+  .status { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); padding: 8px 16px; border-radius: 999px;
+    background: rgba(11,9,24,.78); border: 1px solid var(--line); font-weight: 800; font-size: 16px; white-space: nowrap; pointer-events: none; }
   .status:empty { display: none; }
-  .tip { flex: none; text-align: center; font-size: 13px; color: var(--dim); margin-top: 8px; min-height: 18px; }
+  .tip { flex: none; text-align: center; font-size: 16px; color: var(--dim); margin-top: 8px; min-height: 18px; }
   .tools { flex: none; display: flex; gap: 8px; margin-top: 8px; }
   .tools button { flex: 1; padding: 11px; border-radius: 14px; background: rgba(255,255,255,.07); color: var(--fg); border: 1.5px solid var(--line);
     font-size: 14px; font-weight: 800; }
@@ -90,17 +91,18 @@
     align-items: center; justify-content: center; gap: 3px; background: var(--c); color: #0b0f17; border: 2px solid var(--c);
     box-shadow: 0 12px 34px color-mix(in srgb, var(--c) 35%, transparent); transition: transform .12s, background .25s, color .25s, box-shadow .25s; }
   .ready-btn b { font-size: 26px; font-weight: 900; letter-spacing: -.02em; line-height: 1.1; }
-  .ready-btn small { font-size: 13px; font-weight: 700; opacity: .72; }
+  .ready-btn small { font-size: 15px; font-weight: 700; opacity: .72; }
   .ready-btn:active { transform: scale(.98); }
   .ready-btn.done { background: color-mix(in srgb, var(--c) 14%, #0e0c1c); color: var(--fg); box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 22%, transparent);
     animation: readyPulse 1.6s ease-in-out infinite; }
   .ready-btn.done b { color: #9dffb5; }
   .ready-btn.done small { opacity: .85; color: var(--dim); }
   @keyframes readyPulse { 50% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--c) 12%, transparent); } }
-  .go-note { min-height: 18px; margin-top: -6px; text-align: center; font-size: 13px; font-weight: 700; color: #ffcf8a; }
+  .go-note { min-height: 18px; margin-top: -6px; text-align: center; font-size: 15px; font-weight: 700; color: #ffcf8a; }
   .go-note:empty { display: none; }
   .tut-link { display: flex; justify-content: center; margin-top: -6px; }
   body.roster-on #readyBar { display: none !important; }
+  .lang-box { display: flex; justify-content: center; margin-top: 4px; }
   .debug { position: fixed; left: 8px; bottom: calc(env(safe-area-inset-bottom) + 2px); font: 11px ui-monospace, monospace; color: rgba(255,255,255,.4); pointer-events: none; }
   .flash { animation: flash .45s; }
   @keyframes flash { from { box-shadow: inset 0 0 0 6px var(--c), 0 0 40px var(--c); } }
@@ -127,9 +129,9 @@
       <path d="M85 104l13-42" stroke="var(--c)" stroke-width="2" stroke-dasharray="3 5"/>
     </svg>
     <h1>폰이 말렛이 됩니다</h1>
-    <p>화면을 엄지로 누르고 끌면
-큰 화면의 내 말렛이 그대로 따라와요.</p>
+    <p>엄지로 끌어서 퍽을 쳐요.</p>
     <button class="primary" id="btnStart" style="margin-top:10px">시작하기</button>
+    <div class="lang-box" id="langBox"></div>
   </section>
 
   <!-- 메시지 -->
@@ -164,7 +166,7 @@
       <div class="status" id="status"></div>
       <div class="over" id="over"><b id="overT">골!</b></div>
     </div>
-    <div class="tip" id="tip">엄지로 끌어서 말렛을 움직여요</div>
+    <div class="tip" id="tip">엄지로 끌어요</div>
     <div class="tools hidden" id="tools">
       <button id="btnAuto">자동 움직이기(시험)</button>
     </div>
@@ -173,6 +175,9 @@
 <div class="debug" id="debug"></div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<!-- 사전 모듈을 먼저 둡니다: 이 모듈이 공통 사전을 함께 불러, 첫 번역 전에 두 사전이 모두 등록됩니다 -->
+<script type="module" src="/airhockey/i18n.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
 <script type="module" src="controller.js"></script>
 </body>
 </html>

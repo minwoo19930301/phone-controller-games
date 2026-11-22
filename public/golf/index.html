@@ -11,7 +11,7 @@
 <script type="importmap">
 { "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
 </script>
-<style>/* 대기실 설명은 한 줄만 */ .lobby-copy .steps, .lobby-copy .spins, .lobby-copy .rules { display: none !important; } .golf-options {display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.golf-options label{display:flex;gap:8px;align-items:center;color:#dceadf;font-weight:700}.golf-options select{max-width:290px;padding:9px;border:1px solid #668172;border-radius:8px;background:#102b1d;color:#fff;font:inherit}</style>
+<style>.setbox{margin:14px 0;max-width:680px}.golf-options {display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.golf-options label{display:flex;gap:8px;align-items:center;color:#dceadf;font-weight:700}.golf-options select{max-width:290px;padding:9px;border:1px solid #668172;border-radius:8px;background:#102b1d;color:#fff;font:inherit}</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
@@ -43,7 +43,7 @@
 <div id="live" class="live"></div>
 <div id="pinTag" class="pin-tag"></div>
 <button id="showAnalysis" hidden style="position:fixed;right:20px;bottom:20px;z-index:100;padding:12px;border-radius:10px;border:0;background:#d4f36b;font-weight:800">스윙 분석 · 다시보기</button>
-<dialog id="analysisDialog" style="width:96vw;max-width:1300px;max-height:96vh;background:#10241a;color:white;border:0;border-radius:20px;overflow:auto"><button id="closeAnalysis" style="float:right;padding:8px">닫기</button><p>센서와 자세 모델로 계산한 추정치입니다. 실제 궤도·구질과 다를 수 있어요.</p><div id="analysisPanel"></div></dialog>
+<dialog id="analysisDialog" style="width:96vw;max-width:1300px;max-height:96vh;background:#10241a;color:white;border:0;border-radius:20px;overflow:auto"><button id="closeAnalysis" style="float:right;padding:8px">닫기</button><div id="analysisPanel"></div></dialog>
 
 <div id="shotPanel" class="shot">
   <div class="stat"><span>클럽 스피드</span><b id="sClub">-</b><small>km/h</small></div>
@@ -59,25 +59,12 @@
     <div class="lobby-copy">
       <div class="eyebrow">PHONE CONTROLLER GAMES · 3 HOLES</div>
       <h1 class="wordmark">PHONE<br>GOLF</h1>
-      <p class="lede">폰을 골프채처럼 휘둘러 티샷부터 퍼팅까지 즐겨요.</p>
+      <p class="lede">폰을 골프채처럼 휘두르세요.</p>
       <p class="lede"><a href="/golf/nearpin.html" style="color:#d4f36b">니어핀 모드 →</a> &nbsp; <a href="/golf/putting/" style="color:#d4f36b">퍼팅 챌린지 →</a></p>
-      <div class="golf-options"><label>코스 <select id="courseChoice"></select></label><label>난이도 <select id="difficultyChoice"><option value="easy">쉬움</option><option value="normal" selected>보통</option><option value="hard">어려움</option></select></label></div>
-      <ol class="steps">
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 34c6-14 26-14 32 0"/><path d="M24 34V12"/><path d="M24 12l8 3-8 3"/><path d="M14 30l-4 6M34 30l4 6"/></svg>
-          <div><b>터치로 방향</b><span>폰 화면을 좌우로 밀어 조준하고 클럽을 골라요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="19" y="4" width="11" height="20" rx="3"/><path d="M24.5 24v18"/><path d="M18 42h13"/></svg>
-          <div><b>그립처럼 쥐고 어드레스</b><span>폰 윗부분이 공을, 화면이 목표를 보게 해요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M10 38C8 22 18 8 34 8"/><path d="M34 8l-6-2M34 8l-3 6"/><circle cx="38" cy="38" r="3"/></svg>
-          <div><b>실제처럼 스윙</b><span>백스윙부터 피니시까지 그대로 따라가요.</span></div>
-        </li>
-      </ol>
+      <div class="golf-options"><label>코스 <select id="courseChoice"></select></label></div>
+      <div class="setbox" id="setBox"></div>
       <div class="slots" id="slots"></div>
-      <div class="hint"><kbd>Enter</kbd> 게임 시작 <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
+      <div class="hint"><kbd>Enter</kbd> 게임 시작</div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">

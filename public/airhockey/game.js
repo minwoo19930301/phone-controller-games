@@ -2,9 +2,14 @@
 // 서버는 방과 이벤트만 중계하고 판정은 모두 여기서 합니다.
 import { createScene } from './scene.js';
 import { RINK, createSim, tuneSim, addMallet, placePuck, step, aiTarget, padRegionOf, homeOf, clamp } from './physics.js';
-import { sfx, audio, setHum, setQuiet } from './sfx.js';
+import { sfx, audio, setHum, setQuiet, preloadSamples } from './sfx.js';
+
 import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
 import { createTutorialBoard } from '/common/tutorial-board.js';
+import { t, mountSwitcher } from '/common/i18n.js';
+// 대기실에서 이 종목 녹음을 미리 받고, 소리가 꺼져 있으면 안내 칩을 띄웁니다.
+preloadSamples();
+document.addEventListener('visibilitychange', () => { if (document.hidden) setHum(0); });
 
 const TARGET = 7; // 7점 먼저
 const SLOT_INFO = {
@@ -25,12 +30,12 @@ const SKILL = {
   demo: { maxV: 2.7, aimErr: 0.07, defErr: 0.08, aggro: 0.7, think: 0.09 },
   partner: { maxV: 2.35, aimErr: 0.08, defErr: 0.1, aggro: 0.6, think: 0.11 } // 사람과 같은 팀인 CPU(3명일 때): 난이도와 상관없이 든든하게
 };
-// 난이도. 예전 값이 '어려움'이고, 보통·쉬움은 퍽이 느리고(최고 속도↓, 감속↑) 골문이 넓고 상대 CPU 가 굼뜹니다.
+// 난이도. 어려움은 예전 그대로입니다. 보통은 예전 '쉬움' 값이고, 쉬움(기본)은 그보다 퍽이 더 느리고 골문이 더 넓고 겨냥 도움이 크고 상대 CPU 가 더 굼뜹니다.
 // assist: 사람이 상대 쪽으로 친 퍽을 골문 쪽으로 꺾어 주는 비율(physics.js assistAim). 벽 맞혀 꺾어 넣기는 그대로 살립니다.
 const DIFF = {
-  easy: { goal: 0.42, maxPuck: 4.3, friction: 0.3, assist: 0.5, cpu: { maxV: 1.65, aimErr: 0.14, defErr: 0.17, aggro: 0.4, think: 0.16 } },
-  normal: { goal: 0.38, maxPuck: 5.3, friction: 0.2, assist: 0.28, cpu: { maxV: 2.1, aimErr: 0.1, defErr: 0.12, aggro: 0.55, think: 0.125 } },
-  hard: { goal: RINK.GOAL, maxPuck: 6.5, friction: 0.14, assist: 0, cpu: SKILL.cpu }
+  easy: { goal: 0.48, maxPuck: 3.8, friction: 0.4, assist: 0.8, lift: 34, cpu: { maxV: 1.3, aimErr: 0.2, defErr: 0.24, aggro: 0.3, think: 0.2 } },
+  normal: { goal: 0.42, maxPuck: 4.3, friction: 0.3, assist: 0.5, lift: 26, cpu: { maxV: 1.65, aimErr: 0.14, defErr: 0.17, aggro: 0.4, think: 0.16 } },
+  hard: { goal: RINK.GOAL, maxPuck: 6.5, friction: 0.14, assist: 0, lift: 0, cpu: SKILL.cpu }
 };
 const DIFF_TONE = { easy: '#5ee07a', normal: '#8fd8ff', hard: '#ff7a59' };
 
@@ -56,7 +61,7 @@ let serverPlayers = [];
 // 난이도: 큰 화면이 값을 갖고(이 화면 localStorage 에 기억) 폰 대기실·키보드 D 로 바꿉니다. 경기 중에는 잠급니다.
 const settings = createSettings({
   game: 'airhockey',
-  fields: [fields.difficulty({ hints: { easy: '퍽 느리게 · 골문 넓게 · 겨냥 도움 · CPU 살살', normal: '퍽 조금 느리게 · 골문 조금 넓게 · 겨냥 살짝 도움', hard: '빠른 퍽 · 좁은 골문 · 도움 없음' } })],
+  fields: [fields.difficulty()],
   onChange: () => {
     applyDifficulty();
     renderLobby();
@@ -64,7 +69,7 @@ const settings = createSettings({
   }
 });
 settings.attach(socket);
-const diffCfg = () => DIFF[settings.difficulty()] || DIFF.normal;
+const diffCfg = () => DIFF[settings.difficulty()] || DIFF.easy;
 // 연습(튜토리얼) 현황: 대기실에는 칸 안에, 결과 화면에서는 아래 가운데에 띄웁니다.
 const lobbyBoard = createTutorialBoard({ mount: $('tutBox') });
 lobbyBoard.attach(socket);
@@ -86,7 +91,7 @@ socket.on('room', async (r) => {
   try { sessionStorage.setItem('pcg-airhockey-room', r.code); } catch (e) {}
   serverPlayers = r.players || [];
   // 서버가 다시 떠서 방이 새로 만들어졌으면 진행 중이던 경기는 이어 갈 수 없으니 대기실로 돌아갑니다.
-  if (r.fresh && hadRoom && game.phase !== 'lobby') backToLobby('서버가 다시 시작돼서 대기실로 돌아왔어요');
+  if (r.fresh && hadRoom && game.phase !== 'lobby') backToLobby(t('서버가 다시 시작돼서 대기실로 돌아왔어요'));
   hadRoom = true;
   if (AUTOSTART && BOTS > 0 && !autoStarted && !serverPlayers.length) {
     autoStarted = true;
@@ -276,7 +281,7 @@ function startGame() {
   if (game.phase === 'playing') return;
   const list = lobbyPlayers().filter((p) => p.connected);
   if (!list.length) {
-    lobbyMessage('폰을 먼저 연결해 주세요. QR을 찍고 시작하기를 누르면 자리가 생겨요.');
+    lobbyMessage(t('폰을 먼저 연결해 주세요. QR을 찍고 시작하기를 누르면 자리가 생겨요.'));
     return;
   }
   if (!settings.requireAnswered()) return;
@@ -306,7 +311,7 @@ function startGame() {
   game.sim.puck.live = false;
   setSub('countdown', 3200);
   game.count = 4;
-  callout('준비', `${game.teams[0].name}  vs  ${game.teams[1].name}`, 'ready', 780);
+  callout(t('준비'), `${game.teams[0].name}  vs  ${game.teams[1].name}`, 'ready', 780);
   $('lobby').classList.add('hidden');
   $('over').classList.add('hidden');
   $('hud').classList.remove('hidden');
@@ -348,7 +353,7 @@ function endGame() {
   ruleNote(null);
   const w = game.winner;
   const T = game.teams;
-  $('overTitle').textContent = `${T[w].name} 승리`;
+  $('overTitle').textContent = t('{name} 승리', { name: T[w].name });
   $('overTitle').style.setProperty('--c', T[w].color);
   $('overScore').innerHTML = `<b style="color:${T[0].color}">${game.score[0]}</b><i>:</i><b style="color:${T[1].color}">${game.score[1]}</b>`;
   const rows = game.ents.map((e) => ({ e, st: e.slot != null ? game.stats[e.slot] : null, win: e.team === w }));
@@ -362,10 +367,10 @@ function endGame() {
     el.style.animationDelay = `${0.15 + i * 0.12}s`;
     const st = r.st || { goals: 0, hits: 0, top: 0 };
     el.innerHTML = `<span class="rank">${i + 1}</span><span class="who">${r.e.name}</span>` +
-      `<span class="res">${r.win ? '승' : '패'}</span>` +
-      `<span class="num"><b>${r.st ? st.goals : '-'}</b><span>골</span></span>` +
-      `<span class="num"><b>${r.st ? st.hits : '-'}</b><span>타격</span></span>` +
-      `<span class="num"><b>${r.st && st.top ? kmh(st.top) : '-'}</b><span>최고 km/h</span></span>`;
+      `<span class="res">${t(r.win ? '승' : '패')}</span>` +
+      `<span class="num"><b>${r.st ? st.goals : '-'}</b><span>${t('골')}</span></span>` +
+      `<span class="num"><b>${r.st ? st.hits : '-'}</b><span>${t('타격')}</span></span>` +
+      `<span class="num"><b>${r.st && st.top ? kmh(st.top) : '-'}</b><span>${t('최고 km/h')}</span></span>`;
     box.appendChild(el);
   });
   $('over').classList.remove('hidden');
@@ -598,8 +603,8 @@ function onGoal(ev, now) {
   game.lastGoal = { team: scoring, by: by ? by.slot : null, own };
   view.goalFx(scoring === 0 ? 'A' : 'B', into, T.color);
   sfx.goal(final);
-  const who = own ? `${by.name} 자책골` : by ? `${by.name} 득점${deflected ? ' · 굴절' : ''}` : `${T.name} 득점`;
-  callout(final ? 'WIN' : 'GOAL!', final ? `${T.name} 승리!` : who, final ? 'win' : 'goal', final ? 3000 : 1700, T.color);
+  const who = own ? t('{name} 자책골', { name: by.name }) : by ? t(deflected ? '{name} 득점 · 굴절' : '{name} 득점', { name: by.name }) : t('{name} 득점', { name: T.name });
+  callout(final ? 'WIN' : 'GOAL!', final ? t('{name} 승리!', { name: T.name }) : who, final ? 'win' : 'goal', final ? 3000 : 1700, T.color);
   send('goal', { scorer: own ? null : by ? by.slot : null, team: scoring, own, score: game.score.slice(), final });
   updateBoards(scoring === 0 ? 'A' : 'B');
   renderHud(scoring);
@@ -656,7 +661,7 @@ function updateRule(now) {
     if (!game.demo) {
       sfx.whistle();
       ruleNote(null);
-      note(half === 0 ? '가운데에 멈춘 퍽을 다시 놓았어요' : '8초가 지나 퍽이 상대 쪽으로 넘어갔어요', 2200);
+      note(t(half === 0 ? '가운데에 멈춘 퍽을 다시 놓았어요' : '8초가 지나 퍽이 상대 쪽으로 넘어갔어요'), 2200);
     }
   }
 }
@@ -671,11 +676,12 @@ function watchPlayers(now) {
     return;
   }
   if (!game.allGoneSince) game.allGoneSince = now;
-  if (now - game.allGoneSince > 20000) backToLobby('모든 폰의 연결이 끊겨 대기실로 돌아왔어요');
+  if (now - game.allGoneSince > 20000) backToLobby(t('모든 폰의 연결이 끊겨 대기실로 돌아왔어요'));
 }
 
 let last = performance.now();
 let hudClock = 0;
+let puckClock = 0;
 function tick() {
   const now = performance.now();
   const dtR = Math.min(0.05, Math.max(0.0005, (now - last) / 1000));
@@ -707,7 +713,7 @@ function tick() {
       }
     }
     if (left <= 0) {
-      callout('GO!', '먼저 치는 쪽이 공격!', 'count', 900);
+      callout('GO!', '', 'count', 900);
       sfx.count(true);
       sim.puck.live = true;
       setSub('live');
@@ -752,6 +758,13 @@ function tick() {
     view.setPuck({ visible: true, x: p.x, z: p.z, angle: p.angle, speed: Math.hypot(p.vx, p.vz) });
   }
   view.frame(now, dtR, game.phase === 'playing' ? 'play' : game.phase === 'over' ? 'over' : 'lobby');
+
+  // 폰 패드에 퍽 위치를 보여 줍니다(초당 20번, 세계 좌표 · 모든 폰에 같은 값).
+  puckClock += dtR;
+  if (puckClock >= 0.05 && game.phase === 'playing' && !game.drop) {
+    puckClock = 0;
+    send('puck', { x: +p.x.toFixed(3), z: +p.z.toFixed(3), live: Boolean(p.live) }, null);
+  }
 
   // HUD(초당 30번이면 충분)
   hudClock += dtR;
@@ -800,6 +813,7 @@ function pushState() {
     target: TARGET,
     rink: { w: RINK.W, l: RINK.L, mr: RINK.MR, pr: RINK.PR, goal: game.sim ? game.sim.goal : diffCfg().goal },
     difficulty: game.phase === 'playing' ? game.level : settings.difficulty(),
+    lift: (DIFF[game.phase === 'playing' ? game.level : settings.difficulty()] || DIFF.easy).lift, // 폰 말렛을 엄지 위로 띄우는 픽셀(어려움 0)
     settings: settings.forState(),
     teams: game.phase === 'lobby' ? [] : stateTeams(),
     players: statePlayers(),
@@ -837,7 +851,7 @@ function renderHud(bump) {
     }
   }
   const mp = game.score.some((s) => s === TARGET - 1);
-  $('sbMid').textContent = mp ? '매치 포인트' : `${TARGET}점 선승`;
+  $('sbMid').textContent = t(mp ? '매치 포인트' : '{n}점 선승', { n: TARGET });
   $('sbMid').classList.toggle('mp', mp);
   $('sbMode').textContent = game.ents.length > 2 ? '2 VS 2' : game.ents.some((e) => e.kind === 'cpu') ? 'VS CPU' : '1 VS 1';
   const lv = $('sbLv');
@@ -859,7 +873,7 @@ function speedFlash(v, e) {
   void el.offsetWidth;
   el.classList.add('fast');
   el.style.setProperty('--c', e.color);
-  $('spdTag').textContent = `${e.name} 강슛!`;
+  $('spdTag').textContent = t('{name} 강슛!', { name: e.name });
   clearTimeout(fastTimer);
   fastTimer = setTimeout(() => el.classList.remove('fast'), 1300);
   sfx.fast();
@@ -890,8 +904,8 @@ function placeTags() {
     const pt = view.project(e.m.x, RINK.TOP + 0.1, e.m.z);
     el.style.transform = `translate(${pt.x.toFixed(1)}px, ${pt.y.toFixed(1)}px) translate(-50%, -100%)`;
     let st = '';
-    if (e.kind === 'human' && e.awaySince) st = now - e.awaySince > 2500 ? '연결 끊김 · 자동' : '연결 끊김';
-    else if (e.kind === 'bot') st = now < e.manualUntil ? '키보드' : 'BOT';
+    if (e.kind === 'human' && e.awaySince) st = t(now - e.awaySince > 2500 ? '연결 끊김 · 자동' : '연결 끊김');
+    else if (e.kind === 'bot') st = now < e.manualUntil ? t('키보드') : 'BOT';
     const sp = el.querySelector('span');
     if (sp.textContent !== st) sp.textContent = st;
     el.classList.toggle('away', Boolean(e.kind === 'human' && e.awaySince));
@@ -919,8 +933,15 @@ function note(text, ms) {
   if (text && ms) noteTimer = setTimeout(() => el.classList.remove('on'), ms);
 }
 let ruleShown = false;
+let ruleSent = -1;
 function ruleNote(left) {
   const el = $('rule');
+  // 폰에도 알립니다(폰만 보는 사람이 갑자기 퍽이 넘어가서 놀라지 않게). 초가 바뀔 때만 보냅니다.
+  const sec = left == null || left > 5000 ? -1 : Math.max(0, Math.ceil(left / 1000));
+  if (sec !== ruleSent) {
+    ruleSent = sec;
+    send('rule', { sec });
+  }
   if (left == null || left > 5000) {
     if (ruleShown) {
       el.classList.remove('on');
@@ -930,7 +951,7 @@ function ruleNote(left) {
   }
   ruleShown = true;
   el.classList.add('on');
-  el.textContent = `${Math.max(0, Math.ceil(left / 1000))}초 안에 쳐 내세요`;
+  el.textContent = t('{n}초 안에 쳐 내세요', { n: Math.max(0, Math.ceil(left / 1000)) });
 }
 let msgTimer = null;
 function lobbyMessage(t) {
@@ -957,20 +978,20 @@ function renderLobby() {
     e.className = 'slot' + (p ? ' on' : '') + (p && !p.connected ? ' away' : '') + (p && p.bot ? ' bot' : '') + (ready ? ' ready' : '') + (prac ? ' prac' : '');
     if (p) {
       e.style.setProperty('--c', p.color);
-      const st = p.bot ? 'BOT' : !p.connected ? '연결 끊김' : ready ? '준비 완료 ✓' : prac ? '연습 중' : '준비 대기';
+      const st = p.bot ? 'BOT' : t(!p.connected ? '연결 끊김' : ready ? '준비 완료 ✓' : prac ? '연습 중' : '준비 대기');
       e.innerHTML = `<b>${p.name}</b><small>${st}</small>`;
     } else {
-      e.textContent = `${s}P 비어 있음`;
+      e.textContent = t('{n}P 비어 있음', { n: s });
     }
     box.appendChild(e);
   }
   const conn = list.filter((p) => p.connected);
   const pairs = $('pairs');
   if (!conn.length) {
-    pairs.innerHTML = '혼자면 CPU 와, 둘이면 1:1, 셋·넷이면 2:2 로 겨뤄요.';
+    pairs.textContent = '';
   } else {
     const T = teamInfo(makeTeams(conn));
-    pairs.innerHTML = `<span style="color:${T[0].color}">아래쪽 ${T[0].name}</span> <i>vs</i> <span style="color:${T[1].color}">위쪽 ${T[1].name}</span>`;
+    pairs.innerHTML = `<span style="color:${T[0].color}">${t('아래쪽 {name}', { name: T[0].name })}</span> <i>vs</i> <span style="color:${T[1].color}">${t('위쪽 {name}', { name: T[1].name })}</span>`;
   }
 }
 
@@ -1082,8 +1103,12 @@ function fitScreen(sel, reserveTop, reserveBottom) {
 fitScreen('#lobby .lobby', 74, 24);
 fitScreen('#over .over', 74, 24);
 $('kbTest').classList.toggle('hidden', !BOTS);
+$('keysHelp').classList.toggle('hidden', !BOTS); // 키 안내는 시험(봇) 모드에서만
 settings.mount($('setBox'));
 settings.mount($('overSet'), { compact: true });
+// 언어 고르기: 대기실 오른쪽 위(경기 중에는 대기실과 함께 숨음). 바꾸면 3D 판 글자까지 새로 그리려고 새로 고칩니다.
+mountSwitcher($('langBox'), { reload: true, compact: true });
+document.title = t('에어하키');
 startDemo();
 renderLobby();
 requestAnimationFrame(tick);

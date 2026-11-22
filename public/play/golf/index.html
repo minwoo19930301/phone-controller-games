@@ -41,7 +41,7 @@
   .clubs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
   .clubs button { padding: 12px 0 10px; border-radius: 14px; background: rgba(255,255,255,.06); color: var(--fg); border: 1.5px solid var(--line); }
   .clubs button b { display: block; font-family: Anton, Impact, sans-serif; font-weight: 400; font-size: 22px; }
-  .clubs button span { font-size: 11px; color: var(--dim); }
+  .clubs button span { font-size: 12px; color: var(--dim); }
   .clubs button.on { background: var(--c); color: #0b0f17; border-color: var(--c); }
   .clubs button.on span { color: rgba(0,0,0,.6); }
 
@@ -52,6 +52,12 @@
   .chips { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
   .chip { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); font-size: 14px; color: var(--dim); }
   .chip b { color: var(--fg); font-size: 18px; margin-left: 4px; }
+  .hidden { display: none !important; }
+  .aim-easy { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; }
+  .aim-easy .dist { font-family: Anton, Impact, sans-serif; font-size: 64px; line-height: 1; color: var(--c); }
+  .note { margin: 6px 0 0; font-size: 13px; text-align: center; }
+  .links { display: flex; gap: 10px; justify-content: center; margin: 6px 0 10px; }
+  .link { background: none; color: var(--dim); font-size: 15px; font-weight: 700; padding: 10px 14px; text-decoration: underline; text-underline-offset: 3px; }
   .flash { animation: flash .5s; }
   @keyframes flash { from { background: var(--c); } }
   .debug { position: fixed; left: 8px; bottom: calc(env(safe-area-inset-bottom) + 4px); font: 11px ui-monospace, monospace; color: rgba(255,255,255,.35); }
@@ -69,9 +75,7 @@
       <path d="M75 126v50" stroke="#c7c7c7" stroke-width="5"/>
       <path d="M66 172h22" stroke="#9aa" stroke-width="7"/>
     </svg>
-    <h1>폰이 골프채가 됩니다</h1>
-    <p>폰 아래쪽을 두 손으로 그립처럼 쥐고
-화면이 목표 쪽을 보게 하세요.</p>
+    <h1>폰을 골프채처럼 휘두르세요</h1>
     <button class="primary" id="btnStart" style="margin-top:10px">시작하기</button>
   </section>
 
@@ -88,8 +92,9 @@
 
   <!-- 내 차례: 조준 -->
   <section class="view" id="vAim">
-    <div class="aim-top"><b>방향 맞추기</b><span id="aimInfo">핀까지 145m</span></div>
-    <div class="pad" id="pad">
+    <div class="aim-top"><b>내 차례</b><span id="aimInfo"></span></div>
+    <div class="aim-easy" id="aimEasy"><div class="big" id="aimClub"></div><div class="dist" id="aimDist"></div></div>
+    <div class="pad hidden" id="pad">
       <svg viewBox="0 0 300 260" preserveAspectRatio="none" id="padSvg">
         <path d="M150 250 L150 20" stroke="rgba(255,255,255,.25)" stroke-width="2" stroke-dasharray="6 8"/>
         <circle cx="150" cy="40" r="16" fill="#cfe9b8" opacity=".9"/>
@@ -98,17 +103,16 @@
         <circle cx="150" cy="250" r="6" fill="#fff"/>
       </svg>
       <div class="deg" id="aimDeg">0°</div>
-      <div class="lab">좌우로 밀어서 방향을 맞춰요</div>
     </div>
-    <div class="clubs" id="clubs"></div>
-    <button class="primary" id="btnAddress">어드레스</button>
+    <div class="clubs hidden" id="clubs"></div>
+    <p class="note" id="aimNote"></p>
+    <div class="links"><button class="link hidden" id="btnPadToggle">방향 바꾸기</button><button class="link hidden" id="btnClubToggle">클럽 바꾸기</button></div>
+    <button class="primary" id="btnAddress">스윙하기</button>
   </section>
 
-  <!-- 어드레스 잡는 중 -->
+  <!-- 기준 자세를 잡는 중(저절로 끝납니다) -->
   <section class="view center" id="vHold">
-    <div class="count" id="holdN">3</div>
-    <h1>그립을 잡고 멈추세요</h1>
-    <p>폰 윗부분이 공을, 화면이 목표를 보게.</p>
+    <h1>멈춰요</h1>
   </section>
 
   <!-- 스윙 -->
@@ -119,17 +123,19 @@
       <line id="shaft" x1="0" y1="0" x2="0" y2="96" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
       <circle r="7" fill="#fff"/>
     </svg>
-    <div class="big" id="swingT">스윙하세요</div>
-    <p id="swingB">천천히 들어 올렸다가 끝까지 휘둘러요.</p>
-    <button class="ghost" id="btnRedo" style="margin-top:18px;max-width:260px">다시 어드레스</button>
+    <div class="big" id="swingT">스윙!</div>
+    <p id="swingB"></p>
+    <button class="primary" id="btnTap" style="margin-top:6px">탭으로 치기</button>
+    <button class="ghost" id="btnRedo" style="max-width:260px">다시 맞추기</button>
+    <button class="link" id="btnBack">조준으로</button>
   </section>
 
-  <section class="view" id="vAnalysis" style="overflow:auto;touch-action:pan-y"><button class="ghost" id="closeAnalysis">닫기</button><p>센서 기반 추정이며 실제 궤도·구질과 다를 수 있어요.</p><div id="analysisDetail"></div></section>
+  <section class="view" id="vAnalysis" style="overflow:auto;touch-action:pan-y"><button class="ghost" id="closeAnalysis">닫기</button><div id="analysisDetail"></div></section>
   <!-- 결과 -->
   <section class="view center" id="vResult">
     <div class="big" id="resT"></div>
     <div class="chips" id="resChips"></div>
-    <p id="resB"></p><p style="font-size:12px">스윙 궤적·구질은 휴대폰 센서와 자세 모델로 계산한 추정치예요.</p><div id="analysisSummary" style="width:100%;max-width:420px;overflow:auto"></div>
+    <p id="resB"></p><button class="ghost hidden" id="btnAnalysis" style="max-width:260px">분석 보기</button><div id="analysisSummary" style="width:100%;max-width:420px;overflow:auto"></div>
   </section>
 </main>
 <div class="debug" id="debug"></div>

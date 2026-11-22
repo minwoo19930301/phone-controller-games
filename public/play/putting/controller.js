@@ -1,4 +1,7 @@
 import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
+import { requestMotionPermission } from '/common/motion.js';
+import { createSamples } from '/common/samples.js';
+import { levelOf, strokeDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS } from '/golf/assist.mjs';
 // 퍼팅 컨트롤러. 터치로 조준하고, 폰을 퍼터 그립처럼 쥐고 시계추처럼 밀면 그 세기를 폰에서 직접 잽니다.
 // 좌표는 어드레스 때 정한 기준축으로 보냅니다: u = 위, f = 홀 쪽(어드레스 때 화면이 보는 수평 방향), r = f × u(오른쪽).
 (() => {
@@ -13,8 +16,8 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
   const PIVOT = 0.9; // 퍼터 스피드 = 회전 속도(rad/s) × 0.9m
   const SMASH = 1.2; // 큰 화면이 볼 스피드 = 퍼터 스피드 × 1.2 로 씁니다(세기 안내용)
   const DECEL = 0.549; // 스팀프 10 그린의 감속(평지 거리 안내용)
-  const FWD_RATE = 25; // 홀 쪽으로 이 이상(도/초) 돌기 시작하면 스트로크 시작
-  const MIN_PEAK = 20; // 이보다 약한 움직임은 손 떨림(왜글)으로 봅니다
+  // 스트로크 감지 문턱값(시작 속도·손떨림 한계·최소 이동·기준 위로 올라올 각)은 난이도마다 달라서 assist.mjs 에 있습니다.
+  const SD = () => strokeDetect(state.difficulty);
   const AIM_MAX = 25;
 
   let token = null;
@@ -40,6 +43,10 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
   let grid = true;
   let sensorOk = false;
   let simMode = false;
+  let tapOnly = false; // 동작 센서가 없거나 거절돼서 버튼으로만 치는 폰
+  let showPad = false; // 방향 패드를 펼쳤는지(쉬움·보통은 접혀 있음)
+  let hintTimer = null;
+  let lastF = null; // 마지막으로 잡은 기준 방향
   let noRoomTries = 0;
   let holdTimer = null;
   let turnShot = -1;
@@ -113,9 +120,14 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
   // 퍼터 쪽 기준은 화면 방향입니다. 퍼터 샤프트(폰 길이)는 거의 수직이라 수평 성분이 믿을 만하지 않습니다.
   function calibrate(v) {
     const u = [0, 1, 0];
-    const fh = [v.face[0], 0, v.face[2]];
-    if (Math.hypot(fh[0], fh[2]) < 0.35) return false; // 화면이 하늘이나 땅을 보고 있음
+    let fh = [v.face[0], 0, v.face[2]];
+    if (Math.hypot(fh[0], fh[2]) < 0.35) {
+      // 화면이 하늘이나 땅을 보고 있으면 윗부분이 향한 방향으로, 그것도 안 되면 지난번 방향으로 잡습니다(실패 화면 없음)
+      fh = [v.top[0], 0, v.top[2]];
+      if (Math.hypot(fh[0], fh[2]) < 0.2) fh = lastF || [0, 0, 1];
+    }
     const f = norm(fh);
+    lastF = f;
     const r = norm(cross(f, u));
     basis = { r, u, f };
     basis.s0 = toBasis(v.top);
@@ -160,8 +172,7 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
       if (Math.abs(rate) < 6) {
         if (t - det.stillSince > 600) det.minTh = th;
       } else det.stillSince = t;
-      if (det.minTh < -1.5) $('strokeT').textContent = '좋아요, 이제 톡';
-      if (rate > FWD_RATE && th > det.minTh + 0.8) {
+      if (rate > SD().fwdRate && th > det.minTh + SD().rise) {
         det.stage = 'fwd';
         det.fwdAt = t;
         det.thStart = det.minTh;
@@ -200,14 +211,16 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
 
   function fire(t) {
     const travel = det.th - det.thStart;
-    if (det.peak < MIN_PEAK || travel < 1.5) {
-      // 손 떨림이나 왜글: 다시 기다립니다.
+    if (det.peak < SD().minPeak || travel < SD().travel) {
+      // 손 떨림이나 왜글: 다시 기다립니다. 조용히 넘기지 않고 알려 줍니다.
       det.stage = 'ready';
       det.minTh = det.th;
       det.stillSince = t;
+      hint('더 세게 톡!');
       return;
     }
     det.stage = 'done';
+    clearTimeout(hintTimer);
     const speed = clamp(det.peak * RD * PIVOT, 0.05, 3.6);
     const face = clamp(det.faceAtPeak, -15, 15);
     const data = { speed: +speed.toFixed(3), face: +face.toFixed(2), ago: Math.max(0, Math.round(performance.now() - det.peakAt)), rtt: Math.round(rtt()) };
@@ -252,6 +265,7 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
     sensorOk = true;
     if (simRun) return;
     last = deviceVectors(e.alpha || 0, e.beta || 0, e.gamma || 0);
+    if (mode === 'hold') holdStep(last, performance.now());
     onSample(last, performance.now());
   }
   function onMotion(e) {
@@ -262,12 +276,17 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
 
   // ---------- 소리 ----------
   let actx = null;
+  let sam = null;
   function audio() {
     if (!actx) {
       const AC = window.AudioContext || window.webkitAudioContext;
-      if (AC) actx = new AC();
+      if (AC) {
+        actx = new AC();
+        sam = createSamples(actx);
+        sam.preload(['ball/putt-tap', 'ui/success']); // 폰은 파일 3개만 미리 받습니다(톡 2벌 + 홀인 1개)
+      }
     }
-    if (actx && actx.state === 'suspended') actx.resume();
+    if (actx && actx.state === 'suspended') actx.resume().catch(() => {});
     return actx;
   }
   function beep(freq, sec, gain, type = 'sine', at = 0) {
@@ -288,6 +307,7 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
   function tock(q) {
     const a = audio();
     if (!a) return;
+    if (a.state === 'running' && sam && sam.play('ball/putt-tap', { gain: 0.6 + q * 0.4, rate: 0.95 + q * 0.1 })) return;
     const len = Math.floor(a.sampleRate * 0.04);
     const buf = a.createBuffer(1, len, a.sampleRate);
     const d = buf.getChannelData(0);
@@ -353,71 +373,127 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
   });
 
   // ---------- 어드레스 ----------
+  // 누르고 폰이 잠깐 가만히 있으면(300ms) 그 자세가 기준이 됩니다. 1.5초 안에 안 멈춰도 그 자세로 잡습니다.
+  let hold = { ref: null, since: 0 };
+  function startHold() {
+    keepAwake();
+    audio();
+    clearTimeout(holdTimer);
+    mode = 'hold';
+    show('vHold');
+    send('address', { phase: 'hold', aim, grid });
+    hold = { ref: null, since: 0 };
+    // 센서 없는 PC 시험 모드는 센서 값이 없으니 짧게 기다립니다.
+    holdTimer = setTimeout(finishHold, simMode && !sensorOk ? 450 : FALLBACK_MS);
+  }
+  function holdStep(v, t) {
+    if (!hold.ref || Math.acos(clamp(dot(norm(hold.ref.top), norm(v.top)), -1, 1)) / RD > STILL_DEG) {
+      hold.ref = v;
+      hold.since = t;
+    } else if (t - hold.since >= STILL_MS) finishHold();
+  }
+  function finishHold() {
+    clearTimeout(holdTimer);
+    if (mode !== 'hold') return;
+    if (simMode && !sensorOk) last = simRestPose();
+    calibrate(last || simRestPose());
+    if (!send('address', { phase: 'ready', s0: r3(basis.s0), fc0: r3(basis.fc0), aim, grid })) {
+      lostConnection();
+      return;
+    }
+    enterStroke();
+  }
+  function enterStroke() {
+    mode = 'stroke';
+    resetDet(performance.now());
+    $('strokeT').textContent = '톡!';
+    $('strokeB').textContent = '';
+    $('btnRedo').classList.toggle('hidden', tapOnly);
+    $('sim').classList.toggle('hidden', !simMode);
+    if (simMode) presetSim();
+    drawMeter(0);
+    show('vStroke');
+    armHint();
+    if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
+    beep(1568, 0.18, 0.2);
+  }
+  // 스트로크가 안 잡히는 동안 짧은 힌트와 진동 한 번
+  function hint(text) {
+    if (mode !== 'stroke') return;
+    $('strokeB').textContent = text;
+    if (navigator.vibrate) navigator.vibrate(25);
+  }
+  function armHint() {
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(function again() {
+      if (mode !== 'stroke') return;
+      if (det.stage === 'ready' || det.stage === 'settle') hint('더 세게 톡!');
+      hintTimer = setTimeout(again, HINT_AFTER_MS);
+    }, HINT_AFTER_MS);
+  }
   $('btnAddress').addEventListener('click', () => {
     keepAwake();
     audio();
     if (!sensorOk && !simMode) {
-      sensorHelp();
+      // 센서가 없는 폰: 버튼으로 칩니다
+      tapOnly = true;
+      if (!send('address', { phase: 'ready', s0: [0, -1, 0], fc0: [0, 0, 1], aim, grid })) { lostConnection(); return; }
+      enterStroke();
       return;
     }
-    if (simMode && !sensorOk) last = simRestPose();
-    mode = 'hold';
-    show('vHold');
-    send('address', { phase: 'hold', aim, grid });
-    let n = 3;
-    $('holdN').textContent = n;
-    beep(900, 0.06, 0.15);
-    clearInterval(holdTimer);
-    holdTimer = setInterval(() => {
-      n -= 1;
-      if (n > 0) {
-        $('holdN').textContent = n;
-        beep(900, 0.06, 0.15);
-        if (navigator.vibrate) navigator.vibrate(15);
-        return;
-      }
-      clearInterval(holdTimer);
-      if (mode !== 'hold') return;
-      if (!last || !calibrate(last)) {
-        mode = 'aim';
-        send('cancel', {});
-        message('화면이 홀을 보게 세워 주세요', '폰 윗부분은 땅을, 화면은 홀 쪽을 보게 쥐고 다시 어드레스를 눌러요.', true);
-        return;
-      }
-      if (!send('address', { phase: 'ready', s0: r3(basis.s0), fc0: r3(basis.fc0), aim, grid })) {
-        lostConnection();
-        return;
-      }
-      mode = 'stroke';
-      resetDet(performance.now());
-      $('strokeT').textContent = '톡 밀어요';
-      $('strokeB').textContent = simMode ? '센서가 없어서 아래 버튼으로 시험해요.' : '뒤로 살짝 뺐다가 시계추처럼.\n빠를수록 멀리 굴러가요.';
-      $('sim').classList.toggle('hidden', !simMode);
-      if (simMode) presetSim();
-      drawMeter(0);
-      show('vStroke');
-      if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
-      beep(1568, 0.18, 0.2);
-    }, simMode ? 450 : 1000);
+    startHold();
   });
-  $('btnMsg').addEventListener('click', () => render(true));
-  // 자세가 틀어졌으면 조준부터 다시
-  $('btnRedo').addEventListener('click', () => {
-    clearInterval(holdTimer);
+  // 탭으로 치기: 홀까지 알맞은 세기로 똑바로(큰 화면이 세기를 정합니다)
+  $('btnTap').addEventListener('click', () => {
+    if (mode !== 'stroke' || simRun) return;
+    det.stage = 'done';
+    clearTimeout(hintTimer);
+    if (!send('stroke', { speed: 0, auto: true, face: 0, ago: 0, rtt: Math.round(rtt()) })) {
+      lostConnection();
+      return;
+    }
+    strokeAt = performance.now();
+    if (navigator.vibrate) navigator.vibrate(35);
+    tock(0.6);
+    mode = 'result';
+    $('resT').textContent = '굴러가요';
+    $('resB').textContent = '큰 화면을 보세요';
+    $('resChips').innerHTML = '';
+    show('vResult');
+  });
+  // 조준 화면으로 돌아갑니다(큰 화면도 조준 단계로)
+  $('btnBack').addEventListener('click', () => {
+    clearTimeout(holdTimer); clearTimeout(hintTimer);
     det.stage = 'idle';
     send('cancel', {});
     mode = 'aim';
     render(true);
+  });
+  // 기준 자세를 다시 잡습니다(큰 화면은 그대로)
+  $('btnRedo').addEventListener('click', () => {
+    det.stage = 'idle';
+    startHold();
   });
 
   function lostConnection() {
     mode = 'wait';
     message('연결이 잠깐 끊겼어요', '다시 연결되면 조준 화면으로 돌아가요.');
   }
-  function sensorHelp() {
-    message('동작 센서를 쓸 수 없어요',
-      'iPhone: Safari 를 앱 전환기에서 완전히 닫고 QR을 다시 찍은 뒤, 동작 접근을 허용해 주세요.\nAndroid: 주소창 자물쇠 → 사이트 설정 → 동작 센서를 허용해 주세요.', true);
+  // 센서가 꺼져 있어도 멈추지 않습니다: 버튼으로 칠 수 있고, 켜는 법은 짧게 한 줄만 보여 줍니다.
+  function sensorNote() {
+    $('aimNote').textContent = '동작 접근을 허용해 주세요 (iPhone: Safari 다시 열기 · Android: 사이트 설정)';
   }
+  // 방향 패드·미세 조정은 어려움에서만 처음부터 펼쳐 둡니다. 쉬움·보통은 큰 화면이 정한 방향이 기본입니다.
+  function drawAimTools() {
+    const hard = state.difficulty === 'hard';
+    $('pad').classList.toggle('hidden', !showPad);
+    $('aimEasy').classList.toggle('hidden', showPad);
+    $('btnLeft').classList.toggle('hidden', !showPad);
+    $('btnRight').classList.toggle('hidden', !showPad);
+    $('btnPadToggle').classList.toggle('hidden', hard || showPad);
+    $('aimDist').textContent = `${Number(state.dist || 0).toFixed(1)}m`;
+  }
+  $('btnPadToggle').addEventListener('click', () => { showPad = true; drawAimTools(); });
   function keepAwake() {
     if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
   }
@@ -508,7 +584,7 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
       clearInterval(holdTimer);
       mode = 'wait';
       $('waitT').textContent = state.phase === 'over' ? '경기 끝' : '대기실';
-      $('waitB').textContent = state.phase === 'over' ? '큰 화면에서 순위를 확인하세요.' : '모두 들어오면 게임 시작을 눌러요.\n3홀, 홀마다 최대 5타.';
+      $('waitB').textContent = state.phase === 'over' ? '큰 화면에서 순위를 확인하세요.' : '';
       $('btnGo').style.display = '';
       $('btnGo').textContent = state.phase === 'over' ? '다시 하기' : '게임 시작';
       show('vWait');
@@ -518,7 +594,7 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
     if (!inGame) {
       mode = 'wait';
       $('waitT').textContent = '구경 중';
-      $('waitB').textContent = '다음 차례부터 함께해요. 마지막 홀이 끝났다면 다음 경기를 기다려요.';
+      $('waitB').textContent = '다음 차례부터 함께해요';
       show('vWait');
       return;
     }
@@ -570,10 +646,12 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
       send('cancel', {});
     }
     if (typeof state.grid === 'boolean') grid = state.grid;
+    if (!sameTurn) showPad = state.difficulty === 'hard';
     mode = 'aim';
-    $('aimInfo').textContent = `${state.hole}번 홀 · ${state.stroke || 1}타째 · 홀까지 ${Number(state.dist || 0).toFixed(1)}m`;
+    $('aimInfo').textContent = `${state.hole}번 홀 · ${state.stroke || 1}타째`;
     drawAim();
     drawGrid();
+    drawAimTools();
     show('vAim');
   }
 
@@ -623,9 +701,12 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
     if (r.holed) {
       document.body.classList.add('flash');
       if (navigator.vibrate) navigator.vibrate([60, 50, 60, 50, 180]);
-      beep(784, 0.15, 0.2);
-      beep(1046, 0.15, 0.2, 'sine', 0.12);
-      beep(1568, 0.3, 0.2, 'sine', 0.24);
+      const a = audio();
+      if (!(a && a.state === 'running' && sam && sam.play('ui/success', { gain: 0.9 }))) {
+        beep(784, 0.15, 0.2);
+        beep(1046, 0.15, 0.2, 'sine', 0.12);
+        beep(1568, 0.3, 0.2, 'sine', 0.24);
+      }
     } else if (navigator.vibrate) navigator.vibrate(40);
   });
 
@@ -633,36 +714,31 @@ import { resolveSwingSpeed } from '../golf/swing-speed.mjs';
     // 화면 꺼짐 방지와 권한 요청은 탭 안에서 await 전에 바로 불러야 iPhone 에서 통합니다.
     keepAwake();
     audio();
-    const asks = [];
-    if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-      asks.push(DeviceOrientationEvent.requestPermission().catch(() => 'denied'));
-    }
-    if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') {
-      asks.push(DeviceMotionEvent.requestPermission().catch(() => 'denied'));
-    }
-    const answers = await Promise.all(asks);
+    const perm = await requestMotionPermission();
     window.addEventListener('deviceorientation', onOrientation);
     window.addEventListener('devicemotion', onMotion);
-    // 폰에서 거절되면 켜는 법을 안내합니다. 센서 없는 PC 는 시험 퍼팅으로 계속합니다.
-    if (answers.some((a) => a !== 'granted') && isTouch && !DEBUG) {
-      sensorHelp();
-      return;
-    }
+    // 거절돼도 멈추지 않고 버튼으로 칠 수 있게 합니다. 센서 없는 PC 는 시험 퍼팅으로 계속합니다.
+    if (perm === 'denied' && isTouch && !DEBUG) tapOnly = true;
     if (!ROOM) {
       message('방 코드가 없어요', '큰 화면의 QR을 찍어 주세요.');
       return;
     }
     mode = 'wait';
-    message('연결하는 중', '잠시만 기다려 주세요.');
+    message('연결하는 중', '');
     socket.connect();
+    setTimeout(() => {
+      if (!socket.connected && !me) message('연결이 안 돼요', '같은 와이파이인지 확인해 주세요');
+    }, 8000);
     setTimeout(() => {
       if (sensorOk && !DEBUG) return;
       if (!isTouch || DEBUG) {
         simMode = true;
-        $('btnAddress').textContent = sensorOk ? '어드레스 (시험 퍼팅)' : '센서 없음 · 어드레스 (시험)';
+        $('btnAddress').textContent = sensorOk ? '퍼팅하기 (시험)' : '센서 없음 · 시험';
         debug('동작 센서 값이 들어오지 않아 시험 퍼팅 버튼으로 동작합니다');
       } else {
-        $('btnAddress').textContent = '동작 센서 켜는 법 보기';
+        tapOnly = true;
+        $('btnAddress').textContent = '탭으로 치기';
+        sensorNote();
       }
     }, SENSOR_WAIT_MS);
   });

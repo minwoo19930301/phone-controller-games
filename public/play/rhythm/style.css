@@ -312,6 +312,26 @@ p b { color: var(--fg); }
   .lb-right { position: sticky; top: 0; }
   .song { min-height: 128px; }
   .hud-j { top: 44px; }
+  .hud-hint { top: 92px; }
   .hud-score b { font-size: 26px; } .hud-combo b { font-size: 24px; }
   .ov-grade { font-size: 90px; }
 }
+
+/* 경기 중 짧은 힌트(너무 약한 휙·박자 밖 누름) */
+.hud-hint { position: absolute; z-index: 5; left: 0; right: 0; top: 118px; text-align: center; pointer-events: none; font-size: 17px; font-weight: 900; color: #ffe7a1; opacity: 0; transition: opacity 0.15s; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7); }
+.hud-hint.on { opacity: 1; }
+/* 소리 켜기 안내는 눈에 띄게 */
+.banner.big { padding: 16px 14px; font-size: 18px; font-weight: 900; background: rgba(255, 210, 58, 0.22); border: 1.5px solid rgba(255, 210, 58, 0.6); }
+/* 옵션(접힘): 4/5키·감도·다시 맞추기 */
+.more { border-radius: 14px; background: var(--glass); border: 1px solid var(--line); padding: 0 12px; }
+.more > summary { cursor: pointer; padding: 10px 0; font-size: 13px; font-weight: 800; color: var(--dim); list-style: none; }
+.more > summary::-webkit-details-marker { display: none; }
+.more[open] { padding-bottom: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+/* 언어 고르기(시작 화면 오른쪽 위) */
+#vStart { position: relative; }
+.langbox { position: absolute; top: 4px; right: 4px; z-index: 5; }
+
+/* 글자가 긴 언어(モーション 등)가 오른쪽 위 체크 표시에 가려지지 않게 */
+.mode b { min-width: 0; font-size: 16px; white-space: nowrap; }
+.mode.on::after { top: auto; bottom: 8px; }

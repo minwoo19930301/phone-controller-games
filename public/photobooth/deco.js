@@ -4,6 +4,7 @@
 // 낙서  { t:'draw', id, sh, slot, c: 색, w: 굵기(판 너비 비율), b: 'pen'|'neon', p: [x0,y0,x1,y1,...] }
 // 스티커 { t:'stk',  id, sh, slot, k: 스티커 키, x, y(중심, 0~1), s: 크기(판 너비 비율), r: 회전(라디안) }
 
+import { t as T } from '/common/i18n.js';
 import { EMOJI_FONT, SANS, ANTON, rrect } from './frames.js';
 
 export const Q = 10000; // 좌표 정수 배율
@@ -106,7 +107,7 @@ export function drawStroke(ctx, it, W, H) {
 function wordBox(ctx, st, size) {
   const fs = size * 0.36;
   ctx.font = st.anton ? `400 ${fs}px ${ANTON}` : `900 ${fs}px ${SANS}`;
-  const tw = ctx.measureText(st.word).width;
+  const tw = ctx.measureText(T(st.word)).width;
   return { fs, w: tw + fs * 1.15, h: fs * 1.55 };
 }
 
@@ -141,7 +142,7 @@ export function drawSticker(ctx, it, W, H, o = {}) {
     ctx.fillStyle = st.fg;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(st.word, 0, b.fs * (st.anton ? 0.06 : 0.04));
+    ctx.fillText(T(st.word), 0, b.fs * (st.anton ? 0.06 : 0.04));
   }
   if (o.selected) {
     const half = stickerHalf(ctx, it, W);

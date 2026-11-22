@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
+<script src="/common/i18n-wait.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0a1626">
 <title>테니스 컨트롤러</title>
@@ -19,9 +20,10 @@
   header { display: flex; align-items: center; gap: 10px; height: 44px; }
   .me { font-family: Anton, Impact, sans-serif; font-size: 26px; padding: 2px 14px; border-radius: 999px; background: var(--c); color: #0b0f17; }
   .room { flex: 1; color: var(--dim); font-size: 13px; letter-spacing: .1em; }
-  .recal { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); color: var(--fg); border: 1.5px solid var(--line);
+  .recal { padding: 10px 14px; border-radius: 12px; background: rgba(255,255,255,.07); color: var(--fg); border: 1.5px solid var(--line);
     font-size: 13px; font-weight: 700; }
   .hidden { display: none !important; }
+  .lang-box { display: flex; justify-content: center; margin-top: 4px; }
   .banner { margin: 6px 0 0; padding: 9px 12px; border-radius: 12px; background: rgba(255,90,95,.14); color: #ffb3b5; font-size: 13px; text-align: center; }
   main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
@@ -41,10 +43,6 @@
   .chip { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.07); font-size: 14px; color: var(--dim); }
   .chip b { color: var(--fg); font-size: 16px; margin-left: 4px; }
   .chip.ok b { color: #7ef0a0; }
-  .legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; }
-  .legend div { padding: 10px 4px 9px; border-radius: 14px; background: rgba(255,255,255,.05); border: 1px solid var(--line); }
-  .legend b { display: block; font-size: 15px; }
-  .legend span { font-size: 12px; color: var(--dim); }
   .practice { font-size: 15px; color: var(--fg); }
   .practice:empty { display: none; }
   .setbox { width: 100%; }
@@ -109,17 +107,24 @@
   @keyframes pulse { from { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 60%, transparent); }
     to { transform: scale(1.08); box-shadow: 0 0 0 22px transparent; } }
   @keyframes pop { 0% { transform: scale(.9); } 60% { transform: scale(1.05); } 100% { transform: scale(1); } }
-  .status { min-height: 50px; }
+  .status { min-height: 0; }
+  .status:empty { display: none; }
   .res { min-height: 86px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
   .res .t { font-size: 28px; font-weight: 900; letter-spacing: -.02em; }
   .res .t.good { color: #7ef0a0; }
   .res .t.bad { color: #ff9a9d; }
-  .pads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+  /* 큰 '치기' 버튼: 센서가 있어도 늘 쓸 수 있음. 스핀·손 고르기는 어려움에서만 */
+  .hit { width: 100%; min-height: 84px; padding: 22px 0; border-radius: 20px; background: var(--c); color: #0b0f17; font-size: 28px; font-weight: 900; touch-action: manipulation; }
+  .hit:active { transform: scale(.98); filter: brightness(1.1); }
+  .pads { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 10px; }
   .pads button { padding: 18px 0; border-radius: 16px; background: rgba(255,255,255,.08); color: var(--fg); border: 1.5px solid var(--line);
     font-size: 17px; font-weight: 800; }
-  .pads button:first-child { background: var(--c); color: #0b0f17; border-color: var(--c); }
   .hands { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
-  .hands button { padding: 10px 0; border-radius: 12px; background: transparent; color: var(--dim); border: 1.5px solid var(--line); font-size: 14px; font-weight: 800; }
+  .hands button { padding: 14px 0; border-radius: 12px; background: transparent; color: var(--dim); border: 1.5px solid var(--line); font-size: 15px; font-weight: 800; }
+  /* 스윙이 안 잡혔을 때 잠깐 뜨는 한 줄 */
+  .hintbar { min-height: 30px; padding: 4px 16px; border-radius: 999px; font-size: 18px; font-weight: 900; color: #1a1300; background: #ffd23a; opacity: 0; }
+  .hintbar.on { animation: hintin 1.1s ease-out forwards; }
+  @keyframes hintin { 0% { opacity: 0; transform: scale(.8); } 12% { opacity: 1; transform: scale(1.06); } 20% { transform: scale(1); } 80% { opacity: 1; } 100% { opacity: 0; } }
   .hands button.on { color: var(--fg); border-color: var(--fg); background: rgba(255,255,255,.08); }
   .pads-hint { margin-top: 8px; font-size: 12px; text-align: center; }
 
@@ -146,12 +151,11 @@
       <circle cx="128" cy="22" r="11" fill="#d9f24a"/>
       <path d="M120 16c5 2 9 7 10 13" stroke="#fff" stroke-width="1.6"/>
     </svg>
-    <h1>폰이 라켓이 됩니다</h1>
-    <p>폰 아래쪽을 라켓 손잡이처럼 쥐고
-화면이 TV를 보게 듭니다.</p>
-    <p class="note hidden" id="httpNote">https 주소가 아니라서 동작 센서가 꺼질 수 있습니다.
-그때는 버튼으로 칠 수 있습니다.</p>
+    <h1>폰이 라켓이에요</h1>
+    <p>링이 닫힐 때 휘두르세요.</p>
+    <p class="note hidden" id="httpNote">센서가 꺼질 수 있어요. 버튼으로 쳐요.</p>
     <button class="primary" id="btnStart" style="margin-top:10px">시작하기</button>
+    <div id="langBox" class="lang-box"></div>
   </section>
 
   <!-- 메시지 -->
@@ -166,7 +170,7 @@
     <div class="setbox" id="setBox"></div>
     <button class="primary" id="btnGo" style="margin-top:4px">준비</button>
     <div class="who-wait" id="whoWait"></div>
-    <button class="ghost" id="btnCalLobby">라켓 자세 맞추기</button>
+    <button class="ghost" id="btnCalLobby">다시 맞추기</button>
     <div id="tutLink"></div>
   </section>
 
@@ -184,15 +188,9 @@
       <text x="37" y="176" fill="#9aabc4" font-size="11" text-anchor="middle">손잡이</text>
     </svg>
     <div class="count hidden" id="calN">3</div>
-    <h1 id="calT">라켓처럼 쥡니다</h1>
-    <p id="calB">폰 아래쪽을 라켓 손잡이처럼 쥐고,
-화면이 TV를 보게 한 뒤 아래 버튼을 누릅니다.</p>
-    <div class="legend" id="calLegend">
-      <div><b>쓸어 올리기</b><span>탑스핀</span></div>
-      <div><b>깎아 내리기</b><span>슬라이스</span></div>
-      <div><b>화면 등지기</b><span>백핸드</span></div>
-    </div>
-    <button class="primary" id="btnReady" style="margin-top:6px">이 자세로 맞추기</button>
+    <h1 id="calT">자세 맞추기</h1>
+    <p id="calB">화면이 TV를 보게 쥐고 눌러요.</p>
+    <button class="primary" id="btnReady" style="margin-top:6px">맞추기</button>
     <button class="ghost hidden" id="btnCalCancel">돌아가기</button>
   </section>
 
@@ -205,29 +203,32 @@
     </div>
     <div class="stage">
       <div class="orb" id="orb">준비</div>
-      <p class="status" id="status">공이 느려지면 타이밍을 맞춰 휘두릅니다.</p>
+      <p class="status" id="status"></p>
+      <div class="hintbar" id="hint" aria-live="polite"></div>
       <div class="res">
         <div class="t" id="resT"></div>
         <div class="chips" id="resChips"></div>
       </div>
     </div>
-    <div class="hidden" id="fallback">
-      <div class="pads">
-        <button data-kind="none">플랫</button>
+    <div id="fallback">
+      <button class="hit" id="btnHit" type="button">치기</button>
+      <div class="pads hidden" id="spinPads">
         <button data-kind="top">탑스핀</button>
         <button data-kind="slice">슬라이스</button>
       </div>
-      <div class="hands" id="hands">
+      <div class="hands hidden" id="hands">
         <button data-hand="auto" class="on">손 자동</button>
         <button data-hand="back">백핸드로</button>
       </div>
-      <p class="pads-hint" id="fallbackHint">동작 센서가 없어 버튼으로 칩니다. (키보드: Space · T · S)</p>
+      <p class="pads-hint hidden" id="fallbackHint"></p>
     </div>
   </section>
 </main>
 <div class="debug" id="debug"></div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/tennis/i18n.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
 <script type="module" src="controller.js"></script>
 </body>
 </html>

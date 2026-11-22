@@ -273,6 +273,7 @@ export function createScene(canvas) {
     mode: 'fp', // fp(1인칭) | flight | idle(전경)
     pull: 0, // 0..1 당김(표시용)
     aimDeg: { x: 0, y: 0 }, // 흔들림 포함 조준(폰 도)
+    gain: SIGHT_GAIN, // 폰 1° 가 움직이는 비율(난이도마다 다름, game.js 가 정함)
     lens: 0, // 0..1 조준경 열림 정도
     wind: { speed: 0, dir: 0 },
     t: 0,
@@ -355,7 +356,7 @@ export function createScene(canvas) {
       viewCam.fov = cam.fov;
       viewCam.updateProjectionMatrix();
       // 활: 당길수록 시위·화살이 눈 쪽으로, 시선은 조준 각도만큼 돌아감
-      const psi = SIGHT_GAIN * Math.PI / 180;
+      const psi = (state.gain || SIGHT_GAIN) * Math.PI / 180;
       rig.rotation.set(state.aimDeg.y * psi * 0.4 + pitch0 * 0.0, -state.aimDeg.x * psi * 0.4, 0, 'YXZ');
       // 뷰모델을 카메라 좌표계에 그대로 두되(원점=눈) pitch0 만큼은 카메라에 맞춰 돌려 둠
       rig.rotation.x += 0;

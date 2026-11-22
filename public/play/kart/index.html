@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0b0d1a">
 <title>카트 컨트롤러</title>
+<script src="/common/i18n-wait.js"></script>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
 <style>
@@ -47,6 +48,7 @@
   .chip svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 
   /* 시작 화면 */
+  .lang-box { position: absolute; top: 8px; right: 10px; z-index: 5; }
   .phone-art { width: 150px; height: 96px; }
   .phone-art .ph { animation: hold 3.2s ease-in-out infinite; transform-origin: 75px 48px; }
   @keyframes hold { 0%, 20% { transform: rotate(-90deg) scale(.62); } 45%, 100% { transform: none; } }
@@ -55,11 +57,6 @@
   #vWait { align-items: center; justify-content: center; gap: 14px; flex-direction: column; overflow-y: auto; }
   .wait-main { display: flex; flex-direction: column; align-items: center; gap: 9px; text-align: center; width: 100%; max-width: 420px; }
   .wait-side { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 8px; }
-  .mode-note { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 14px; background: rgba(255,255,255,.05); border: 1px solid var(--line);
-    font-size: 12.5px; font-weight: 700; color: #c9d3e3; line-height: 1.35; }
-  .mode-note i { flex: none; width: 30px; height: 30px; display: grid; place-items: center; }
-  .mode-note i svg { width: 28px; height: 28px; }
-  .mode-note:empty { display: none; }
   #stage.land #vWait { flex-direction: row; align-items: center; gap: 22px; padding: 10px 22px; }
   #stage.land .wait-main { flex: 1 1 0; max-width: none; }
   #stage.land .wait-side { flex: 1 1 0; max-width: 400px; }
@@ -73,12 +70,6 @@
   .bar { width: 220px; max-width: 90%; height: 10px; border-radius: 6px; background: rgba(255,255,255,.1); position: relative; }
   .bar i { position: absolute; top: -4px; width: 4px; height: 18px; left: 50%; margin-left: -2px; border-radius: 2px; background: var(--c); }
   .bar b { position: absolute; left: 50%; top: -2px; width: 2px; height: 14px; background: rgba(255,255,255,.4); }
-  .cal-row { display: flex; align-items: center; gap: 22px; }
-  .cal-col { display: flex; flex-direction: column; gap: 8px; align-items: center; }
-  #stage.port .cal-row { flex-direction: column; gap: 14px; }
-  .hold-hint { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: rgba(255,207,138,.12); color: #ffcf8a; font-size: 13px; font-weight: 800; }
-  .hold-hint svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; animation: turn 2.2s ease-in-out infinite; }
-  @keyframes turn { 0%, 25% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
 
   /* 경기 중: 가로면 왼쪽 브레이크 · 가운데 핸들 · 오른쪽 액셀, 세로면 위 핸들 · 아래 두 페달 */
   #vPlay { padding: 10px 12px; gap: 12px; display: none; }
@@ -90,8 +81,17 @@
   .mid { grid-area: mid; }
   .pedal { border-radius: 28px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 0;
     font-weight: 900; font-size: clamp(20px, 6vmin, 38px); letter-spacing: -.02em; touch-action: none; transition: transform .05s, filter .05s; position: relative; overflow: hidden; }
-  .pedal small { font-size: 13px; font-weight: 700; opacity: .75; letter-spacing: 0; }
-  .pedal svg { width: clamp(40px, 14vmin, 84px); height: clamp(40px, 14vmin, 84px); fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .pedal .pico { display: grid; place-items: center; }
+  /* 오른쪽 큰 버튼: 쉬움·보통은 아이템 버튼(아이템전) 또는 브레이크(스피드전), 어려움은 액셀 */
+  #pGas.item { background: radial-gradient(circle at 50% 35%, #2b3352, #121729 72%); color: #cfd8ee; box-shadow: 0 10px 0 #0a0e1c, inset 0 0 0 3px rgba(255,255,255,.18); }
+  #pGas.item .pico svg { display: block; width: clamp(48px, 18vmin, 104px); height: clamp(48px, 18vmin, 104px); filter: drop-shadow(0 3px 5px rgba(0,0,0,.5)); }
+  #pGas.item.none .pico { opacity: .3; filter: grayscale(1); }
+  #pGas.item.roll { box-shadow: 0 10px 0 #0a0e1c, inset 0 0 0 3px #fff, 0 0 26px rgba(255,230,120,.6); }
+  #pGas.item.have { background: radial-gradient(circle at 50% 35%, #4a3d12, #1c1606 72%); color: #ffd23a; box-shadow: 0 10px 0 #5a4708, inset 0 0 0 3px #ffd23a, 0 0 30px rgba(255,210,58,.55); }
+  #pGas.item.down { box-shadow: 0 2px 0 #5a4708, inset 0 0 0 3px #ffd23a; }
+  #pGas.brake { background: linear-gradient(180deg, #ff6a74, #c8283a); color: #fff; box-shadow: 0 10px 0 #7d1522; }
+  #pGas.brake.down { box-shadow: 0 2px 0 #7d1522; }
+  .pedal svg.pi { width: clamp(40px, 14vmin, 84px); height: clamp(40px, 14vmin, 84px); fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
   #pBrake { background: linear-gradient(180deg, #ff6a74, #c8283a); color: #fff; box-shadow: 0 10px 0 #7d1522; }
   #pGas { background: linear-gradient(180deg, #4be58a, #1b9e55); color: #04210f; box-shadow: 0 10px 0 #0c5e31; }
   .pedal.down { transform: translateY(8px); filter: brightness(1.18); }
@@ -168,13 +168,6 @@
   .tk-gauge i { position: absolute; top: 3px; width: 26px; height: 26px; margin-left: -13px; left: 50%; border-radius: 50%; background: var(--c); box-shadow: 0 0 14px var(--c); }
   .tk-gauge .goal { position: absolute; top: 0; bottom: 0; width: 22%; border-radius: 17px; background: color-mix(in srgb, var(--c) 22%, transparent); border: 1.5px dashed var(--c); }
   .tk-gauge em { position: absolute; inset: 0; display: grid; place-items: center; font-style: normal; font-size: 11px; color: var(--dim); pointer-events: none; }
-  .tk-pedals { display: flex; gap: 12px; height: 84px; }
-  .tk-pedals button { flex: 1; border-radius: 18px; font-weight: 900; font-size: 18px; position: relative; overflow: hidden; touch-action: none; }
-  .tk-pedals .b { background: linear-gradient(180deg, #ff6a74, #c8283a); color: #fff; box-shadow: 0 6px 0 #7d1522; }
-  .tk-pedals .g { background: linear-gradient(180deg, #4be58a, #1b9e55); color: #04210f; box-shadow: 0 6px 0 #0c5e31; }
-  .tk-pedals button.dim { opacity: .45; }
-  .tk-pedals button.down { transform: translateY(5px); box-shadow: none; }
-  .tk-pedals button s { position: absolute; left: 0; bottom: 0; height: 6px; width: 0; background: rgba(255,255,255,.85); text-decoration: none; }
   .tk-item { align-self: center; width: 92px; height: 92px; border-radius: 50%; display: grid; place-items: center; touch-action: none;
     background: radial-gradient(circle at 50% 35%, #4a3d12, #1c1606 72%); box-shadow: inset 0 0 0 3px #ffd23a, 0 0 28px rgba(255,210,58,.55); animation: ready 1s ease-in-out infinite alternate; }
   .tk-item span { width: 62%; height: 62%; display: grid; place-items: center; }
@@ -182,6 +175,9 @@
   .tk-item.fly span { animation: fly .6s ease-in forwards; }
   @keyframes fly { to { transform: translate(0, -60px) scale(.4) rotate(160deg); opacity: 0; } }
   .tut-link-wrap { display: flex; justify-content: center; }
+  .sub-links { gap: 18px; }
+  .linkbtn { background: none; color: var(--dim); font-size: 13px; font-weight: 700; text-decoration: underline; padding: 10px 6px; }
+  #waitHint:empty { display: none; }
 </style>
 </head>
 <body>
@@ -190,6 +186,7 @@
 
 <!-- 처음 -->
 <section class="view center on" id="vStart">
+  <div class="lang-box" id="langBox"></div>
   <svg class="phone-art" viewBox="0 0 150 96" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g class="ph">
     <rect x="19" y="16" width="112" height="64" rx="12" fill="#0b0f17" stroke="#fff" stroke-width="3"/>
     <circle cx="75" cy="48" r="20" stroke="var(--c)" stroke-width="5"/>
@@ -197,12 +194,8 @@
     <path d="M75 28v8M58 58l7-4M92 58l-7-4" stroke="var(--c)" stroke-width="4"/>
   </g></svg>
   <h1>폰이 카트 핸들이 됩니다</h1>
-  <p>폰을 가로로 세워 양손으로 잡고 핸들처럼 기울여요.
-왼쪽 엄지는 브레이크, 오른쪽 엄지는 액셀.</p>
-  <div class="chips">
-    <span class="chip"><svg viewBox="0 0 24 24"><rect x="5" y="9" width="14" height="11" rx="2"/><path d="M8 9V6a4 4 0 0 1 8 0v3"/></svg>화면 회전 잠금, 그대로 둬도 돼요</span>
-  </div>
-  <p class="note hidden" id="httpNote">https 주소가 아니라서 동작 센서가 꺼질 수 있어요. 그때는 화면 가운데를 밀어서 조향해요.</p>
+  <p>폰을 가로로 들고 핸들처럼 기울여요.</p>
+  <p class="note hidden" id="httpNote">https 주소로 열어야 기울여서 조향해요</p>
   <button class="primary" id="btnStart">시작하기</button>
 </section>
 
@@ -216,43 +209,22 @@
     <h1 id="waitT">대기실</h1>
     <p id="waitB"></p>
     <div class="row">
-      <button class="ghost" id="btnCal">핸들 맞추기</button>
       <button class="primary" id="btnReady">준비</button>
     </div>
-    <div class="tut-link-wrap" id="tutLink"></div>
+    <p class="note" id="waitHint"></p>
+    <div class="row sub-links">
+      <button class="linkbtn" id="btnCal">다시 맞추기</button>
+      <div class="tut-link-wrap" id="tutLink"></div>
+    </div>
   </div>
   <div class="wait-side">
     <div id="setBox"></div>
-    <div class="mode-note" id="modeNote"></div>
-  </div>
-</section>
-
-<!-- 핸들 맞추기 -->
-<section class="view center" id="vCal">
-  <div class="cal-row">
-    <div class="wheel"><svg viewBox="0 0 100 100" fill="none" stroke-linecap="round"><g class="rot" id="calWheel">
-      <circle cx="50" cy="50" r="40" stroke="#fff" stroke-width="9"/>
-      <path d="M50 50V13M50 50L19 68M50 50L81 68" stroke="#fff" stroke-width="7"/>
-      <circle cx="50" cy="50" r="9" fill="var(--c)" stroke="none"/>
-      <rect x="46" y="4" width="8" height="12" rx="2" fill="#ffd23a" stroke="none"/>
-    </g></svg></div>
-    <div class="cal-col">
-      <h1 id="calT">핸들 맞추기</h1>
-      <p id="calB">폰을 가로로 세워, 핸들을 똑바로 잡은 자세에서
-영점 맞추기를 누르세요. 그 자세가 직진이에요.</p>
-      <div class="hold-hint hidden" id="holdHint"><svg viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="18" rx="2"/></svg>폰을 가로로 눕혀 핸들처럼 잡아요</div>
-      <div class="bar"><b></b><i id="calBar"></i></div>
-      <div class="row">
-        <button class="ghost" id="btnZero">영점 맞추기</button>
-        <button class="primary" id="btnCalDone" style="padding:10px 22px;font-size:16px;min-width:0">완료</button>
-      </div>
-    </div>
   </div>
 </section>
 
 <!-- 경기 중 -->
 <section class="view" id="vPlay">
-  <button class="pedal" id="pBrake" aria-label="브레이크"><svg viewBox="0 0 48 48"><rect x="10" y="10" width="28" height="28" rx="6"/></svg>브레이크<small>왼쪽 엄지</small></button>
+  <button class="pedal" id="pBrake" aria-label="브레이크"><svg class="pi" viewBox="0 0 48 48"><rect x="10" y="10" width="28" height="28" rx="6"/></svg>브레이크</button>
   <div class="mid" id="mid">
     <div class="top"><span class="me" id="meP">…</span><span class="status" id="status">달릴 준비</span></div>
     <div class="hub">
@@ -264,14 +236,14 @@
       </g></svg>
       <button class="itembtn none" id="btnItem" aria-label="아이템 쓰기"><span class="ico" id="itemIco"></span></button>
     </div>
-    <div class="ilbl" id="itemLbl">상자를 먹어요</div>
+    <div class="ilbl" id="itemLbl"></div>
     <div class="bar"><b></b><i id="bar"></i></div>
-    <div class="sub" id="sub">폰을 핸들처럼 기울여요</div>
+    <div class="sub" id="sub"></div>
     <div class="chase-p" id="chaseP"><i id="chaseIco"></i><span>추격 부스트</span></div>
-    <div class="slide" id="slide"><i id="slideKnob"></i><em>동작 센서가 없어요 · 여기를 좌우로 밀어서 조향</em></div>
+    <div class="slide" id="slide"><i id="slideKnob"></i><em>여기를 좌우로 밀어요</em></div>
     <div class="cd" id="cd"></div>
   </div>
-  <button class="pedal" id="pGas" aria-label="액셀"><svg viewBox="0 0 48 48"><path d="M10 26l14-14 14 14"/><path d="M10 40l14-14 14 14"/></svg>액셀<small>오른쪽 엄지</small></button>
+  <button class="pedal" id="pGas" aria-label="액셀"><span class="pico" id="pGasIco"></span><span id="pGasLbl">액셀</span></button>
 </section>
 
 <div id="flash"></div>
@@ -279,6 +251,8 @@
 </div></div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/kart/i18n.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
 <script type="module" src="controller.js"></script>
 </body>
 </html>

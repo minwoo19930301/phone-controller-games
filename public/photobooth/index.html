@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#140e16">
 <title>네컷 사진관</title>
+<script src="/common/i18n-wait.js"></script>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
 <link rel="stylesheet" href="style.css">
@@ -16,9 +17,10 @@
 <section id="lobby" class="screen lobby-screen">
   <div class="lobby">
     <div class="l-left">
+      <div class="lang-box" id="langBox"></div>
       <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 · 셀카 네컷</div>
       <h1 class="wordmark">네컷 사진관<small>FOUR-CUT PHOTO BOOTH</small></h1>
-      <p class="lede">각자 폰으로 셀카를 찍어 네컷을 만들고, 마지막엔 다 같이 낙서하고 스티커를 붙여 저장해요.</p>
+      <p class="lede">폰으로 셀카 찍고, 네 컷 만들고, 같이 꾸며요.</p>
       <div class="pick">
         <div class="pick-label">모드<kbd>M</kbd></div>
         <div class="modes" id="modes"></div>
@@ -44,7 +46,7 @@
           <div class="qr-k">폰 카메라로 찍어 들어와요</div>
           <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
           <div class="qr-url" id="url"></div>
-          <div class="qr-warn hidden" id="warn">http 주소라 폰 카메라가 안 켜질 수 있어요. 그때는 폰이 '직접 찍기'로 바꿔 찍어요. https 주소면 실시간으로 찍혀요.</div>
+          <div class="qr-warn hidden" id="warn">http라서 폰 카메라 앱으로 찍어요</div>
         </div>
       </div>
     </div>
@@ -74,9 +76,9 @@
   <div class="result" id="result">
     <div class="r-eyebrow">DONE</div>
     <h2 class="r-title" id="rTitle">완성!</h2>
-    <p class="r-sub" id="rSub">폰에서도 바로 저장할 수 있어요.</p>
+    <p class="r-sub" id="rSub">폰에서도 저장할 수 있어요</p>
     <div class="r-btns" id="rBtns"></div>
-    <div class="r-note"><i></i><span id="rNote">사진은 이 화면과 서버 메모리에만 있고 10분 뒤 사라져요</span></div>
+    <div class="r-note"><i></i><span id="rNote">사진은 10분 뒤 사라져요</span></div>
     <div class="r-next" id="rNext"></div>
     <div class="r-keys"><kbd>S</kbd> 저장 <span class="dot"></span> 폰에서 모두 준비하면 한 번 더 <span class="dot"></span> <kbd>Esc</kbd> 처음으로</div>
   </div>
@@ -96,6 +98,8 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/photobooth/i18n.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
 <script type="module" src="booth.js"></script>
 </body>
 </html>

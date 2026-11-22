@@ -2,6 +2,7 @@
 // 사람마다 세로 길 하나(내 색). 맨 위에 받침 화살표(리셉터)가 있고 노트는 아래에서 위로 올라옵니다(DDR 방식).
 // 판정 글자, 콤보, 점수, 체력 띠, 맞힌 자리 불꽃, 박자 줄, 길게 누르기 몸통을 그립니다.
 // 시간은 모두 곡 시간(초)입니다.
+import { t } from '/common/i18n.js';
 
 const ANTON = 'Anton, Impact, sans-serif';
 const SANS = '"Pretendard Variable", Pretendard, -apple-system, system-ui, sans-serif';
@@ -18,7 +19,7 @@ const JCOL = {
 };
 const JTEXT = { perfect: 'PERFECT', great: 'GREAT', good: 'GOOD', miss: 'MISS', ok: 'OK!', ng: 'NG' };
 const DIFF_KO = { easy: '쉬움', normal: '보통', hard: '어려움' };
-const VISIBLE = { easy: 2.0, normal: 1.65, hard: 1.35 }; // 아래 끝에서 받침까지 걸리는 시간(초)
+const VISIBLE = { easy: 2.4, normal: 2.0, hard: 1.35 }; // 아래 끝에서 받침까지 걸리는 시간(초). 쉬움이 가장 천천히
 
 function hexToRgb(h) {
   const s = h.replace('#', '');
@@ -286,10 +287,10 @@ export function createHighways(canvas) {
     g.fillStyle = '#e8eef8';
     g.font = `800 15px ${SANS}`;
     const modeTxt = p.input === 'motion' ? '모션' : lanes === 5 ? '패드 5키' : '패드';
-    g.fillText(modeTxt + (p.bot ? ' · 봇' : p.keys ? ' · 키보드' : ''), x + 76, hy + 10);
+    g.fillText(p.bot ? t('{mode} · 봇', { mode: modeTxt }) : p.keys ? t('{mode} · 키보드', { mode: modeTxt }) : t(modeTxt), x + 76, hy + 10);
     g.fillStyle = '#9fb0cc';
     g.font = `700 13px ${SANS}`;
-    g.fillText(`${DIFF_KO[p.diff] || '보통'} · ★${p.stars || 1}`, x + 76, hy + 28);
+    g.fillText(t('{d} · ★{k}', { d: DIFF_KO[p.diff] || '보통', k: p.stars || 1 }), x + 76, hy + 28);
     g.textAlign = 'right';
     g.fillStyle = '#fff';
     g.font = `400 ${w < 300 ? 24 : 30}px ${ANTON}`;
@@ -483,11 +484,6 @@ export function createHighways(canvas) {
         g.strokeText(JTEXT[j] || j, 0, 0);
         g.fillStyle = tg;
         g.fillText(JTEXT[j] || j, 0, 0);
-        if ((j === 'great' || j === 'good') && !fx.popup.hold) {
-          g.font = `800 ${Math.round(fs * 0.26)}px ${SANS}`;
-          g.fillStyle = fx.popup.wrong ? '#ffcf8a' : fx.popup.early ? '#7cc8ff' : '#ff9a7a';
-          g.fillText(fx.popup.wrong ? '방향 봐줌' : fx.popup.early ? '빨라요' : '늦어요', 0, fs * 0.62);
-        }
         g.restore();
       }
     }
@@ -528,10 +524,10 @@ export function createHighways(canvas) {
       g.textAlign = 'center';
       g.fillStyle = '#fff';
       g.font = `800 20px ${SANS}`;
-      g.fillText('연결이 끊겼어요', x + w / 2, H * 0.5);
+      g.fillText(t('연결이 끊겼어요'), x + w / 2, H * 0.5);
       g.fillStyle = '#9fb0cc';
       g.font = `700 15px ${SANS}`;
-      g.fillText('다시 들어오면 이어서 해요', x + w / 2, H * 0.5 + 26);
+      g.fillText(t('다시 들어오면 이어서 해요'), x + w / 2, H * 0.5 + 26);
     }
     g.restore();
   }

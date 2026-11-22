@@ -175,7 +175,6 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
   color: var(--fg); animation: pop 0.4s cubic-bezier(.2, 1.6, .4, 1); box-shadow: 0 0 22px color-mix(in srgb, var(--c) 25%, transparent); }
 .slot.cal small { color: var(--c); }
 .slot.away { opacity: 0.45; }
-.slot.away small::after { content: " · 끊김"; }
 @keyframes pop { from { transform: scale(0.9); } to { transform: none; } }
 .hint { color: var(--dim); font-size: 15px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .qr-card { flex: none; width: clamp(280px, 21vw, 360px); padding: 24px; border-radius: 26px; background: #f5f6fb; color: #0b1220;
@@ -257,3 +256,8 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .xh.lock .ring { stroke-width: 3.6; }
 .xh.down .lk { opacity: 0; }
 .hint b { color: var(--fg); }
+
+/* ---------- 언어 (라운드 4) ---------- */
+.langbox { position: absolute; top: clamp(14px, 2.4vh, 26px); right: var(--padx, 32px); z-index: 6; }
+.qr-code { flex-wrap: wrap; row-gap: 2px; }
+.qr-code span { white-space: nowrap; }

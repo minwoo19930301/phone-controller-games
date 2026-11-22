@@ -2,7 +2,8 @@
 //   4키(DDR): 화면을 대각선으로 4칸(위·아래·왼쪽·오른쪽 삼각형)으로 나눕니다. 화살표 방향 = 누를 칸이라 외울 것이 없습니다.
 //   5키(펌프): 네 귀퉁이(↖ ↗ ↙ ↘) + 가운데 동그라미(●).
 // 칸은 요소의 실제 크기(getBoundingClientRect)로 정하므로, 화면을 돌려도 맞습니다.
-// 여러 손가락을 따로 따라가고(동시 누르기), 누른 채 옆 칸으로 밀면 앞 칸을 떼고 새 칸을 누른 것으로 칩니다.
+// 여러 손가락을 따로 따라가고(동시 누르기), 누른 채 옆 칸으로 밀면(slidePx 이상 움직였을 때만) 앞 칸을 떼고 새 칸을 누른 것으로 칩니다.
+// slidePx = Infinity(기본, 쉬움·보통): 칸은 누른 순간에 정해지고 손가락이 흘러도 그대로. 어려움은 setSlide(20) 로 밀기를 허용합니다.
 // 누르는 순간 칸이 밝게 켜지고, 큰 화면 판정이 오면 그 칸에 판정 색 고리가 터집니다.
 //
 //   const pad = createPad(el, { lanes: 4, color: '#ff5a5f', onPress(lane, info), onRelease(lane, info) });
@@ -71,6 +72,8 @@ export function createPad(container, opts = {}) {
   }
   const ripples = [];
   const pointers = new Map(); // pointerId -> lane
+  const origin = new Map(); // pointerId -> 칸을 정한 자리(밀기 거리 재는 기준)
+  let slidePx = opts.slidePx != null ? opts.slidePx : Infinity;
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -340,6 +343,7 @@ export function createPad(container, opts = {}) {
     const p = local(e);
     const l = laneAt(lanes, p.x, p.y, p.w, p.h);
     pointers.set(e.pointerId, l);
+    origin.set(e.pointerId, { x: p.x, y: p.y });
     ripples.push({ x: p.x, y: p.y, t: performance.now() });
     press(l, { t: stampOf(e), x: p.x, y: p.y });
   }
@@ -350,8 +354,12 @@ export function createPad(container, opts = {}) {
     const l = laneAt(lanes, p.x, p.y, p.w, p.h);
     const prev = pointers.get(e.pointerId);
     if (l === prev) return;
+    // 손가락이 살짝 흘러서 경계를 넘은 것은 무시합니다(헛 스텝·길게 누르기 끊김 방지)
+    const o0 = origin.get(e.pointerId) || p;
+    if (Math.hypot(p.x - o0.x, p.y - o0.y) < slidePx) return;
     // 밀어서 옆 칸으로: 앞 칸은 떼고 새 칸은 누른 것으로
     pointers.set(e.pointerId, l);
+    origin.set(e.pointerId, { x: p.x, y: p.y });
     const t = stampOf(e);
     release(prev, { t, x: p.x, y: p.y, slide: true });
     press(l, { t, x: p.x, y: p.y, slide: true });
@@ -360,6 +368,7 @@ export function createPad(container, opts = {}) {
     if (!pointers.has(e.pointerId)) return;
     const l = pointers.get(e.pointerId);
     pointers.delete(e.pointerId);
+    origin.delete(e.pointerId);
     const p = local(e);
     release(l, { t: stampOf(e), x: p.x, y: p.y });
   }
@@ -371,6 +380,7 @@ export function createPad(container, opts = {}) {
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   function releaseAll() {
+    origin.clear();
     for (const [id, l] of pointers) { pointers.delete(id); release(l, { t: performance.now() }); }
     for (let l = 0; l < st.length; l++) while (st[l].down > 0) release(l, { t: performance.now() });
   }
@@ -387,6 +397,7 @@ export function createPad(container, opts = {}) {
       st = fresh();
       kick();
     },
+    setSlide(px) { slidePx = px > 0 ? px : Infinity; },
     setColor(c) { if (c && c !== color) { color = c; kick(); } },
     setEnabled(v) { enabled = Boolean(v); if (!enabled) releaseAll(); },
     /** 큰 화면 판정을 그 칸에 보여 줍니다 */

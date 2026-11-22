@@ -10,8 +10,13 @@ import { KINDS, HALF_W } from './models.js';
 import { sfx, audio } from './sfx.js';
 import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
 import { createTutorialBoard } from '/common/tutorial-board.js';
+import { t as tr, lang, mountSwitcher } from '/common/i18n.js';
+import './i18n.js';
 
 const $ = (id) => document.getElementById(id);
+// 점수 표기: 지금 언어의 자릿점
+const LOCALES = { ko: 'ko-KR', en: 'en-US', ja: 'ja-JP', zh: 'zh-CN' };
+const nf = (n) => Number(n).toLocaleString(LOCALES[lang()] || 'en-US');
 const params = new URLSearchParams(location.search);
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const num = (v, d) => (v !== null && v !== '' && v !== undefined && Number.isFinite(Number(v)) ? Number(v) : d);
@@ -36,31 +41,32 @@ const TRAVEL_SPEED = 6.5; // 레일 이동 속도(m/s)
 const CAM_Y = 1.62;
 
 // ---------- 난이도 ----------
-// 어려움 = 예전 그대로입니다. 보통·쉬움은 좀비가 느리고 적고 약하며, 조준점이 과녁에 달라붙고(자석) 장전이 빠릅니다.
+// 어려움 = 예전 그대로입니다. 보통 = 예전의 쉬움, 쉬움(기본) = 훨씬 더 넉넉합니다.
+//   쉬움·보통은 좀비가 느리고 적고 약하며, 조준점이 과녁에 달라붙고(자석) 장전이 빠르고 비면 저절로 장전합니다.
 //   speed·count·hp·dmg: 좀비 속도·마릿수·체력·주는 피해 배율, bite: 무는 간격 배율(클수록 느리게 묾)
 //   interval: 새로 나오는 간격 배율, maxK: 한꺼번에 나와 있는 최대 마릿수 배율
 //   hitbox: 맞는 범위를 넓히는 비율
 //   magnet: 조준점이 과녁 쪽으로 끌리기 시작하는 거리(화면 높이 비율), pull: 끌리는 세기(0~1)
 //   snap: 빗나가도 이 거리 안에 과녁이 있으면 그 과녁을 맞힘(화면 높이 비율)
-//   reload: 장전 시간(ms), revive: 부활 체력, heal: 구급상자 회복
+//   reload: 장전 시간(ms), revive: 부활 체력, heal: 구급상자 회복, auto: 탄이 비면 저절로 장전(사람도)
 //   bossHp·bossDmg: 보스 체력·내려치기 피해 배율, coreNeed: 공격을 끊는 데 필요한 코어 피해 배율, charge: 보스가 힘 모으는 시간(초)
-//   adds: 보스전 졸개가 나오는 간격(초)
+//   coreR: 보스 코어(약점) 판정 크기 배율, adds: 보스전 졸개가 나오는 간격(초)
 const DIFF = {
   easy: {
-    speed: 0.66, count: 0.62, hp: 0.75, dmg: 0.45, bite: 1.5, interval: 1.35, maxK: 0.7, hitbox: 0.34, magnet: 0.14, pull: 0.55, snap: 0.09,
-    reload: 650, revive: 80, heal: 45, bossHp: 0.6, bossDmg: 0.45, coreNeed: 0.55, charge: 2.7, adds: 12
+    speed: 0.55, count: 0.52, hp: 0.65, dmg: 0.3, bite: 1.8, interval: 1.5, maxK: 0.6, hitbox: 0.5, magnet: 0.2, pull: 0.75, snap: 0.14,
+    reload: 500, revive: 90, heal: 55, bossHp: 0.5, bossDmg: 0.3, coreNeed: 0.4, charge: 3.5, coreR: 0.26, auto: true, adds: 14
   },
   normal: {
-    speed: 0.82, count: 0.8, hp: 0.88, dmg: 0.7, bite: 1.22, interval: 1.15, maxK: 0.85, hitbox: 0.22, magnet: 0.08, pull: 0.32, snap: 0.045,
-    reload: 950, revive: 65, heal: 35, bossHp: 0.8, bossDmg: 0.7, coreNeed: 0.75, charge: 2.2, adds: 10
+    speed: 0.66, count: 0.62, hp: 0.75, dmg: 0.45, bite: 1.5, interval: 1.35, maxK: 0.7, hitbox: 0.34, magnet: 0.14, pull: 0.55, snap: 0.09,
+    reload: 650, revive: 80, heal: 45, bossHp: 0.6, bossDmg: 0.45, coreNeed: 0.55, charge: 3.0, coreR: 0.22, auto: true, adds: 12
   },
   hard: {
     speed: 1, count: 1, hp: 1, dmg: 1, bite: 1, interval: 1, maxK: 1, hitbox: 0.12, magnet: 0, pull: 0, snap: 0,
-    reload: 1300, revive: 50, heal: 30, bossHp: 1, bossDmg: 1, coreNeed: 1, charge: 1.8, adds: 8
+    reload: 1300, revive: 50, heal: 30, bossHp: 1, bossDmg: 1, coreNeed: 1, charge: 1.8, coreR: 0.16, auto: false, adds: 8
   }
 };
-let diff = 'normal';
-let D = DIFF.normal;
+let diff = 'easy';
+let D = DIFF.easy;
 const SLOT_INFO = {
   1: { name: '1P', color: '#ff5a5f' }, 2: { name: '2P', color: '#3ab4ff' }, 3: { name: '3P', color: '#ffc93c' }, 4: { name: '4P', color: '#5ee07a' },
   5: { name: '5P', color: '#c77dff' }, 6: { name: '6P', color: '#ff8fd1' }, 7: { name: '7P', color: '#3ee6d6' }, 8: { name: '8P', color: '#ff9b3d' }
@@ -124,7 +130,7 @@ socket.on('room', async (r) => {
   serverPlayers = r.players || [];
   syncRoster();
   // 서버가 다시 떠서 방이 새로 만들어졌으면 하던 판은 이어 갈 수 없으니 대기실로 돌아갑니다.
-  if (r.fresh && hadRoom && game.phase !== 'lobby') backToLobby('서버가 다시 시작돼서 대기실로 돌아왔어요');
+  if (r.fresh && hadRoom && game.phase !== 'lobby') backToLobby(tr('서버가 다시 시작됐어요'));
   hadRoom = true;
   $('code').textContent = r.code;
   $('codeMini').textContent = r.code;
@@ -157,7 +163,7 @@ socket.on('calibrate', (d) => onCalibrate(d));
 // 값의 주인은 이 화면입니다(localStorage 'pcg-settings-gun'). 폰의 알약 버튼·키보드 D 로 바꾸고, 판 중에는 잠급니다.
 const settings = createSettings({
   game: 'gun',
-  fields: [fields.difficulty({ hints: { easy: '느리고 적은 좀비 · 강한 조준 자석 · 빠른 장전', normal: '조금 느린 좀비 · 약한 조준 자석', hard: '빠르고 많은 좀비 · 조준 도움 없음' } })],
+  fields: [fields.difficulty()],
   onChange: () => {
     applyDifficulty();
     renderLobby();
@@ -196,7 +202,7 @@ function applyDifficulty() {
   // 판 중에는 시작할 때 정한 값을 그대로 씁니다(설정도 잠겨 있음).
   if (game.phase === 'playing') return;
   diff = settings.difficulty();
-  D = DIFF[diff] || DIFF.normal;
+  D = DIFF[diff] || DIFF.easy;
 }
 
 // ================================================================
@@ -425,7 +431,7 @@ function updateXh(P, dt, now) {
   u.el.classList.toggle('empty', P.ammo <= 0 && !reloading);
   u.el.classList.toggle('down', P.down);
   if (reloading) u.rld.setAttribute('stroke-dasharray', `${clamp(((now - P.reloadStart) / D.reload) * 100, 0, 100).toFixed(1)} 100`);
-  const txt = P.down ? '쓰러짐' : reloading ? '장전' : P.ammo <= 0 ? '장전!' : P.ammo <= 3 ? `${P.ammo}` : '';
+  const txt = P.down ? tr('쓰러짐') : reloading ? tr('장전') : P.ammo <= 0 ? tr('장전!') : P.ammo <= 3 ? `${P.ammo}` : '';
   if (u.ammo.textContent !== txt) u.ammo.textContent = txt;
 }
 
@@ -453,7 +459,7 @@ function updateCards() {
     const c = P.card;
     if (!c) continue;
     const L = c.last;
-    const sc = P.score.toLocaleString('ko-KR');
+    const sc = nf(P.score);
     if (L.sc !== sc) { c.sc.textContent = sc; L.sc = sc; }
     const hp = Math.ceil(P.hp);
     if (L.hp !== hp) {
@@ -469,9 +475,9 @@ function updateCards() {
     }
     const down = P.down;
     if (L.down !== down) { c.el.classList.toggle('down', down); L.down = down; }
-    const st = down ? '쓰러짐 · 다음 웨이브에 부활' : P.reloading ? '장전 중' : P.ammo <= 0 ? '장전!' : '';
+    const st = down ? tr('쓰러짐 · 다음 웨이브에 부활') : P.reloading ? tr('장전 중') : P.ammo <= 0 ? tr('장전!') : '';
     if (L.st !== st) { c.st.textContent = st; L.st = st; }
-    const cb = mult(P) > 1 ? `x${mult(P)} 콤보` : P.streak >= 3 ? `${P.streak} 연속` : '';
+    const cb = mult(P) > 1 ? tr('x{m} 콤보', { m: mult(P) }) : P.streak >= 3 ? tr('{n} 연속', { n: P.streak }) : '';
     if (L.cb !== cb) { c.cb.textContent = cb; L.cb = cb; }
   }
 }
@@ -538,7 +544,7 @@ function renderLobby() {
   if (!box) return;
   if (!slotEls.length) {
     for (let s = 1; s <= 8; s++) {
-      const d = el('div', 'slot', `<b>${SLOT_INFO[s].name}</b><small>비어 있음</small>`);
+      const d = el('div', 'slot', `<b>${SLOT_INFO[s].name}</b><small>${tr('비어 있음')}</small>`);
       d.style.setProperty('--c', SLOT_INFO[s].color);
       box.appendChild(d);
       slotEls.push({ d, b: d.querySelector('b'), sm: d.querySelector('small') });
@@ -548,13 +554,14 @@ function renderLobby() {
   for (let s = 1; s <= 8; s++) {
     const { d, sm } = slotEls[s - 1];
     const P = list.find((p) => p.slot === s);
-    let txt = '비어 있음';
+    let txt = tr('비어 있음');
     if (P) {
       if (P.bot) txt = 'BOT';
-      else if (practicing.has(s)) txt = '연습 중';
-      else if (readyNow.has(s)) txt = '준비 완료';
-      else if (P.calibrated) txt = '조준 완료';
-      else txt = '연결됨';
+      else if (practicing.has(s)) txt = tr('연습 중');
+      else if (readyNow.has(s)) txt = tr('준비 완료');
+      else if (P.calibrated) txt = tr('조준 완료');
+      else txt = tr('연결됨');
+      if (!P.connected && !P.bot) txt += ` · ${tr('끊김')}`; // 끊긴 사람 표시(예전엔 CSS 글자였습니다)
     }
     d.classList.toggle('on', Boolean(P));
     d.classList.toggle('away', Boolean(P && !P.connected));
@@ -701,7 +708,7 @@ function fire(P, x, y, now) {
   } else {
     hitZombie(P, hit.zb, hit.part, hit.point);
   }
-  if (P.ammo <= 0 && P.bot) startReload(P);
+  if (P.ammo <= 0 && (P.bot || D.auto)) startReload(P);
   pushState();
 }
 
@@ -797,7 +804,7 @@ function spawnZombie(kind, o = {}) {
   const r = model.radii;
   const sp = (part, anchor, rad) => ({ part, anchor, r: rad, p: new THREE.Vector3() });
   zb.spheres.push(sp('head', model.anchors.head, r.head), sp('body', model.anchors.chest, r.chest), sp('body', model.anchors.hip, r.hip));
-  if (model.anchors.core) zb.spheres.push(sp('core', model.anchors.core, 0.16 * model.scale));
+  if (model.anchors.core) zb.spheres.push(sp('core', model.anchors.core, D.coreR * model.scale));
   model.root.updateMatrixWorld(true);
   for (const s of zb.spheres) s.anchor.getWorldPosition(s.p);
   view.add(model.root);
@@ -815,7 +822,7 @@ function killZombie(zb, P, part, point) {
   zb.state = 'dying';
   zb.dyingT = 0;
   const big = zb.kind === 'brute' || zb.kind === 'boss';
-  sfx.die(big);
+  sfx.die(big, zb.kind === 'boss');
   if (part === 'head' && zb.kind !== 'boss') {
     zb.model.hideHead();
     bloodAt(zb.spheres[0].p, P, 30, 1.6);
@@ -849,7 +856,7 @@ function damagePlayer(P, dmg) {
     P.down = true;
     P.downs += 1;
     P.reloading = false;
-    banner(`${P.name} 쓰러짐`, '다음 웨이브가 끝나면 부활해요', 'bad', 1500);
+    banner(tr('{p} 쓰러짐', { p: P.name }), '', 'bad', 1500);
   }
   pushState(true);
 }
@@ -970,9 +977,9 @@ function bossAttack(zb, dt) {
     if (zb.cool <= 0) {
       zb.chargeT = D.charge;
       zb.coreDmg = 0;
-      sfx.alarm();
-      banner('코어를 쏴요!', '가슴의 주황빛 약점에 집중 사격', 'warn', 1600);
-      send('cue', { text: '보스가 힘을 모아요! 가슴의 코어를 쏴요!' });
+      sfx.alarm(true);
+      banner(tr('코어를 쏴요!'), '', 'warn', 1600);
+      send('cue', { text: '코어를 쏴요!' });
     }
     return;
   }
@@ -985,7 +992,7 @@ function bossAttack(zb, dt) {
     zb.cool = 2.5;
     zb.stunned = 2.4;
     zb.flinch = 1;
-    banner('저지!', '보스의 공격을 끊었어요', 'good', 1100);
+    banner(tr('저지!'), '', 'good', 1100);
     sfx.boom();
     return;
   }
@@ -1050,8 +1057,8 @@ function startWave(i) {
     game.crates.push({ m, pos, t0: game.gt });
   }
   sfx.wave();
-  banner(st.boss ? '보스 출현' : `WAVE ${i + 1}`, st.boss ? '거대 변이체가 다가와요' : '좀비가 몰려와요', st.boss ? 'bad' : 'warn', 1500);
-  send('cue', { text: st.boss ? '보스 출현!' : `웨이브 ${i + 1} 시작` });
+  banner(st.boss ? tr('보스 출현') : `WAVE ${i + 1}`, '', st.boss ? 'bad' : 'warn', 1500);
+  send('cue', { text: st.boss ? '보스 출현!' : `웨이브 ${i + 1}` });
   pushState(true);
 }
 function beginMove(toIdx) {
@@ -1067,7 +1074,7 @@ function beginMove(toIdx) {
   game.stageT = 0;
   const prev = toIdx > 0 ? STOPS[toIdx - 1].stage : -1;
   if (st.stage !== prev) {
-    banner(`STAGE ${st.stage + 1}`, STAGE_NAMES[st.stage], '', 2600);
+    banner(`STAGE ${st.stage + 1}`, tr(STAGE_NAMES[st.stage]), '', 2600);
     sfx.alarm();
   }
   pushState(true);
@@ -1094,8 +1101,8 @@ function waveClear() {
     victory();
     return;
   }
-  banner('CLEAR', revived.length ? `${revived.join(' ')} 부활!` : '+200 보너스 · 체력 조금 회복', 'good', 1700);
-  send('cue', { text: '웨이브 클리어' });
+  banner('CLEAR', revived.length ? tr('{p} 부활!', { p: revived.join(' ') }) : '+200', 'good', 1700);
+  send('cue', { text: 'CLEAR' });
   pushState(true);
 }
 function victory() {
@@ -1103,7 +1110,7 @@ function victory() {
   game.stage = 'end';
   game.stageT = 0;
   for (const P of players()) if (!P.down) P.score += Math.round(P.hp * 5);
-  banner('작전 성공!', '살아남은 체력만큼 보너스', 'good', 3000);
+  banner(tr('작전 성공!'), '', 'good', 3000);
   sfx.win();
   pushState(true);
 }
@@ -1112,7 +1119,7 @@ function defeat() {
   game.stage = 'end';
   game.stageT = 0;
   for (const zb of game.zombies) if (hostile(zb)) zb.stunned = 99;
-  banner('전멸...', '좀비에게 둘러싸였어요', 'bad', 3000);
+  banner(tr('전멸...'), '', 'bad', 3000);
   sfx.lose();
   pushState(true);
 }
@@ -1256,7 +1263,7 @@ function startGame() {
   if (game.phase === 'playing') return;
   const list = lobbyList().filter((p) => p.connected);
   if (!list.length) {
-    lobbyMessage('폰을 먼저 연결해 주세요. QR을 찍고 준비를 누르면 자리가 생겨요.');
+    lobbyMessage(tr('QR을 찍고 준비를 눌러요.'));
     return;
   }
   audio();
@@ -1309,7 +1316,7 @@ function showResults() {
   $('overEyebrow').textContent = game.victory ? 'MISSION COMPLETE' : 'MISSION FAILED';
   $('diffOver').textContent = DIFF_LABEL[diff] || '보통';
   $('diffOver').dataset.d = diff;
-  $('overTitle').textContent = game.victory ? '작전 성공' : '작전 실패';
+  $('overTitle').textContent = game.victory ? tr('작전 성공') : tr('작전 실패');
   rows.forEach((P, k) => {
     const acc = P.shots ? Math.round((P.hits / P.shots) * 100) : 0;
     const e = el('div', `r${P.down ? ' ko' : ''}`);
@@ -1320,11 +1327,11 @@ function showResults() {
       `<span class="num"><b>${P.headshots}</b><span>헤드샷</span></span>` +
       `<span class="num"><b>${acc}%</b><span>명중률</span></span>` +
       `<span class="num"><b>${P.bestStreak}</b><span>최고 연속</span></span>` +
-      `<span class="num big"><b>${P.score.toLocaleString('ko-KR')}</b><span>점수</span></span>`;
+      `<span class="num big"><b>${nf(P.score)}</b><span>점수</span></span>`;
     box.appendChild(e);
     if (!P.bot) {
       send('result', {
-        text: `${k + 1}위 · ${P.score.toLocaleString('ko-KR')}점`, rank: k + 1, of: rows.length, score: P.score, kills: P.kills,
+        text: `${k + 1}위 · ${P.score}점`, rank: k + 1, of: rows.length, score: P.score, kills: P.kills,
         headshots: P.headshots, accuracy: acc, win: game.victory
       }, P.slot);
     }
@@ -1503,7 +1510,7 @@ function tick() {
     if (game.phase === 'playing') {
       updateCards();
       const st = STOPS[Math.max(0, game.stopIdx)];
-      $('stageName').textContent = `${st.stage + 1} · ${STAGE_NAMES[st.stage]}`;
+      $('stageName').textContent = `${st.stage + 1} · ${tr(STAGE_NAMES[st.stage])}`;
       $('waveName').textContent = `WAVE ${Math.max(1, game.stopIdx + 1)}/${STOPS.length}`;
       const left = game.zombies.filter(hostile).length + (game.wave ? game.wave.queue.length : 0);
       $('foeLeft').textContent = String(left);
@@ -1519,6 +1526,21 @@ renderLobby();
 startPractice();
 syncXh();
 requestAnimationFrame(tick);
+// "모두 [준비]" 처럼 굵은 낱말이 문장 가운데 끼는 안내는 한 문장 틀로 만들고 낱말만 굵게 합니다.
+function paintHints() {
+  for (const [id, word] of [['hintReady', '준비'], ['hintAgain', '다시 하기']]) {
+    const [pre, post = ''] = tr('모두 {x}', { x: '\u0001' }).split('\u0001');
+    const sp = $(id);
+    if (!sp) continue;
+    const b = document.createElement('b');
+    b.textContent = tr(word);
+    sp.textContent = pre;
+    sp.append(b, post);
+  }
+}
+paintHints();
+// 언어 고르기: 대기실에서만 보입니다(바꾸면 새로 고쳐 3D 간판 글자도 다시 그립니다).
+mountSwitcher($('langBox'), { reload: true, compact: true });
 applyDifficulty();
 renderLobby();
 // ?autostart 는 봇·마우스 시험 전용입니다. 폰이 한 대라도 들어와 있으면 모두 준비로만 시작합니다.

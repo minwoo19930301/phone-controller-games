@@ -5,10 +5,12 @@ import { haptics } from '/common/haptics.js';
 import { createPhoneSettings } from '/common/phone-settings.js';
 import { createTutorial } from '/common/tutorial.js';
 import { createSynth } from '/common/music/synth.js';
-import { getSong } from '/common/music/songs.js';
+import { getSong, songTitle, songComposer } from '/common/music/songs.js';
+import { mountSwitcher, lang } from '/common/i18n.js';
 import { drawCover } from '/common/disc-picker.js';
-import { INSTRUMENTS, INST_ORDER, ICONS, buildPart, GRADE_WORD, JUDGE_LABEL, DIFF_LABEL, isSustain } from '/orchestra/parts.js';
+import { INSTRUMENTS, INST_ORDER, ICONS, buildPart, GRADE_WORD, JUDGE_LABEL, DIFF_LABEL, isSustain, T } from '/orchestra/parts.js';
 import { createScore } from '/orchestra/score.js';
+import { sampleKit, PHONE_NAMES } from '/orchestra/sounds.js';
 import { createInstrument } from './instruments.js';
 import { sensors } from './sensors.js';
 import { openMic, MIC_SIM } from './audio-in.js';
@@ -19,7 +21,8 @@ const ROOM = (params.get('room') || '').toUpperCase();
 const DEBUG = params.has('debug');
 const SENSOR_WAIT_MS = 1500;
 const PLAY_URL = (g) => (g === 'baseball' ? '/play/' : `/play/${g}/`);
-$('room').textContent = ROOM ? `방 ${ROOM}` : '';
+$('room').textContent = ROOM ? T('방 {code}', { code: ROOM }) : '';
+mountSwitcher($('langBox'), { reload: true, compact: true }); // 언어 고르기: 시작 화면에서만 보임
 if (!window.isSecureContext) $('httpNote').classList.remove('hidden');
 $('heroIcons').innerHTML = INST_ORDER.map((k, i) => {
   const a = (i / INST_ORDER.length) * Math.PI * 2 - Math.PI / 2;
@@ -74,8 +77,15 @@ function ensureSynth() {
 }
 function voice(name) {
   ensureSynth();
-  if (!voices.has(name)) voices.set(name, synth.instrument(name, { gain: name === 'drums' ? 1.25 : name === 'castanets' ? 1.2 : 1 }));
-  return voices.get(name);
+  // 드럼·지휘 박 소리·캐스터네츠는 실제 녹음 1~3개(고른 악기에 맞게)를 먼저 틀고, 못 받았으면 합성음. 지휘자는 드럼 소리통을 박 딸깍에만 씁니다.
+  const sampled = name === 'drums' || name === 'castanets';
+  const key = sampled ? `${name}:${myInst}` : name;
+  if (!voices.has(key)) {
+    const v = synth.instrument(name, { gain: name === 'drums' ? 1.25 : name === 'castanets' ? 1.2 : 1 });
+    const names = sampled ? PHONE_NAMES[myInst === 'castanets' ? 'castanets' : myInst === 'conductor' ? 'conductor' : 'drum'] : null;
+    voices.set(key, names ? sampleKit(v, names) : v);
+  }
+  return voices.get(key);
 }
 // 마이크: 관악기는 숨소리를 그대로(잡음 억제 끔), 성악은 목소리용(잡음 억제·자동 크기). 고를 때 탭 안에서 미리 엽니다.
 let micP = null, micKind = null;
@@ -149,7 +159,7 @@ function myInfo() {
 function myDiff() {
   const info = myInfo();
   if (state.phase === 'playing' && info && info.diff) return info.diff;
-  return ps.get('difficulty') || 'normal';
+  return ps.get('difficulty') || 'easy';
 }
 
 // ───────── 악보 ─────────
@@ -202,6 +212,8 @@ function ensureInstrument() {
   instKey = myInst;
   ensureSynth();
   inst = createInstrument(myInst, env);
+  // 탭 없이 센서 악기가 정해진 경우(큰 화면이 정해 줌): 권한 창은 못 띄우지만 센서가 열려 있으면 바로 씁니다
+  if (INSTRUMENTS[myInst].motion && !motionAsked) { motionAsked = true; sensors.start(); probeMotion(); }
   $('instArea').textContent = '';
   $('instArea').appendChild(inst.el);
   const label = INSTRUMENTS[myInst].label;
@@ -212,7 +224,6 @@ function ensureInstrument() {
     steps: inst.tutorial(),
     onStep: (i) => { if (inst && inst.onTutStep) inst.onTutStep(i); },
     onDone: () => { sendInstrument(); render(); },
-    finish: { title: '연습 끝!', body: `이제 ${label}로 연주할 수 있어요.\n다른 악기로 바꾸고 싶으면 ‘악기 바꾸기’를 눌러요.`, button: '좋아요' },
   });
   $('tutLink').textContent = '';
   tut.link($('tutLink'), { before: () => state.phase !== 'playing' });
@@ -222,10 +233,10 @@ function sendInstrument() {
   if (!myInst || !me) return;
   send('instrument', { inst: myInst, fresh: tutFirst(myInst) });
 }
-function tutFirst(k) {
-  if (params.get('tut') === '1') return true;
-  if (params.get('tut') === '0') return false;
-  try { return !localStorage.getItem(`pcg-tut-orchestra-${k}`); } catch (e) { return false; }
+// 연습 단계(자유 연습)는 저절로 끼지 않습니다. 주소에 ?tut=1 이 있거나 대기실에서 '연습하고 시작'을 켰을 때만.
+let wantPractice = false;
+function tutFirst() {
+  return params.get('tut') === '1' || wantPractice;
 }
 
 // ───────── 화면 ─────────
@@ -266,6 +277,7 @@ $('instGrid').addEventListener('click', (e) => {
   ensureSynth().resume();
   // 마이크가 필요한 악기는 이 탭 안에서 바로 권한을 묻습니다(iPhone).
   if (INSTRUMENTS[k].mic) ensureMic(k === 'voice');
+  if (INSTRUMENTS[k].motion) askMotion();
   myInst = k;
   instChosen = true;
   picking = false;
@@ -288,6 +300,11 @@ function previewSound(k) {
 }
 $('instChip').addEventListener('click', () => { if (state.phase !== 'playing') { picking = true; render(); } });
 $('btnChange').addEventListener('click', () => { if (state.phase !== 'playing') { picking = true; render(); } });
+$('btnPractice').addEventListener('click', () => {
+  wantPractice = !wantPractice;
+  $('btnPractice').classList.toggle('on', wantPractice);
+  sendInstrument();
+});
 $('btnTutorial').addEventListener('click', () => { if (tut && !tut.isRunning() && state.phase !== 'playing') tut.run(); });
 
 function renderRoster() {
@@ -305,12 +322,12 @@ function setReadyButton(label, enabled, status) {
   b.classList.toggle('done', myReady);
   b.classList.toggle('off', !enabled && !myReady);
   b.dataset.enabled = enabled ? '1' : '0';
-  $('dockStatus').textContent = myReady ? '다른 사람을 기다리는 중이에요' : status || '';
+  $('dockStatus').textContent = myReady ? '다른 사람을 기다려요' : status || '';
 }
 $('btnReady').addEventListener('click', () => {
   if (myReady) { haptics.play('warn', 0.4); return; }
   if ($('btnReady').dataset.enabled !== '1') { haptics.play('warn', 0.5); render(); return; }
-  if (tut && tut.isRunning()) return;
+  if (tut && tut.isRunning()) tut.cancel(); // 튜토리얼이 떠 있어도 준비는 늘 먹습니다
   ensureSynth().resume();
   keepAwake();
   if (send('start_game', {})) {
@@ -357,7 +374,7 @@ function render() {
       tutRanFor = myInst;
       if (tut.firstTime()) setTimeout(() => { if (state.phase === 'practice' && tut && !tut.isRunning()) tut.run(); }, 250);
     }
-    setReadyButton('연습 끝 · 준비', !(tut && tut.isRunning()), tut && tut.firstTime() ? '튜토리얼을 마치면 준비를 눌러요' : '자유롭게 쳐 보고, 다 됐으면 준비');
+    setReadyButton('연습 끝 · 준비', true, '');
     $('btnTutorial').classList.toggle('hidden', false);
     return;
   }
@@ -376,10 +393,11 @@ function render() {
   const I = INSTRUMENTS[myInst];
   $('lobIcon').innerHTML = ICONS[myInst];
   $('lobName').textContent = I.label;
-  $('lobRole').textContent = `맡은 파트 · ${I.role}`;
+  $('lobRole').textContent = T('맡은 파트 · {role}', { role: I.role });
   $('lobHow').textContent = I.how;
   renderRoster();
-  setReadyButton('준비', true, tutFirst(myInst) ? '처음 고른 악기라 시작 전에 잠깐 연습해요' : '모두 준비를 누르면 시작해요');
+  $('btnPractice').classList.toggle('on', wantPractice);
+  setReadyButton('준비', true, '');
   show('vLobby');
 }
 
@@ -401,26 +419,26 @@ function renderSelect() {
       $('selCover').src = drawCover(song, 240);
       $('selCover').dataset.id = song.id;
     }
-    $('selTitle').textContent = song.title;
-    $('selSub').textContent = `${song.en} · ${song.composer}`;
-    $('selMeta').textContent = `${song.bpm} BPM · ${Math.floor(song.lengthSec / 60)}:${String(Math.round(song.lengthSec % 60)).padStart(2, '0')} · ${song.mood || ''}`;
+    $('selTitle').textContent = songTitle(song);
+    $('selSub').textContent = lang() === 'ko' ? `${song.en} · ${song.composer}` : songComposer(song);
+    $('selMeta').textContent = `${song.bpm} BPM · ${Math.floor(song.lengthSec / 60)}:${String(Math.round(song.lengthSec % 60)).padStart(2, '0')}${song.mood ? ' · ' + T(song.mood) : ''}`;
   }
-  const drv = p && p.driver ? `${p.driver}P가 고르는 중` : '아무나 밀어서 넘겨요';
-  $('selDriver').textContent = p && p.selected ? `고른 곡이에요 · 넘기면 다시 골라요` : drv;
+  const drv = p && p.driver ? T('{n}P가 고르는 중', { n: p.driver }) : '밀어서 넘겨요';
+  $('selDriver').textContent = p && p.selected ? '넘기면 다시 골라요' : drv;
   $('btnPick').textContent = p && p.selected ? '고른 곡 ✓' : '이 곡으로 할게요';
   $('btnPick').classList.toggle('picked', Boolean(p && p.selected));
-  setReadyButton('준비', Boolean(p && p.selected), p && p.selected ? `고른 곡: ${song ? song.title : ''} · 모두 준비하면 연주를 시작해요` : '먼저 곡을 골라요');
+  setReadyButton('준비', Boolean(p && p.selected), p && p.selected ? (song ? songTitle(song) : '') : '곡을 골라요');
 }
 
 function renderOver() {
   const r = result;
   const song = state.song ? getSong(state.song.id) : null;
-  $('ovSong').textContent = song ? `${song.title} · ${INSTRUMENTS[myInst] ? INSTRUMENTS[myInst].label : ''}` : '';
+  $('ovSong').textContent = song ? `${songTitle(song)} · ${INSTRUMENTS[myInst] ? T(INSTRUMENTS[myInst].label) : ''}` : '';
   if (r) {
     $('ovGrade').textContent = r.grade || '–';
-    $('ovWord').textContent = (r.late ? '중간 참가 · 남은 악보 기준 · ' : '') + (GRADE_WORD[r.grade] || '');
+    $('ovWord').textContent = [r.late ? T('중간 참가 · 남은 악보 기준') : '', GRADE_WORD[r.grade] ? T(GRADE_WORD[r.grade]) : ''].filter(Boolean).join(' · ');
     $('ovStats').innerHTML = `<span>정확도<b>${Math.round((r.acc || 0) * 100)}%</b></span><span>PERFECT<b>${r.perfect || 0}</b></span><span>GOOD<b>${r.good || 0}</b></span><span>MISS<b>${r.miss || 0}</b></span><span>최대 콤보<b>${r.maxCombo || 0}</b></span>`;
-    $('ovEns').textContent = r.ens ? `${r.ens.partial ? '중간 참가 구간 평가' : '합주 평가'} ${r.ens.grade} · ${GRADE_WORD[r.ens.grade] || ''}` : '';
+    $('ovEns').textContent = r.ens ? T(r.ens.partial ? '중간 참가 구간 평가 {grade} · {word}' : '합주 평가 {grade} · {word}', { grade: r.ens.grade, word: GRADE_WORD[r.ens.grade] || '' }) : '';
   } else {
     $('ovGrade').textContent = '–';
     $('ovWord').textContent = '큰 화면에서 결과를 확인해요';
@@ -434,9 +452,9 @@ function renderOver() {
     $('ovDl').href = clip.url;
     $('ovDl').setAttribute('download', clip.name || 'orchestra.webm');
     const left = Math.max(0, Math.round((clip.expiresAt - Date.now()) / 60000));
-    $('ovDlSub').textContent = `${clip.size ? (clip.size / 1048576).toFixed(1) + 'MB · ' : ''}${left}분 뒤 사라져요 · 오래 보관하지 않아요`;
+    $('ovDlSub').textContent = `${clip.size ? (clip.size / 1048576).toFixed(1) + 'MB · ' : ''}${T('{left}분 뒤 사라져요 · 오래 보관하지 않아요', { left })}`;
   }
-  setReadyButton('다시 하기 · 준비', true, '모두 준비하면 다음 곡을 골라요');
+  setReadyButton('다시 하기 · 준비', true, '');
 }
 setInterval(() => { if (state.phase === 'over' && mode === 'app') renderOver(); }, 20000);
 
@@ -444,21 +462,26 @@ setInterval(() => { if (state.phase === 'over' && mode === 'app') renderOver(); 
 {
   const sw = $('swipe');
   let st = null;
-  sw.addEventListener('pointerdown', (e) => { e.preventDefault(); try { sw.setPointerCapture(e.pointerId); } catch (err) {} st = { x: e.clientX, t: performance.now(), lx: e.clientX, lt: performance.now(), v: 0, sent: 0 }; });
+  sw.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    // 화살표 버튼은 밀지 않고 눌러도 한 곡씩 넘어갑니다
+    const sb = e.target.closest ? e.target.closest('[data-d]') : null;
+    if (sb) { send('nav', { d: Number(sb.dataset.d) }); haptics.tick({ noFlash: true }); sw.classList.remove('flick'); void sw.offsetWidth; sw.classList.add('flick'); return; }
+    try { sw.setPointerCapture(e.pointerId); } catch (err) {} st = { x: e.clientX, t: performance.now(), lx: e.clientX, lt: performance.now(), v: 0, sent: 0 }; });
   sw.addEventListener('pointermove', (e) => {
     if (!st) return;
     const t = performance.now();
     st.v = st.v * 0.5 + ((e.clientX - st.lx) / Math.max(4, t - st.lt)) * 1000 * 0.5;
     st.lx = e.clientX; st.lt = t;
     // 천천히 끌면 끄는 만큼 한 칸씩
-    const steps = Math.trunc((e.clientX - st.x) / 70);
+    const steps = Math.trunc((e.clientX - st.x) / 50);
     if (steps !== st.sent) { send('nav', { d: steps > st.sent ? -1 : 1 }); st.sent = steps; haptics.tick({ noFlash: true }); }
   });
   const end = () => {
     if (!st) return;
     const v = st.v;
-    if (Math.abs(v) > 900 && Math.abs(st.lx - st.x) > 40) send('nav', { v: Math.max(-14, Math.min(14, -v / 260)) });
-    else if (st.sent === 0 && Math.abs(st.lx - st.x) > 30) send('nav', { d: st.lx < st.x ? 1 : -1 });
+    if (Math.abs(v) > 700 && Math.abs(st.lx - st.x) > 30) send('nav', { v: Math.max(-14, Math.min(14, -v / 260)) });
+    else if (st.sent === 0 && Math.abs(st.lx - st.x) > 20) send('nav', { d: st.lx < st.x ? 1 : -1 });
     sw.classList.remove('flick'); void sw.offsetWidth; sw.classList.add('flick');
     st = null;
   };
@@ -547,7 +570,7 @@ socket.on('game_state', (s) => {
   state = s && typeof s === 'object' ? s : { phase: 'lobby' };
   if (state.picker) picker = { ...picker, ...state.picker };
   if (state.phase !== 'playing') { clk.song = false; clk.live = false; }
-  if (state.phase === 'playing' && prev.phase !== 'playing') { combo = 0; result = null; partKey = ''; score.clearMarks(); picking = false; }
+  if (state.phase === 'playing' && prev.phase !== 'playing') { combo = 0; result = null; partKey = ''; score.clearMarks(); picking = false; if (tut && tut.isRunning()) tut.cancel(); }
   if (state.phase === 'select' && prev.phase !== 'select') { clip = null; }
   // 큰 화면이 정한 내 악기(봇 시험 등)와 다르면 맞춤
   const info = myInfo();
@@ -588,6 +611,23 @@ socket.on('judge', (d) => {
 socket.on('result', (r) => { result = r || null; if (r && r.grade === 'S') haptics.play('success'); if (mode === 'app') render(); });
 socket.on('clip', (c) => { clip = c && c.url ? c : null; if (mode === 'app' && state.phase === 'over') renderOver(); if (clip) haptics.play('success', 0.6); });
 
+// ───────── 동작 센서(드럼·지휘봉만) ─────────
+// 권한은 탭 안에서 묻고, 1.5초 안에 값이 안 오면 센서가 없는 것으로 보고 화면 조작 안내로 넘어갑니다. 화면 조작은 늘 됩니다.
+let motionAsked = false;
+function probeMotion(ok = true) {
+  setTimeout(() => {
+    noSensor = !ok || (!sensors.gotMotion && !sensors.gotOrient);
+    if (noSensor) debug('동작 센서 값이 없어 화면 조작으로 해요');
+  }, SENSOR_WAIT_MS);
+}
+function askMotion() {
+  if (motionAsked) return null;
+  motionAsked = true;
+  const p = sensors.permission();
+  p.then((ok) => probeMotion(ok));
+  return p;
+}
+
 // ───────── 시작 ─────────
 function keepAwake() { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {}); }
 $('btnStart').addEventListener('click', async () => {
@@ -597,18 +637,13 @@ $('btnStart').addEventListener('click', async () => {
   haptics.unlock();
   keepAwake();
   ensureSynth().resume();
-  // iPhone 은 탭 안에서, await 전에 권한을 물어야 합니다.
-  const perm = sensors.permission();
+  // iPhone 은 탭 안에서, await 전에 권한을 물어야 합니다. 동작 센서는 센서 악기(드럼·지휘)를 이미 골라 둔 경우만 여기서 묻고,
+  // 나머지는 그 악기를 고르는 탭에서 묻습니다(권한 창을 줄이려고).
+  const perm = myInst && INSTRUMENTS[myInst].motion ? askMotion() : null;
   if (myInst && INSTRUMENTS[myInst].mic) ensureMic(myInst === 'voice');
-  await perm;
+  if (perm) await perm;
   if (!ROOM) { message('방 코드가 없어요', '큰 화면의 QR을 찍어 주세요.'); return; }
   join();
-  setTimeout(() => {
-    if (!sensors.gotMotion && !sensors.gotOrient) {
-      noSensor = true;
-      debug('동작 센서 값이 없어 화면 조작으로 해요');
-    }
-  }, SENSOR_WAIT_MS);
 });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { if (synth) synth.allOff(); return; }

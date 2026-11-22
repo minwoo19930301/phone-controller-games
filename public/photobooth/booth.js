@@ -11,6 +11,8 @@ import { MODES, MODE, THEMES, THEME, makeSheet, drawSheet, drawSwatch, silhouett
 import { drawItems, drawItem, cleanItem, cleanPoints, Q, STICKERS, PEN_COLORS } from './deco.js';
 import { drawAvatar, avatarCanvas, POSES, GROUP_HEART } from './avatar.js';
 import { sfx, audio } from './sfx.js';
+import { t as T, mountSwitcher } from '/common/i18n.js';
+mountSwitcher(document.getElementById('langBox'), { reload: true, compact: true }); // 대기실 구석 언어 고르기(촬영 중엔 대기실이 숨어 안 보입니다)
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -25,10 +27,10 @@ const SLOT_INFO = {
   4: { name: '4P', color: '#5ee07a' }
 };
 const DECO_MS = 90000; // 꾸미기 90초
-// 난이도 = 찍기 여유. 지금(처음 만든 그대로)은 '어려움' 쪽입니다.
+// 난이도 = 찍기 여유. 쉬움이 기본이고 아주 넉넉합니다. 보통은 예전 쉬움 정도, 어려움은 그대로.
 const DIFF = {
-  easy: { count: 5000, review: 12000, retakes: 3, intro: 2400 },
-  normal: { count: 3000, review: 4200, retakes: 1, intro: 1700 },
+  easy: { count: 5000, review: 15000, retakes: 5, intro: 3000 },
+  normal: { count: 5000, review: 12000, retakes: 3, intro: 2400 },
   hard: { count: 3000, review: 1600, retakes: 0, intro: 1100 }
 };
 // 모두 한 장·각자 네컷의 컷별 한마디
@@ -38,7 +40,7 @@ const FREE = [
   { text: '얼굴 가까이!', e: '🤩', k: 'wink' },
   { text: '마지막 컷! 제일 신나게', e: '🎉', k: 'tongue' }
 ];
-const PHOTO_WAIT = { live: 7000, file: 35000 }; // 찰칵 뒤 사진 기다리는 시간
+const PHOTO_WAIT = { live: 10000, file: 35000 }; // 찰칵 뒤 사진 기다리는 시간
 const G = { phase: 'lobby' }; // lobby | shoot | review | decorate | over
 let S = null; // 지금 판(세션)
 
@@ -124,7 +126,7 @@ setInterval(() => {
 const settings = createSettings({
   game: 'photobooth',
   fields: [
-    fields.difficulty({ hints: { easy: '5초 · 다시 찍기 3번', normal: '3초 · 다시 찍기 1번', hard: '3초 · 한 번에' } }),
+    fields.difficulty({ hints: { easy: '5초 · 다시 찍기 5번', normal: '5초 · 다시 찍기 3번', hard: '3초 · 한 번에' } }),
     fields.choice('mode', '모드', MODES.map((m) => ({ value: m.id, label: m.short, hint: m.desc })), { default: 'together', hotkey: 'm' }),
     fields.choice('theme', '프레임', THEMES.map((t) => ({ value: t.id, label: t.short })), { default: 'classic', hotkey: 't' })
   ],
@@ -434,9 +436,8 @@ function paintPolaroidPv(slot) {
 function renderHint() {
   const n = lobbyPlayers().length;
   const bots = !phonesPresent() && BOTS > 0;
-  $('lobbyHint').innerHTML = (n ? `<b>폰에서 모두 준비</b>를 누르면 바로 찍어요` : 'QR을 찍고 들어오면 내 얼굴이 여기 떠요') +
-    (bots ? '<span class="dot"></span><kbd style="margin:0 6px 0 0">Enter</kbd>봇과 시작' : '') +
-    '<span class="dot"></span>화면을 한 번 누르면 소리가 켜져요';
+  $('lobbyHint').innerHTML = (n ? T('폰에서 모두 준비를 누르면 바로 찍어요') : T('QR로 들어와요')) +
+    (bots ? '<span class="dot"></span><kbd style="margin:0 6px 0 0">Enter</kbd>봇과 시작' : '');
 }
 
 // 대기실 견본 판: 고른 모드·프레임에 지금 들어온 사람 얼굴을 실시간으로
@@ -763,14 +764,19 @@ function onPhoto(d) {
   const url = String(d.dataUrl || '');
   if (!/^data:image\/(jpeg|png|webp);base64,/.test(url) || url.length > 3_600_000) return;
   if (d.src === 'file' || d.src === 'live' || d.src === 'fake') infoOf(slot).cam = d.src;
+  // 폰이 한 번 더 보낸 같은 사진은 무시합니다.
+  const cur0 = S0.photos.get(keyOf(S0, slot, S0.shots[idx].cut));
+  if (cur0 && cur0.img && cur0.seq === seq) return;
   const img = new Image();
   img.onload = () => {
     if (S !== S0 || S0.seqOf.get(`${idx}:${slot}`) !== seq) return;
-    landPhoto(S0, keyOf(S0, slot, S0.shots[idx].cut), img, slot);
+    const cur1 = S0.photos.get(keyOf(S0, slot, S0.shots[idx].cut));
+    if (cur1 && cur1.img && cur1.seq === seq) return;
+    landPhoto(S0, keyOf(S0, slot, S0.shots[idx].cut), img, slot, seq);
   };
   img.src = url;
 }
-function landPhoto(S0, key, img, slot) {
+function landPhoto(S0, key, img, slot, seq) {
   const th = THEME[S0.theme];
   let baked = null;
   if (th && th.filter) {
@@ -786,7 +792,7 @@ function landPhoto(S0, key, img, slot) {
     baked = c;
   }
   const had = [...S0.photos.values()].filter((p) => p.img).length;
-  S0.photos.set(key, { img, baked, at: now(), spin: (Math.random() - 0.5) * 0.16, slot });
+  S0.photos.set(key, { img, baked, at: now(), spin: (Math.random() - 0.5) * 0.16, slot, seq });
   S0.pending.delete(slot);
   sfx.land(had);
   sendHaptic(socket, slot, 'success', 1);
@@ -856,10 +862,10 @@ function labelFor(S0, sheet, ci, sub) {
   const cur = S0.shots[S0.idx];
   const isCur = G.phase === 'shoot' && cur && cur.cut === ci && S0.active.includes(slot);
   let subText = '';
-  if (ph && ph.missing) subText = '사진이 안 왔어요';
-  else if (isCur && camOf(slot) === 'file') subText = '폰에서 직접 찍는 중';
-  else if (isCur && S0.step === 'wait') subText = '사진 받는 중…';
-  else if (isCur) subText = '카메라 기다리는 중';
+  if (ph && ph.missing) subText = T('사진이 안 왔어요');
+  else if (isCur && camOf(slot) === 'file') subText = T('폰에서 직접 찍는 중');
+  else if (isCur && S0.step === 'wait') subText = T('사진 받는 중…');
+  else if (isCur) subText = T('카메라 기다리는 중');
   return { text: nameOf(slot), color: colorOf(slot), sub: subText };
 }
 
@@ -1186,11 +1192,13 @@ function renderCombined(S0, canvases) {
   g.textAlign = 'left';
   g.fillStyle = dark ? '#ffffff' : '#241a20';
   g.font = `900 64px ${SANS}`;
-  g.fillText('우리들의 네컷', pad, 104);
+  const title = T('우리들의 네컷');
+  const tw0 = g.measureText(title).width;
+  g.fillText(title, pad, 104);
   g.fillStyle = dark ? '#ff8fc2' : '#ff5f9e';
   g.font = `400 34px ${ANTON}`;
   if ('letterSpacing' in g) g.letterSpacing = '6px';
-  g.fillText(fmtDate(S0.startedAt), pad + 470, 102);
+  g.fillText(fmtDate(S0.startedAt), pad + Math.max(470, tw0 + 56), 102);
   g.textAlign = 'right';
   g.fillStyle = dark ? 'rgba(255,255,255,.4)' : 'rgba(36,26,32,.4)';
   g.font = `800 18px ${SANS}`;
@@ -1220,11 +1228,11 @@ async function finishDeco() {
   setPhase('over');
   for (const v of views) { v.el.classList.remove('shine'); void v.el.offsetWidth; v.el.classList.add('shine'); }
   confetti();
-  sfx.done();
+  sfx.done(true);
   renderResult();
   // 완성 연출(판 반짝임·색종이)이 먼저 움직이기 시작한 뒤에 무거운 고해상도 굽기를 합니다.
   await nap(450);
-  const base = `네컷-${stamp(S0.startedAt)}`;
+  const base = `${T('네컷')}-${stamp(S0.startedAt)}`;
   const per = new Map();
   const canv = S0.sheets.map((sh) => renderSheetFull(S0, sh));
   const all = S0.mode === 'each' && canv.length > 1 ? renderCombined(S0, canv) : canv[0];
@@ -1287,21 +1295,20 @@ function renderResult() {
   renderNext();
   const res = S.result;
   $('rTitle').textContent = S.making ? '만드는 중…' : '완성!';
-  $('rSub').textContent = S.making ? '사진을 고해상도로 굽고 있어요.' : S.mode === 'each' ? '모두의 네컷 한 장과 사람마다 한 줄씩 저장할 수 있어요.' : '이 화면에서도, 각자 폰에서도 저장할 수 있어요.';
+  $('rSub').textContent = S.making ? '' : '폰에서도 저장할 수 있어요';
   const btns = $('rBtns');
   if (!res) { btns.innerHTML = '<a class="r-btn wait">PNG 만드는 중…</a>'; }
   else {
     let html = `<a class="r-btn" id="dlMain" href="${res.all.url}" download="${res.all.name}">PNG 저장<small>${res.all.w}×${res.all.h}</small></a>`;
-    for (const [slot, r] of res.per) html += `<a class="r-btn sub" href="${r.url}" download="${r.name}" style="--c:${colorOf(slot)}"><span><b>${nameOf(slot)}</b>네컷만 저장</span><small>${r.w}×${r.h}</small></a>`;
+    for (const [slot, r] of res.per) html += `<a class="r-btn sub" href="${r.url}" download="${r.name}" style="--c:${colorOf(slot)}"><span>${T('{p}네컷만 저장', { p: `<b>${nameOf(slot)}</b>` })}</span><small>${r.w}×${r.h}</small></a>`;
     btns.innerHTML = html;
   }
   const note = $('rNote');
   const box = note.parentElement;
   box.classList.toggle('bad', S.upload === 'fail');
   note.textContent = S.upload === 'fail'
-    ? '폰으로는 못 보냈어요. 이 화면에서 저장해 주세요 · 사진은 이 화면 메모리에만 있어요'
-    : S.upload === 'ok' ? '폰에도 보냈어요 · 이 화면과 서버 메모리에만 있고 10분 뒤 사라져요'
-    : '사진은 이 화면과 서버 메모리에만 있고 10분 뒤 사라져요';
+    ? '폰으로는 못 보냈어요 · 이 화면에서 저장해요'
+    : '사진은 10분 뒤 사라져요';
 }
 function renderNext() {
   const el = document.getElementById('rNext');
@@ -1361,22 +1368,20 @@ function renderSide(popPrompt) {
     ey.textContent = `CUT ${shot.cut + 1} / ${S.shots.length}${S.retry ? ' · 다시' : ''}`;
     if (S.mode === 'together') {
       const s = S.active[0] ?? shot.slots[0];
-      ti.innerHTML = `<span class="who" style="--c:${colorOf(s)}">${nameOf(s)}</span>차례!`;
+      ti.innerHTML = T('{p}차례!', { p: `<span class="who" style="--c:${colorOf(s)}">${nameOf(s)}</span>` });
     } else ti.textContent = S.mode === 'pose' ? `미션 ${shot.cut + 1}` : '모두 함께!';
     const p = shot.prompt || {};
     const ptxt = `<span class="em">${p.e || ''}</span><span>${p.text || ''}</span>`;
-    if (pr.innerHTML !== ptxt) { pr.innerHTML = ptxt; }
+    if (pr._src !== ptxt) { pr._src = ptxt; pr.innerHTML = ptxt; }
     if (popPrompt) { pr.classList.remove('pop'); void pr.offsetWidth; pr.classList.add('pop'); }
     const files = S.active.filter((s) => camOf(s) === 'file');
     const st = S.step;
     let t;
-    if (st === 'intro') t = S.mode === 'pose' ? (p.tip || '폰 화면을 보며 포즈를 잡아요') : '폰 화면을 보며 포즈를 잡아요';
-    else if (st === 'count') t = files.length ? `${files.map(nameOf).join('·')}는 폰에서 직접 찍어요` : '큰 화면 거울을 보며 포즈!';
-    else if (st === 'wait') t = files.length && S.pending.size ? `${[...S.pending].map(nameOf).join('·')} 사진 기다리는 중…` : '찰칵! 사진 받는 중…';
-    else if (st === 'review') {
-      const can = S.cfg.retakes > 0;
-      t = can ? '마음에 안 들면 폰에서 ‘다시 찍기’\n좋으면 ‘좋아요’' : '잘 나왔어요!';
-    } else t = '';
+    // 안내 문장은 지웠습니다. 포즈 미션의 팁만 남깁니다.
+    if (st === 'intro' && S.mode === 'pose' && p.tip) t = p.tip;
+    else if (st === 'count' && files.length) t = `${files.map(nameOf).join('·')}는 폰에서 직접 찍어요`;
+    else if (st === 'wait' && files.length && S.pending.size) t = `${[...S.pending].map(nameOf).join('·')} 사진 기다리는 중…`;
+    else t = '';
     sub.textContent = t;
     cnt.style.display = each ? '' : 'none';
     cuts.innerHTML = S.shots.map((x, i) => `<i class="${i < S.idx ? 'd' : i === S.idx ? 'c' : ''}"></i>`).join('');
@@ -1403,8 +1408,9 @@ function renderSide(popPrompt) {
   if (G.phase === 'review') {
     ey.textContent = 'ALL CUTS';
     ti.textContent = '다 찍었어요!';
+    pr._src = null;
     pr.innerHTML = '';
-    sub.textContent = '폰에서 모두 준비를 누르면\n다 같이 낙서하고 스티커를 붙여요.';
+    sub.textContent = '';
     const rd = new Set((readySt && readySt.ready) || []);
     ppl.innerHTML = lobbyPlayers().map((p) => {
       const ok = p.bot || rd.has(p.slot);
@@ -1415,8 +1421,9 @@ function renderSide(popPrompt) {
   if (G.phase === 'decorate') {
     ey.textContent = 'DECORATE';
     ti.textContent = '다 같이 꾸미기';
+    pr._src = null;
     pr.innerHTML = '<div class="timer" id="timer"><svg viewBox="0 0 150 150"><circle class="bg" cx="75" cy="75" r="68"/><circle class="fg" id="timerFg" cx="75" cy="75" r="68"/></svg><b id="timerT">90</b></div>';
-    sub.textContent = '폰에서 손가락으로 그리고\n스티커를 붙여요. 다 하면 ‘완성’';
+    sub.textContent = '';
     paintTimer(true);
     ppl.innerHTML = decoPeople().map((s) => {
       const ok = S.deco.done.has(s);

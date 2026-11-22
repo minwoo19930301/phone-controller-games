@@ -128,7 +128,7 @@ export function createHud(root, track) {
       '<div class="starfx"></div><div class="hitfx"></div><div class="boltfx"></div>' +
       '<div class="islot"><div class="ib"><div class="ico"></div></div><span class="iname"></span></div>' +
       `<div class="chase"><i>${CHASE_ICON}</i><span>추격 부스트</span><b>+0%</b></div>` +
-      '<div class="fin"><div class="fin-r"></div><div class="fin-t"></div><div class="fin-s">다른 사람이 들어올 때까지 기다려요</div></div>';
+      '<div class="fin"><div class="fin-r"></div><div class="fin-t"></div><div class="fin-s">대기 중</div></div>';
     const q = (s) => c.querySelector(s);
     return {
       kind: 'player', root: c, map: q('.minimap'), cache: {},

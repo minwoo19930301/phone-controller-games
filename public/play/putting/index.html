@@ -30,6 +30,10 @@
   .ghost { width: 100%; padding: 14px; border-radius: 16px; background: transparent; color: var(--fg); border: 1.5px solid var(--line); font-size: 16px; font-weight: 700; }
   .art { width: 150px; height: 190px; }
   .hidden { display: none !important; }
+  .aim-easy { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .aim-easy .dist { font-family: Anton, Impact, sans-serif; font-size: 72px; line-height: 1; color: var(--c); }
+  .note { margin: 6px 0 0; font-size: 13px; text-align: center; }
+  .link { background: none; color: var(--dim); font-size: 15px; font-weight: 700; padding: 10px 14px; text-decoration: underline; text-underline-offset: 3px; align-self: center; }
 
   /* 조준 */
   .aim-top { display: flex; justify-content: space-between; align-items: baseline; margin: 6px 0 10px; gap: 10px; }
@@ -42,8 +46,8 @@
   .pad .deg { position: absolute; top: 12px; left: 0; right: 0; text-align: center; font-family: Anton, Impact, sans-serif; font-size: 30px;
     text-shadow: 0 2px 10px rgba(0,0,0,.35); }
   .row { display: flex; gap: 8px; margin: 10px 0; }
-  .row button { flex: 1; padding: 13px 0; border-radius: 14px; background: rgba(255,255,255,.07); color: var(--fg); border: 1.5px solid var(--line);
-    font-weight: 800; font-size: 15px; }
+  .row button { flex: 1; padding: 15px 0; border-radius: 14px; background: rgba(255,255,255,.07); color: var(--fg); border: 1.5px solid var(--line);
+    font-weight: 800; font-size: 17px; }
   .row button.on { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); color: var(--accent); }
 
   /* 어드레스·스트로크 */
@@ -83,9 +87,7 @@
       <path d="M62 168h28" stroke="#d9dde2" stroke-width="7"/>
       <circle cx="104" cy="168" r="6" fill="#fff"/>
     </svg>
-    <h1>폰이 퍼터가 됩니다</h1>
-    <p>폰을 퍼터 그립처럼 두 손으로 쥐고
-윗부분이 땅을, 화면이 홀 쪽을 보게 하세요.</p>
+    <h1>폰을 퍼터처럼 톡 미세요</h1>
     <button class="primary" id="btnStart" style="margin-top:10px">시작하기</button>
   </section>
 
@@ -102,8 +104,9 @@
 
   <!-- 내 차례: 조준 -->
   <section class="view" id="vAim">
-    <div class="aim-top"><b>방향 맞추기</b><span id="aimInfo"></span></div>
-    <div class="pad" id="pad">
+    <div class="aim-top"><b>내 차례</b><span id="aimInfo"></span></div>
+    <div class="aim-easy" id="aimEasy"><div class="dist" id="aimDist"></div></div>
+    <div class="pad hidden" id="pad">
       <svg viewBox="0 0 300 260" preserveAspectRatio="xMidYMid meet">
         <ellipse cx="150" cy="44" rx="120" ry="22" fill="rgba(255,255,255,.06)"/>
         <path d="M150 238 L150 44" stroke="rgba(255,255,255,.28)" stroke-width="2" stroke-dasharray="6 8"/>
@@ -113,22 +116,20 @@
         <circle cx="150" cy="238" r="7" fill="#fff"/>
       </svg>
       <div class="deg" id="aimDeg">홀 방향</div>
-      <div class="lab">좌우로 밀어서 방향을 맞춰요</div>
     </div>
     <div class="row">
       <button id="btnLeft">◀ 0.5°</button>
       <button id="btnGrid" class="on">경사 보기 켜짐</button>
       <button id="btnRight">0.5° ▶</button>
     </div>
-    <button class="primary" id="btnAddress">어드레스</button>
+    <p class="note" id="aimNote"></p>
+    <button class="link hidden" id="btnPadToggle">방향 바꾸기</button>
+    <button class="primary" id="btnAddress">퍼팅하기</button>
   </section>
 
   <!-- 어드레스 잡는 중 -->
   <section class="view center" id="vHold">
-    <div class="count" id="holdN">3</div>
-    <h1>퍼터처럼 쥐고 멈추세요</h1>
-    <p>폰 윗부분이 땅을, 화면이 홀을 보게.
-이 자세가 퍼터 페이스의 기준이 돼요.</p>
+    <h1>멈춰요</h1>
   </section>
 
   <!-- 스트로크 -->
@@ -143,9 +144,9 @@
       <text x="-112" y="176" fill="rgba(255,255,255,.5)" font-size="13" font-weight="700" text-anchor="middle">뒤</text>
       <text x="112" y="176" fill="rgba(255,255,255,.5)" font-size="13" font-weight="700" text-anchor="middle">홀</text>
     </svg>
-    <div class="big" id="strokeT">톡 밀어요</div>
-    <p id="strokeB">뒤로 살짝 뺐다가 시계추처럼.
-빠를수록 멀리 굴러가요.</p>
+    <div class="big" id="strokeT">톡!</div>
+    <p id="strokeB"></p>
+    <button class="primary" id="btnTap" style="max-width:300px">탭으로 치기</button>
     <div class="sim hidden" id="sim">
       <h3>센서 없음 · 시험 퍼팅</h3>
       <label>세기 <b id="simV">1.50 m/s</b></label>
@@ -154,7 +155,8 @@
       <input type="range" id="simFace" min="-6" max="6" step="0.5" value="0">
       <button class="primary" id="btnSim">시험 스트로크</button>
     </div>
-    <button class="ghost" id="btnRedo" style="max-width:260px">다시 어드레스</button>
+    <button class="ghost" id="btnRedo" style="max-width:260px">다시 맞추기</button>
+    <button class="link" id="btnBack">조준으로</button>
   </section>
 
   <!-- 결과 -->

@@ -2,6 +2,7 @@
 // 전부 코드로 만든 도형과 캔버스 텍스처입니다. 외부 에셋은 쓰지 않습니다.
 import * as THREE from 'three';
 import { HALF_W, CURB_W, WALL_D } from './track.js';
+import { t as tr } from '/common/i18n.js';
 
 const std = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.05, ...o });
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -624,7 +625,7 @@ export function makeTrackMeshes(track) {
     beam.position.set(0, 8.1, 0);
     g.add(beam);
     // 현수막: 오는 쪽(-진행 방향)을 향합니다.
-    const tex = bannerTex(gi.text, gi.bg);
+    const tex = bannerTex(tr(gi.text), gi.bg); // 현수막 글자는 3D 텍스처라 직접 번역합니다(언어를 바꾸면 페이지가 새로 고쳐집니다)
     const bn = new THREE.Mesh(new THREE.PlaneGeometry(half * 2 - 0.4, 1.7), new THREE.MeshBasicMaterial({ map: tex }));
     bn.position.set(-0.47, 8.1, 0);
     bn.rotation.y = -Math.PI / 2;

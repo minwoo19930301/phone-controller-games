@@ -7,9 +7,10 @@ import { haptics } from '/common/haptics.js';
 import { createPhoneSettings } from '/common/phone-settings.js';
 import { createTutorial } from '/common/tutorial.js';
 import { MODES, MODE, THEMES, THEME, drawSwatch } from '/photobooth/frames.js';
-import { drawItems, STICKERS, Q } from '/photobooth/deco.js';
 import { createCamera, encode } from './camera.js';
 import { createDecorator } from './decorate.js';
+import { t as T, mountSwitcher } from '/common/i18n.js';
+mountSwitcher(document.getElementById('langBox'), { reload: true, compact: true }); // 시작 화면에서만 보입니다
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -84,11 +85,20 @@ async function ensureCamera() {
   const ok = await cam.start();
   if (ok) return true;
   if (!isTouch) { cam.useFake(me ? me.slot : 1, myColor()); return true; }
-  if (cam.state === 'unsupported') cam.useFile();
+  // 터치 폰에서 카메라를 못 켜면 알아서 '직접 찍기'로 바꾸고, 한 번 알려 줍니다.
+  cam.useFile();
+  camBanner(window.isSecureContext ? '카메라를 못 켰어요 · 찍을 때 폰 카메라 앱이 열려요' : 'http라서 폰 카메라 앱으로 찍어요');
   return false;
+}
+function camBanner(text) {
+  const b = $('banner');
+  b.textContent = text;
+  b.dataset.src = 'cam';
+  b.classList.remove('hidden');
 }
 function paintCam() {
   const st = cam.state;
+  if (st === 'live' || st === 'fake') $('banner').classList.add('hidden');
   const chip = $('camChip');
   chip.classList.toggle('hidden', !me);
   chip.classList.toggle('on', st === 'live' || st === 'fake');
@@ -100,22 +110,22 @@ function paintCam() {
   if (!live) {
     if (st === 'file') {
       $('camOffT').textContent = '폰 카메라 앱으로 찍어요';
-      $('camOffB').textContent = '숫자가 끝나면 ‘지금 찍기’로 직접 찍어요';
+      $('camOffB').textContent = '';
       $('btnCam').textContent = '실시간 카메라 다시 켜 보기';
       $('btnFile').classList.add('hidden');
     } else if (st === 'denied') {
       $('camOffT').textContent = '카메라 권한이 막혀 있어요';
-      $('camOffB').textContent = '주소창의 카메라 권한을 허용하고 다시 눌러요';
+      $('camOffB').textContent = '주소창에서 카메라를 허용해요';
       $('btnCam').textContent = '카메라 다시 켜기';
       $('btnFile').classList.remove('hidden');
     } else if (st === 'asking') {
       $('camOffT').textContent = '카메라 허용을 눌러 주세요';
-      $('camOffB').textContent = '폰 화면 위쪽에 물어보는 창이 떠요';
+      $('camOffB').textContent = '';
       $('btnCam').textContent = '카메라 켜기';
       $('btnFile').classList.remove('hidden');
     } else {
-      $('camOffT').textContent = window.isSecureContext ? '카메라가 꺼져 있어요' : 'http 주소라 실시간 카메라가 안 돼요';
-      $('camOffB').textContent = window.isSecureContext ? '셀카를 찍으려면 앞 카메라를 켜요' : '찍을 때 폰 카메라 앱이 열려요';
+      $('camOffT').textContent = window.isSecureContext ? '카메라가 꺼져 있어요' : 'http라서 폰 카메라 앱으로 찍어요';
+      $('camOffB').textContent = window.isSecureContext ? '' : '찍을 때 폰 카메라 앱이 열려요';
       $('btnCam').textContent = '카메라 켜기';
       $('btnFile').classList.remove('hidden');
     }
@@ -126,7 +136,7 @@ $('btnCam').addEventListener('click', async () => {
   await ensureCamera();
   attachCam();
 });
-$('btnFile').addEventListener('click', () => { cam.useFile(); toast('찍을 때 폰 카메라 앱이 열려요'); });
+$('btnFile').addEventListener('click', () => { cam.useFile(); camBanner('찍을 때 폰 카메라 앱이 열려요'); });
 $('camChip').addEventListener('click', async () => {
   if (cam.ready()) return;
   await ensureCamera();
@@ -233,7 +243,6 @@ const CAM_SVG = '<svg class="pcgt-svg" viewBox="0 0 200 160" aria-hidden="true">
   '<circle cx="93" cy="84" r="2.5" fill="var(--pcgt-c,#ff6fae)" stroke="none"/><circle cx="107" cy="84" r="2.5" fill="var(--pcgt-c,#ff6fae)" stroke="none"/>' +
   '<path d="M100 34 L 60 10 M100 34 L140 10" stroke="rgba(255,255,255,.35)" stroke-width="2" stroke-dasharray="3 5"/></g></svg>';
 let tutShot = null; // 연습 사진(이 폰 메모리에만)
-let tutItems = [];
 function tutBox(stage, aspect, width) {
   stage.innerHTML = '';
   const wrap = document.createElement('div');
@@ -246,32 +255,6 @@ function tutBox(stage, aspect, width) {
   wrap.appendChild(box);
   stage.appendChild(wrap);
   return { wrap, box, w, h: w / aspect };
-}
-function tutPad(box, w, h) {
-  // 연습용 그림판: 연습 사진 + 그린 것
-  const cv = document.createElement('canvas');
-  cv.className = 'pad';
-  const k = Math.min(3, window.devicePixelRatio || 1);
-  cv.width = Math.round(w * k);
-  cv.height = Math.round(h * k);
-  cv.style.touchAction = 'none';
-  box.appendChild(cv);
-  const g = cv.getContext('2d');
-  const paint = (sel) => {
-    g.setTransform(k, 0, 0, k, 0, 0);
-    g.fillStyle = '#2a1f2c';
-    g.fillRect(0, 0, w, h);
-    if (tutShot) {
-      const s = Math.max(w / tutShot.width, h / tutShot.height);
-      g.drawImage(tutShot, (w - tutShot.width * s) / 2, (h - tutShot.height * s) / 2, tutShot.width * s, tutShot.height * s);
-    } else {
-      g.fillStyle = '#ffd9ea';
-      g.fillRect(0, 0, w, h);
-    }
-    drawItems(g, tutItems, w, h, { selected: sel, color: myColor() });
-  };
-  paint();
-  return { cv, g, paint };
 }
 function tutCountdown(box, ms = 3000) {
   return new Promise((res) => {
@@ -302,7 +285,7 @@ const tut = createTutorial({
   title: '처음이라 연습해 봐요',
   steps: [
     {
-      title: '카메라 켜기', body: '셀카는 앞 카메라로 찍어요. 사진은 이 방 큰 화면에만 가요.', svg: CAM_SVG, waitFor: 'camera', hint: '카메라 허용을 눌러요', okText: '카메라 준비 끝!',
+      title: '카메라 켜기', body: '앞 카메라를 켜 주세요', svg: CAM_SVG, waitFor: 'camera', hint: '허용을 눌러요', okText: '켜졌어요!',
       render(stage, api) {
         const { wrap, box } = tutBox(stage, 3 / 4, 120);
         const btn = document.createElement('button');
@@ -312,7 +295,7 @@ const tut = createTutorial({
         const alt = document.createElement('button');
         alt.type = 'button';
         alt.className = 'tbtn sub';
-        alt.textContent = '카메라 없이 폰 카메라 앱으로 찍을래요';
+        alt.textContent = '폰 카메라 앱으로 찍기';
         const note = document.createElement('div');
         note.className = 'tnote';
         wrap.append(btn, alt, note);
@@ -320,19 +303,19 @@ const tut = createTutorial({
         if (cam.ready()) { btn.hidden = true; alt.hidden = true; setTimeout(() => api.ok('카메라가 켜져 있어요'), 500); return null; }
         btn.addEventListener('click', async () => {
           btn.disabled = true;
-          note.textContent = '폰 화면 위쪽 창에서 허용을 눌러요';
+          note.textContent = '허용을 눌러요';
           await ensureCamera();
           btn.disabled = false;
           cam.attach(box);
           if (cam.ready()) { note.textContent = ''; api.ok(cam.state === 'fake' ? '시험 카메라로 할게요' : '카메라가 켜졌어요!'); }
-          else { note.textContent = '카메라를 못 켰어요. 찍을 때 폰 카메라 앱으로 직접 찍으면 돼요.'; api.fail('카메라 권한을 확인해 주세요'); }
+          else { note.textContent = '못 켰어요 · 폰 카메라 앱으로 찍어요'; api.fail('카메라 권한을 확인해 주세요'); }
         });
         alt.addEventListener('click', () => { cam.useFile(); api.ok('폰 카메라 앱으로 찍을게요'); });
         return null;
       }
     },
     {
-      title: '포즈 연습 한 장', body: '3초 세고 찰칵! 진짜 촬영도 이렇게 해요.', waitFor: 'snap', hint: '찍어 보기를 눌러요', okText: '잘 나왔어요!',
+      title: '한 장 찍기', body: '3초 뒤에 찰칵!', waitFor: 'snap', hint: '찍어 보기를 눌러요', okText: '잘 나왔어요!',
       render(stage, api) {
         const aspect = 1.37;
         const { wrap, box, w, h } = tutBox(stage, aspect, 280);
@@ -366,104 +349,9 @@ const tut = createTutorial({
         });
         return null;
       }
-    },
-    {
-      title: '낙서해 보기', body: '사진 위에 손가락으로 쓱 그려 봐요.', waitFor: 'doodle', hint: '그려 보세요', okText: '멋져요!',
-      render(stage, api) {
-        const { box, w, h } = tutBox(stage, 1.37, 280);
-        tutItems = [];
-        const pad = tutPad(box, w, h);
-        let it = null;
-        let len = 0;
-        let last = null;
-        const pos = (e) => { const r = pad.cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-        pad.cv.addEventListener('pointerdown', (e) => {
-          e.preventDefault();
-          try { pad.cv.setPointerCapture(e.pointerId); } catch (err) {}
-          const [x, y] = pos(e);
-          it = { t: 'draw', id: `t${tutItems.length}`, c: myColor(), w: 0.022, b: tutItems.length % 2 ? 'neon' : 'pen', p: [Math.round((x / w) * Q), Math.round((y / h) * Q)] };
-          tutItems.push(it);
-          last = [x, y];
-          pad.paint();
-        });
-        pad.cv.addEventListener('pointermove', (e) => {
-          if (!it) return;
-          const [x, y] = pos(e);
-          len += Math.hypot(x - last[0], y - last[1]);
-          last = [x, y];
-          it.p.push(Math.round((x / w) * Q), Math.round((y / h) * Q));
-          pad.paint();
-        });
-        const end = () => {
-          if (!it) return;
-          it = null;
-          if (len > Math.min(140, w * 0.5)) api.signal('doodle', { len });
-          else if (len > 4) api.fail('조금 더 길게 그려 봐요');
-        };
-        pad.cv.addEventListener('pointerup', end);
-        pad.cv.addEventListener('pointercancel', end);
-        return null;
-      }
-    },
-    {
-      title: '스티커 붙이기', body: '스티커를 누르면 붙어요. 사진 위에서 끌어 옮겨 봐요.', waitFor: 'sticker', hint: '붙이고 끌어 보세요', okText: '완벽해요!',
-      render(stage, api) {
-        const { wrap, box, w, h } = tutBox(stage, 1.37, 280);
-        const pad = tutPad(box, w, h);
-        const row = document.createElement('div');
-        row.className = 'tstk';
-        const picks = ['heart', 'sparkle', 'cool', 'crown', 'party'];
-        row.innerHTML = picks.map((k) => `<button type="button" data-k="${k}">${STICKERS.find((s) => s.k === k).e}</button>`).join('');
-        wrap.appendChild(row);
-        let cur = null;
-        let drag = null;
-        let moved = 0;
-        row.addEventListener('click', (e) => {
-          const b = e.target.closest('[data-k]');
-          if (!b) return;
-          // 첫 스티커는 가운데에(바로 눈에 띄고 끌기 쉽게), 다음부터는 조금씩 비껴서
-          const n = tutItems.filter((it) => it.t === 'stk').length;
-          const j = () => (n ? (Math.random() - 0.5) * 0.3 : 0);
-          cur = { t: 'stk', id: `s${tutItems.length}`, k: b.dataset.k, x: Q * (0.5 + j()), y: Q * (0.5 + j()), s: 0.26, r: n ? (Math.random() - 0.5) * 0.4 : -0.12 };
-          tutItems.push(cur);
-          try { haptics.tick(); } catch (err) {}
-          pad.paint(cur.id);
-        });
-        const pos = (e) => { const r = pad.cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-        pad.cv.addEventListener('pointerdown', (e) => {
-          e.preventDefault();
-          const [x, y] = pos(e);
-          const hit = [...tutItems].reverse().find((it) => it.t === 'stk' && Math.hypot((it.x / Q) * w - x, (it.y / Q) * h - y) < it.s * w * 0.7);
-          if (!hit) return;
-          try { pad.cv.setPointerCapture(e.pointerId); } catch (err) {}
-          cur = hit;
-          drag = [x - (hit.x / Q) * w, y - (hit.y / Q) * h];
-          pad.paint(cur.id);
-        });
-        pad.cv.addEventListener('pointermove', (e) => {
-          if (!drag || !cur) return;
-          const [x, y] = pos(e);
-          const nx = ((x - drag[0]) / w) * Q;
-          const ny = ((y - drag[1]) / h) * Q;
-          moved += Math.hypot(((nx - cur.x) / Q) * w, ((ny - cur.y) / Q) * h);
-          cur.x = nx;
-          cur.y = ny;
-          pad.paint(cur.id);
-        });
-        const end = () => {
-          if (!drag) return;
-          drag = null;
-          if (moved > 22) api.signal('sticker', { moved });
-          else api.fail('스티커를 누른 채로 끌어 봐요');
-        };
-        pad.cv.addEventListener('pointerup', end);
-        pad.cv.addEventListener('pointercancel', end);
-        return null;
-      }
     }
   ],
-  finish: { title: '연습 끝!', body: '이제 준비를 누르면 돼요.\n큰 화면 3-2-1에 맞춰 포즈만 하면 끝!', button: '좋아요' },
-  onDone: () => { tutShot = null; tutItems = []; }
+  onDone: () => { tutShot = null; }
 });
 // 연습이 끝나면 미리보기를 대기실로 되돌립니다.
 async function runTutorial() {
@@ -571,18 +459,24 @@ function capture() {
   sendPhoto(c, cam.state === 'fake' ? 'fake' : 'live');
 }
 function sendPhoto(c, src) {
+  const sh = shoot;
   showFreeze(c);
-  myPhotos.set(shoot.idx, c);
+  myPhotos.set(sh.idx, c);
   const url = encode(c);
-  shoot.sent = send('photo', { seq: shoot.seq, idx: shoot.idx, cut: shoot.cut, dataUrl: url, w: c.width, h: c.height, src });
-  shoot.bytes = Math.round(url.length * 0.75);
+  const pack = { seq: sh.seq, idx: sh.idx, cut: sh.cut, dataUrl: url, w: c.width, h: c.height, src };
+  sh.captured = true;
+  sh.sent = send('photo', pack);
+  sh.bytes = Math.round(url.length * 0.75);
+  // 3초 안에 결과가 안 오면 한 번 더 보냅니다(큰 화면은 같은 사진을 한 번만 받습니다).
+  setTimeout(() => { if (shoot === sh && !sh.review && !sh.resent) { sh.resent = true; sh.sent = send('photo', pack); } }, 3000);
   paintShootBottom();
 }
 $('btnSnapFile').addEventListener('click', async () => {
   if (!shoot) return;
   const sh = shoot;
   const c = await cam.pickFile(sh.aspect);
-  if (!c || shoot !== sh) return;
+  if (!c) { toast('사진을 못 찍었어요 · 다시 눌러요'); try { haptics.play('warn', 0.6); } catch (e) {} return; }
+  if (shoot !== sh) return;
   sendPhoto(c, 'file');
 });
 $('btnRetake').addEventListener('click', () => {
@@ -654,23 +548,26 @@ function paintShootBottom() {
   const mine = shoot && shoot.seq === sh.seq && shoot.shooter;
   if (!active && !mine) {
     const s = sh.active && sh.active[0];
-    st.innerHTML = state.mode === 'together' && s ? `지금은 <b>${s}P</b> 차례예요 · 큰 화면을 봐요` : '큰 화면을 봐요';
+    st.innerHTML = state.mode === 'together' && s ? T('{p} 차례 · 큰 화면을 봐요', { p: `<b>${s}P</b>` }) : T('큰 화면을 봐요');
     return;
   }
-  if (mine && shoot.captured && !shoot.sent && (cam.state === 'file' || !cam.ready())) {
-    st.innerHTML = '<b>지금 찍어요!</b> 폰 카메라 앱이 열려요';
+  const fileMode = cam.state === 'file' || !cam.ready();
+  if (mine && fileMode && !shoot.sent && !shoot.review && (sh.step === 'count' || shoot.captured)) {
+    // 폰 카메라 앱은 탭으로만 열리니, 숫자 세는 동안에도 눌러 찍을 수 있게 버튼을 미리 띄웁니다.
+    st.innerHTML = '<b>지금 찍어요!</b>';
     fileBtn.classList.remove('hidden');
     return;
   }
   if (mine && shoot.review) {
     const r = shoot.review;
     const left = Math.max(0, r.until - now());
-    if (r.answered === 'retake') { st.innerHTML = '<b>다시 찍어요!</b> 곧 숫자를 세요'; return; }
-    if (r.answered === 'keep') { st.innerHTML = '<b>좋아요 ✓</b> 다음 컷을 기다려요'; return; }
+    if (r.answered === 'retake') { st.innerHTML = '<b>다시 찍어요!</b>'; return; }
+    if (r.answered === 'keep') { st.innerHTML = '<b>좋아요 ✓</b>'; return; }
     if (r.retake && left > 0) {
-      st.innerHTML = r.ok ? '어때요? 마음에 안 들면 다시 찍어요' : '사진이 안 갔어요. 다시 찍어요';
+      st.innerHTML = r.ok ? '다시 찍을까요?' : '사진이 안 갔어요 · 다시 찍어요';
       rv.classList.remove('hidden');
       $('btnRetake').innerHTML = `다시 찍기<small>${r.left}번 남음</small>`;
+      $('btnRetake').classList.add('big');
       bar.classList.remove('hidden');
       const i = bar.querySelector('i');
       i.style.transition = 'none';
@@ -680,12 +577,12 @@ function paintShootBottom() {
       i.style.transform = 'scaleX(0)';
       return;
     }
-    st.innerHTML = r.ok ? '<b>잘 나왔어요!</b> 큰 화면을 봐요' : '사진이 안 갔어요';
+    st.innerHTML = r.ok ? '<b>잘 나왔어요!</b>' : '사진이 안 갔어요';
     return;
   }
-  if (mine && shoot.captured) { st.innerHTML = shoot.sent ? '<b>찰칵!</b> 큰 화면으로 보내는 중…' : '연결을 확인하는 중…'; return; }
-  if (sh.step === 'intro') st.innerHTML = state.mode === 'pose' && sh.prompt && sh.prompt.tip ? sh.prompt.tip : '<b>포즈 준비!</b> 곧 3-2-1 세요';
-  else if (sh.step === 'count') st.innerHTML = cam.state === 'file' ? '숫자가 끝나면 <b>지금 찍기</b>' : '<b>화면을 보며 포즈!</b>';
+  if (mine && shoot.captured) { st.innerHTML = shoot.sent ? '<b>찰칵!</b>' : '연결을 확인하는 중…'; return; }
+  if (sh.step === 'intro') st.innerHTML = state.mode === 'pose' && sh.prompt && sh.prompt.tip ? sh.prompt.tip : '<b>포즈 준비!</b>';
+  else if (sh.step === 'count') st.innerHTML = '<b>화면을 보며 포즈!</b>';
   else st.innerHTML = '';
 }
 
@@ -741,7 +638,7 @@ function prefetch(c) {
   if (!c || !c.url || files.has(c.url)) return;
   files.set(c.url, null);
   fetch(c.url).then((r) => (r.ok ? r.blob() : null)).then((b) => {
-    if (b) files.set(c.url, new File([b], c.name || '네컷.png', { type: b.type || 'image/png' }));
+    if (b) files.set(c.url, new File([b], c.name || `${T('네컷')}.png`, { type: b.type || 'image/png' }));
   }).catch(() => {});
 }
 async function save(c) {
@@ -749,12 +646,12 @@ async function save(c) {
   const f = files.get(c.url);
   // iPhone 은 공유 시트의 '이미지 저장'이 사진 앱으로 바로 갑니다.
   if (f && haptics.isIOS && navigator.canShare && navigator.canShare({ files: [f] })) {
-    try { await navigator.share({ files: [f], title: '네컷 사진관' }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+    try { await navigator.share({ files: [f], title: T('네컷 사진관') }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
   }
   const a = document.createElement('a');
   const href = f ? URL.createObjectURL(f) : c.url;
   a.href = href;
-  a.download = c.name || '네컷.png';
+  a.download = c.name || `${T('네컷')}.png`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -801,7 +698,7 @@ function render() {
 function modeName(m) { return (MODE[m] || MODE.together).short; }
 function paintWaitHead() {
   const sub = state.sub || state.phase;
-  if (sub === 'lobby') $('wSub').textContent = `${modeName(curVal('mode'))} · ${(THEME[curVal('theme')] || THEME.classic).short}`;
+  if (sub === 'lobby') $('wSub').textContent = `${T(modeName(curVal('mode')))} · ${T((THEME[curVal('theme')] || THEME.classic).short)}`;
 }
 function paintWait(sub) {
   const lobby = sub === 'lobby';
@@ -809,7 +706,7 @@ function paintWait(sub) {
   const over = sub === 'over';
   const busy = sub === 'shoot';
   $('wTitle').textContent = lobby ? '대기실' : review ? '다 찍었어요!' : over ? '완성!' : '촬영 중';
-  $('wSub').textContent = review ? '모두 준비하면 다 같이 꾸며요' : over ? '저장하고, 한 번 더 찍어도 돼요' : busy ? '촬영이 끝나면 꾸미기에 참여해요. 다음 촬영부터 사진을 찍을 수 있어요.' : '';
+  $('wSub').textContent = review ? '' : over ? '' : busy ? '다음 컷부터 같이 찍어요' : '';
   if (review && !preview) needSheets();
   if (lobby) paintWaitHead();
   $('camCard').classList.toggle('hidden', !(lobby || busy));
@@ -914,8 +811,10 @@ socket.on('replaced', () => message('다른 탭에서 열었어요', '마지막�
 socket.on('room_closed', () => message('방이 닫혔어요', '큰 화면의 새 QR을 찍어 주세요.'));
 socket.on('display_status', (d) => {
   const b = $('banner');
-  b.textContent = '큰 화면 연결이 끊겼어요. 다시 열리면 이어서 해요.';
-  b.classList.toggle('hidden', Boolean(d && d.connected));
+  if (d && d.connected) { if (b.dataset.src === 'disp') b.classList.add('hidden'); return; }
+  b.textContent = '큰 화면 연결이 끊겼어요';
+  b.dataset.src = 'disp';
+  b.classList.remove('hidden');
 });
 socket.on('ready_state', (st) => { readySt = st; if (mode === 'wait') paintWait(state.sub || state.phase); });
 socket.on('game_state', (s) => {
@@ -984,9 +883,7 @@ $('btnGo').addEventListener('click', async () => {
 document.addEventListener('visibilitychange', () => { if (!document.hidden && mode !== 'start') keepAwake(); });
 if (!window.isSecureContext) {
   const b = $('banner');
-  b.textContent = 'http 주소라 실시간 카메라가 안 될 수 있어요. 찍을 때 폰 카메라 앱으로 찍어요.';
-  b.classList.remove('hidden');
-  setTimeout(() => b.classList.add('hidden'), 7000);
+  camBanner('http라서 폰 카메라 앱으로 찍어요');
 }
 paintCam();
 paintPicks();

@@ -3,6 +3,7 @@
 // kind: 'drag'(원 3개 지나가기) | 'hit'(퍽 치기) | 'shoot'(위로 세게 밀기) | 'block'(내려오는 퍽 막기)
 // 좌표: x = 왼쪽(−0.5) → 오른쪽(+0.5), z = 위(0, 가운데 선 = 상대 쪽) → 아래(1, 내 골문).
 import { haptics } from '/common/haptics.js';
+import { t as tr } from '/common/i18n.js'; // 지역 변수 t 와 겹치지 않게 tr
 
 const MR = 0.056; // 말렛 반지름(큰 화면과 같음)
 const PR = 0.04; // 퍽 반지름
@@ -249,12 +250,12 @@ export function createPractice(stage, opts = {}) {
     hitAt = now;
     movedSince = now;
     if (kind === 'hit') {
-      floats.push({ text: '딱!', x: p.x, z: p.z - 0.08, t: now, c: color });
+      floats.push({ text: tr('딱!'), x: p.x, z: p.z - 0.08, t: now, c: color });
       opts.onEvent && opts.onEvent('hit', { strength: q });
       resetAt = now + 1100;
     } else if (kind === 'block') {
       if (!p.done) {
-        floats.push({ text: '막았다!', x: p.x, z: p.z - 0.1, t: now, c: '#7ef0a0' });
+        floats.push({ text: tr('막았다!'), x: p.x, z: p.z - 0.1, t: now, c: '#7ef0a0' });
         opts.onEvent && opts.onEvent('block', { strength: q });
         p.done = true; // 한 번 막으면 이번 퍽은 끝(튕겨 나가는 모습은 그대로 보여 줌)
         resetAt = now + 1200;
@@ -326,9 +327,9 @@ export function createPractice(stage, opts = {}) {
         p.vx = p.vz = 0;
         p.dead = true;
         resetAt = now + 900;
-        floats.push({ text: kind === 'block' ? '골 먹었어요' : '앗, 내 골문!', x: 0, z: LEN - 0.14, t: now, c: '#ff8a8a' });
+        floats.push({ text: tr(kind === 'block' ? '골 먹었어요' : '앗, 내 골문!'), x: 0, z: LEN - 0.14, t: now, c: '#ff8a8a' });
         try { haptics.play('warn', 0.6); } catch (e) {}
-        opts.onFail && opts.onFail(kind === 'block' ? '퍽이 오는 길목, 골문 앞에 말렛을 두고 막아요' : '아래는 내 골문이에요. 위쪽으로 쳐요');
+        opts.onFail && opts.onFail(tr(kind === 'block' ? '퍽이 오는 길목, 골문 앞에 말렛을 두고 막아요' : '아래는 내 골문이에요. 위쪽으로 쳐요'));
         return;
       }
       if (w === 'out') {
@@ -339,12 +340,12 @@ export function createPractice(stage, opts = {}) {
         if (kind === 'shoot') {
           const kmh = Math.round(sp * 3.6);
           if (sp >= SHOT_MIN) {
-            floats.push({ text: `슛! ${kmh}km/h`, x: clamp(p.x, -0.3, 0.3), z: 0.12, t: now, c: color });
+            floats.push({ text: tr('슛! {kmh}km/h', { kmh }), x: clamp(p.x, -0.3, 0.3), z: 0.12, t: now, c: color });
             try { haptics.play('strong', 1); } catch (e) {}
             opts.onEvent && opts.onEvent('goal', { speed: sp, kmh });
           } else {
             floats.push({ text: `${kmh}km/h`, x: clamp(p.x, -0.3, 0.3), z: 0.12, t: now, c: '#ffcf8a' });
-            opts.onFail && opts.onFail('조금 약해요. 퍽 뒤에서 위로 휙 밀어 쳐요');
+            opts.onFail && opts.onFail(tr('조금 약해요. 퍽 뒤에서 위로 휙 밀어 쳐요'));
           }
         }
         return;
@@ -355,7 +356,7 @@ export function createPractice(stage, opts = {}) {
     if (spd < 0.08 && hitAt && now - hitAt > 400 && !resetAt) {
       if (!stillSince) stillSince = now;
       if (now - stillSince > 1300) {
-        if (kind === 'shoot') opts.onFail && opts.onFail('위쪽(상대 쪽)으로 빠르게 밀어 보내요');
+        if (kind === 'shoot') opts.onFail && opts.onFail(tr('위쪽(상대 쪽)으로 빠르게 밀어 보내요'));
         resetAt = now + 200;
       }
     } else {
@@ -492,15 +493,6 @@ export function createPractice(stage, opts = {}) {
     g.restore();
     g.fillStyle = '#06070a';
     g.fillRect(X(-goal / 2), B, X(goal / 2) - X(-goal / 2), 10);
-    g.font = '800 11px "Pretendard Variable", Pretendard, sans-serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillStyle = 'rgba(255,255,255,.75)';
-    g.fillText('내 골문', X(0), B + 18);
-    if (kind !== 'hit') {
-      g.fillStyle = 'rgba(255,255,255,.7)';
-      g.fillText('▲ 상대 쪽', X(0), T - 18);
-    }
     // 고리
     for (let i = rings.length - 1; i >= 0; i--) {
       const r = rings[i];

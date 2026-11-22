@@ -221,3 +221,10 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .join.hidden { display:none; }
 .join img { width:90px; height:90px; background:#fff; border-radius:5px; }
 .join span, .join b { display:block; } .join span { font-size:11px; } .join b { font-size:20px; letter-spacing:.08em; }
+
+/* 소리가 잠겨 있을 때만 보이는 작은 안내 칩(대기실) */
+.sound-chip { position: fixed; right: 20px; bottom: 20px; z-index: 30; padding: 8px 14px; border-radius: 999px; background: var(--glass-2); color: var(--dim); font-size: 13px; pointer-events: none; }
+.sound-chip.hidden { display: none; }
+
+/* 언어 고르기: 대기실 오른쪽 아래 구석(경기 중에는 대기실 화면이 숨어 보이지 않습니다) */
+.lang-box { position: absolute; right: 18px; bottom: 14px; z-index: 5; }

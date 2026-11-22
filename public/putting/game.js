@@ -3,13 +3,16 @@
 import { createScene } from './scene.js';
 import { getHole, HOLE_COUNT, readLine } from './greens.js';
 import { simulate, planPutt, flatDistance, speedForFlat, MAX_BALL_SPEED } from './physics.js';
-import { sfx, audio } from './sfx.js';
+import { sfx, audio, getCtx } from './sfx.js';
+import { createSettings, fields } from '/common/settings.js';
+import { levelOf, putt, assistAim, shapePutterSpeed, shapePutterFace } from '/golf/assist.mjs';
+import { mountSoundGate } from '/golf/sound-gate.js';
 
 const RD = Math.PI / 180;
 const MAX_STROKES = 5; // 한 홀 최대 타수. 못 넣으면 6타로 적습니다.
 const PICKUP = MAX_STROKES + 1;
 const SMASH = 1.2; // 볼 스피드 = 퍼터 스피드 × 1.2
-const FACE_K = 0.88; // 공이 출발하는 방향 = 조준 + 페이스 × 0.88
+const FACE_K = 0.88; // 공이 출발하는 방향 = 조준 + 페이스 × 0.88 (어려움·봇·키보드. 쉬움·보통은 assist.mjs 의 faceK)
 const AIM_MAX = 25;
 const PUTTER_MAX = MAX_BALL_SPEED / SMASH;
 const SLOT_INFO = {
@@ -46,6 +49,15 @@ await Promise.race([
 ]).catch(() => {});
 
 const view = createScene($('cv'));
+// 난이도는 공통 설정 알약으로 고르고, 기본은 쉬움입니다. 자동 조준·세기 자석·넉넉한 컵은 쉬움·보통에서만.
+const settings = createSettings({
+  game: 'putting',
+  fields: [fields.difficulty({ hints: { easy: '자동 조준 · 세기 보정 · 넉넉한 컵', normal: '방향 일부 보정 · 약한 세기 보정', hard: '직접 읽고 직접 쳐요' } })],
+  onChange: () => pushState()
+});
+settings.mount($('setBox'));
+const level = () => levelOf(settings.difficulty());
+mountSoundGate(getCtx, audio, () => game.phase === 'lobby');
 let hole = getHole(0);
 view.setHole(hole);
 view.setGolfer(SLOT_INFO[1].color);
@@ -55,6 +67,7 @@ view.setBagColor(SLOT_INFO[1].color);
 // 연결
 // ================================================================
 const socket = io({ transports: ['websocket', 'polling'], tryAllTransports: true });
+settings.attach(socket);
 let serverPlayers = [];
 const rtts = [];
 function displayRtt() {
@@ -227,6 +240,7 @@ function pushState() {
     lastSlot: game.lastSlot,
     grid: game.grid,
     aim: game.aim,
+    difficulty: level(),
     maxStrokes: MAX_STROKES
   });
 }
@@ -236,12 +250,14 @@ async function startGame() {
   if (game.phase === 'playing' || game.busy) return;
   const list = lobbyPlayers().filter((p) => p.connected);
   if (!list.length) {
-    callout('폰을 먼저 연결해 주세요', 'QR을 찍고 시작하기를 누르면 자리가 생겨요', 'miss', 2400);
+    callout('폰을 먼저 연결해 주세요', '', 'miss', 2400);
     return;
   }
   audio();
   demo.state = 'off';
   sfx.rollStop();
+  settings.lock(true);
+  game.grid = level() === 'hard'; // 경사 보기·그린 읽기 패널은 어려움에서만 처음부터 켜 둡니다
   game.phase = 'playing';
   game.info = {};
   game.card = {};
@@ -333,7 +349,7 @@ async function beginTurn(fadeIt, changed) {
   renderRead();
   $('shot').classList.remove('on');
   if (changed) callout(p.name, `${b.strokes + 1}타째 · 홀까지 ${distOf(slot).toFixed(1)}m`, 'player', 1500);
-  prompt(`${p.name} 차례`, p.bot ? '봇이 라인을 읽고 있어요' : p.local ? '키보드: ←→ 방향, ↑↓ 세기, Space 퍼팅' : '폰에서 방향을 맞추고 어드레스를 눌러요');
+  prompt(`${p.name} 차례`, p.bot ? '봇이 라인을 읽고 있어요' : p.local ? '키보드: ←→ 방향, ↑↓ 세기, Space 퍼팅' : '');
   if (p.local) {
     game.kbdUsed = true;
     renderKbd();
@@ -347,7 +363,14 @@ function setupTurnView(slot) {
   const p = playerInfo(slot);
   const b = ballOf(slot);
   game.aim = 0;
+  game.plan = null;
   game.roll = null;
+  // 폰 선수는 이 차례의 이상적인 라인을 미리 계산합니다. 쉬움·보통은 조준을 그 방향으로 맞춰 줍니다(어려움은 직접).
+  if (!p.bot && !p.local) {
+    game.plan = planPutt(hole, { x: b.x, z: b.z });
+    const base = Math.atan2(hole.cup.x - b.x, hole.cup.z - b.z);
+    game.aim = assistAim((base - game.plan.heading) / RD, level());
+  }
   document.documentElement.style.setProperty('--c', p.color);
   view.setGolfer(p.color);
   view.setBagColor(p.color);
@@ -386,6 +409,7 @@ function endHole() {
 }
 
 function endGame() {
+  settings.lock(false);
   game.phase = 'over';
   game.sub = 'idle';
   game.turn = null;
@@ -435,6 +459,7 @@ function rankList() {
 }
 
 async function backToLobby(why) {
+  settings.lock(false);
   game.phase = 'lobby';
   game.sub = 'idle';
   game.turn = null;
@@ -483,16 +508,16 @@ function watchTurn(now) {
   if (!p.connected) {
     if (!game.awaySince) {
       game.awaySince = now;
-      prompt(`${p.name} 연결을 기다려요`, '15초 안에 돌아오지 않으면 이 홀은 6타로 적고 넘어가요');
+      prompt(`${p.name} 연결을 기다려요`, '');
     }
     if (now - game.awaySince > 15000) forfeit(slot, `${p.name} 기권`, '연결이 끊겼어요');
     return;
   }
   if (game.awaySince) {
     game.awaySince = null;
-    prompt(`${p.name} 차례`, '폰에서 방향을 맞추고 어드레스를 눌러요');
+    prompt(`${p.name} 차례`, '');
   }
-  if (now - game.activity > 90000) forfeit(slot, `${p.name} 시간 초과`, '이 홀은 6타로 적어요');
+  if (now - game.activity > 120000) forfeit(slot, `${p.name} 시간 초과`, '이 홀은 6타로 적어요');
 }
 function forfeit(slot, title, note) {
   const b = ballOf(slot);
@@ -545,7 +570,7 @@ function onAddress(d, local) {
   view.orientBall(aimHeading());
   if (d.phase === 'hold') {
     game.sub = 'hold';
-    prompt('어드레스 중', '폰을 그립처럼 쥐고 3초 동안 멈춰요');
+    prompt('멈춰요', '');
     pushState();
     return;
   }
@@ -561,13 +586,14 @@ function onAddress(d, local) {
   game.sub = 'stroke';
   if (view.pullFlag()) sfx.flag();
   if (first) sfx.tick();
-  prompt('퍼팅하세요', '뒤로 살짝 뺐다가 시계추처럼 톡 밀어요');
+  prompt('톡!', '');
   renderBug();
   pushState();
 }
 
 function onPose(d) {
   if (!isHumanTurn(d.slot) || game.sub !== 'stroke' || !Array.isArray(d.s) || !Array.isArray(d.fc)) return;
+  game.activity = performance.now(); // 폰이 움직이고 있으면 자리를 비운 것이 아닙니다
   const th = Math.atan2(num(d.s[2], 0), -num(d.s[1], -1)) - game.addr.theta0;
   const fy = Math.atan2(num(d.fc[0], 0), num(d.fc[2], 1)) - game.addr.face0;
   game.mirror = { theta: clamp(th, -0.7, 0.7), face: clamp(fy, -0.35, 0.35), at: performance.now() };
@@ -578,7 +604,7 @@ function onCancel(d) {
   game.sub = 'aim';
   game.activity = performance.now();
   game.mirror = null;
-  prompt(`${playerInfo(d.slot).name} 차례`, '폰에서 방향을 맞추고 어드레스를 눌러요');
+  prompt(`${playerInfo(d.slot).name} 차례`, '');
   pushState();
 }
 
@@ -588,13 +614,23 @@ function onStroke(d, local) {
   if (!(game.sub === 'stroke' || (local && (game.sub === 'aim' || game.sub === 'hold')))) return;
   const now = performance.now();
   game.activity = now;
-  const putter = clamp(num(d.speed, 0), 0.05, PUTTER_MAX);
-  const face = clamp(num(d.face, 0), -15, 15);
+  const lv = level();
+  const b = ballOf(game.turn);
+  // 폰 선수는 난이도 보정을 받습니다. 봇·키보드는 예전 값 그대로(사람처럼 틀리는 봇을 유지).
+  const assisted = !local;
+  if (assisted && !game.plan) game.plan = planPutt(hole, { x: b.x, z: b.z });
+  const ideal = game.plan ? game.plan.speed / SMASH : speedForFlat(distOf(game.turn) + 0.4) / SMASH;
+  const auto = Boolean(d.auto); // 폰의 '탭으로 치기': 알맞은 세기로 똑바로
+  let putter = auto ? ideal : num(d.speed, 0);
+  if (assisted && !auto) putter = shapePutterSpeed(putter, ideal, lv);
+  putter = clamp(putter, 0.05, PUTTER_MAX);
+  const rawFace = auto ? 0 : clamp(num(d.face, 0), -15, 15);
+  const face = assisted ? shapePutterFace(rawFace, lv) : rawFace;
+  const faceK = assisted ? putt(lv).faceK : FACE_K;
   // 페이스가 틀어지면 약간 덜 나갑니다(빗맞음)
   const ball = Math.min(MAX_BALL_SPEED, putter * SMASH * (1 - Math.min(0.1, Math.abs(face) * 0.004)));
-  const heading = aimHeading() - face * FACE_K * RD;
-  const b = ballOf(game.turn);
-  const sim = simulate(hole, { x: b.x, z: b.z }, heading, ball);
+  const heading = aimHeading() - face * faceK * RD;
+  const sim = simulate(hole, { x: b.x, z: b.z }, heading, ball, { cupScale: putt(lv).cup });
   const mirrored = !local && game.mirror && now - game.mirror.at < 400;
   const lag = local ? 0 : num(d.ago, 0) + num(d.rtt, 80) / 2 + displayRtt() / 2;
   const anim = mirrored ? mirrorAnim(putter, now, rigNow.theta) : scriptAnim(putter, now, rigNow.theta);
@@ -620,7 +656,7 @@ function onStroke(d, local) {
   $('read').classList.remove('on');
   $('sPutter').textContent = putter.toFixed(2);
   $('sBall').textContent = ball.toFixed(2);
-  $('sFace').textContent = faceText(face);
+  $('sFace').textContent = faceText(rawFace);
   $('sLeft').textContent = dl.toFixed(1);
   $('shot').classList.add('on');
   debug(`stroke putter ${putter.toFixed(2)}m/s ball ${ball.toFixed(2)} face ${face.toFixed(1)}° lag ${Math.round(lag)}ms ` +
@@ -1174,7 +1210,7 @@ function tick() {
     overlay = game.phase === 'lobby' && Math.floor(now / 9000) % 2 === 1;
   }
   game.lastCam = cam;
-  $('read').classList.toggle('on', game.phase === 'playing' && ['aim', 'hold'].includes(game.sub));
+  $('read').classList.toggle('on', game.phase === 'playing' && game.grid && ['aim', 'hold'].includes(game.sub));
   view.frame(now, { cam, ball: ballPos, halo, overlay, cut: cutNext });
   cutNext = false;
   updateTags();

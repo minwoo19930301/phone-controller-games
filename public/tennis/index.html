@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0a1a2e">
+<script src="/common/i18n-wait.js"></script>
 <title>테니스</title>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
@@ -11,7 +12,6 @@
 <script type="importmap">
 { "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
 </script>
-<style>/* 대기실 설명은 한 줄만 */ .lobby-copy .steps, .lobby-copy .spins, .lobby-copy .rules { display: none !important; }</style>
 <script>
   // 예전 시험 주소 ?noslow 는 ?slow=off 와 같습니다(설정 모듈은 slow 만 읽음). 모듈보다 먼저 주소만 바꿉니다.
   (function () {
@@ -58,30 +58,12 @@
 <div id="fade" class="fade"></div>
 
 <section id="lobby" class="screen">
+  <div class="lang-box" id="langBox"></div>
   <div class="lobby">
     <div class="lobby-copy">
       <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 · 단식·복식</div>
       <h1 class="wordmark">TENNIS</h1>
       <p class="lede">폰을 라켓처럼 휘두르세요.</p>
-      <ol class="steps">
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><ellipse cx="24" cy="17" rx="11" ry="13"/><path d="M24 30v14"/><path d="M19 22h10M19 14h10M24 6v22"/></svg>
-          <div><b>라켓처럼 쥐기</b><span>폰 아래쪽을 손잡이처럼 쥐고 화면이 TV를 보게 해요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="15" y="5" width="18" height="34" rx="4"/><circle cx="24" cy="22" r="6"/><path d="M24 44v-3"/></svg>
-          <div><b>자세 맞추기</b><span>그 자세가 기준이 돼요. 3초 세고 맞춰요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="16" stroke-dasharray="4 4"/><circle cx="24" cy="24" r="4"/><path d="M6 10l6 4M42 10l-6 4"/></svg>
-          <div><b>링이 닫힐 때 스윙</b><span>서브는 토스가 내려올 때, 랠리는 공이 링에 닿을 때.</span></div>
-        </li>
-      </ol>
-      <div class="spins">
-        <div class="top"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="M4 20C14 20 22 14 34 4"/><path d="M34 4l-7 1M34 4l-1 7"/></svg><div><b>탑스핀</b><span>아래에서 위로 쓸어 올리기 · 뚝 떨어지고 높이 튐</span></div></div>
-        <div class="back"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="M4 4C14 4 22 10 34 20"/><path d="M34 20l-7-1M34 20l-1-7"/></svg><div><b>슬라이스</b><span>위에서 아래로 깎아 내리기 · 낮게 깔림</span></div></div>
-        <div class="flat"><svg viewBox="0 0 40 24" aria-hidden="true"><path d="M4 12h30"/><path d="M34 12l-6-4M34 12l-6 4"/></svg><div><b>플랫</b><span>앞으로 곧게 · 빠르고 낮게</span></div></div>
-      </div>
       <div class="slots" id="slots"></div>
       <div class="pairs" id="pairs"></div>
       <div class="setbox" id="setBox"></div>
@@ -104,7 +86,7 @@
     <h1 class="wordmark sm">테니스 결과</h1>
     <div class="podium" id="podium"></div>
     <div class="setbox over-set" id="setBoxOver"></div>
-    <div class="hint">폰에서 모두 <b>다시 하기</b>를 누르면 다음 판 · 폰이 없을 때는 <kbd>Enter</kbd></div>
+    <div class="hint" id="overHint"></div>
     <div class="tutboard over-tut" id="tutBoardOver"></div>
   </div>
 </section>
@@ -115,6 +97,8 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/tennis/i18n.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
 <script type="module" src="game.js"></script>
 </body>
 </html>

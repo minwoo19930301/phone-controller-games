@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#06050d">
 <title>에어하키</title>
+<script src="/common/i18n-wait.js"></script>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
 </script>
-<style>/* 대기실 설명은 한 줄만 */ .lobby-copy .steps, .lobby-copy .spins, .lobby-copy .rules { display: none !important; }</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
@@ -30,7 +30,7 @@
     <div class="spd-num"><b id="spdV">0</b><small>km/h</small></div>
     <div class="spd-track"><i id="spdBar"></i></div>
   </div>
-  <div class="keys"><kbd>W A S D</kbd> 아래쪽 · <kbd>방향키</kbd> 위쪽 · 판을 마우스로 끌기 <span>(시험용)</span></div>
+  <div class="keys hidden" id="keysHelp"><kbd>W A S D</kbd> <span>아래쪽</span> · <kbd>방향키</kbd> <span>위쪽</span> · <span>판을 마우스로 끌기</span> <span>(시험용)</span></div>
 </div>
 
 <div id="join" class="join hidden">
@@ -44,36 +44,23 @@
 
 <!-- 대기실 -->
 <section id="lobby" class="screen">
+  <div class="lang-box" id="langBox"></div>
   <div class="lobby">
     <div class="lobby-copy">
-      <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 · 7점 선승</div>
+      <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4P</div>
       <h1 class="wordmark">AIR<br>HOCKEY</h1>
-      <p class="lede">폰 화면을 엄지로 밀어 퍽을 치세요.</p>
-      <ol class="steps">
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="14" y="5" width="20" height="38" rx="4"/><path d="M20 15h8v8h-8z M20 27h3 M25 27h3v3 M20 31h3v3"/></svg>
-          <div><b>QR을 찍어요</b><span>폰 카메라로 찍고 시작하기를 눌러요. 센서 허용은 필요 없어요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="13" y="4" width="22" height="40" rx="5"/><circle cx="24" cy="28" r="6"/><path d="M24 22v-8 M20 17l4-4 4 4"/></svg>
-          <div><b>엄지로 말렛 조작</b><span>폰 화면이 큰 화면 속 내 쪽 반 코트와 같은 방향이에요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 40h32"/><path d="M16 40v-6h16v6"/><circle cx="24" cy="18" r="6"/><path d="M24 8v-4 M33 11l3-3 M15 11l-3-3"/></svg>
-          <div><b>세게 밀어 쳐요</b><span>빠르게 밀수록 퍽이 빨라요. 벽을 맞혀 꺾어 넣어도 돼요.</span></div>
-        </li>
-      </ol>
+      <p class="lede">엄지로 끌어서 퍽을 쳐요.</p>
       <div class="slots" id="slots"></div>
       <div class="pairs" id="pairs"></div>
       <div class="set-box" id="setBox"></div>
       <div class="tut-box" id="tutBox"></div>
-      <div class="hint"><span>폰에서 모두 <b>준비</b>를 누르면 시작해요</span> <span class="dot"></span> <span>한쪽 반에 8초 넘게 머물면 상대에게 넘어가요</span> <span class="dot"></span> <span>화면을 한 번 누르면 소리가 켜져요</span><span class="kb-test hidden" id="kbTest"><span class="dot"></span> <kbd>Enter</kbd> 봇 시험 시작</span></div>
+      <div class="hint"><span>폰에서 모두 준비를 누르면 시작해요</span><span class="kb-test hidden" id="kbTest"><span class="dot"></span> <kbd>Enter</kbd> 봇 시험 시작</span></div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
       <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
       <div class="qr-url" id="url"></div>
-      <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 화면 꺼짐 방지가 안 될 수 있어요. 경기 중 폰 화면이 꺼지지 않게 해 두거나 https 주소로 열어 주세요.</div>
+      <div class="qr-warn hidden" id="warn">http 주소라 폰 화면이 꺼질 수 있어요</div>
     </div>
   </div>
   <div class="msg" id="msg"></div>
@@ -87,16 +74,19 @@
     <div class="over-score" id="overScore"></div>
     <div class="podium" id="podium"></div>
     <div class="over-set" id="overSet"></div>
-    <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 다음 판</span> <span class="dot"></span> <span>난이도는 지금 바꿔도 돼요</span></div>
+    <div class="hint"><span>폰에서 모두 다시 하기를 누르면 다음 판</span></div>
   </div>
 </section>
 
 <section id="replaced" class="screen hidden">
-  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1></div>
 </section>
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<!-- 사전 모듈을 먼저 둡니다: 이 모듈이 공통 사전을 함께 불러, 첫 번역 전에 두 사전이 모두 등록됩니다 -->
+<script type="module" src="/airhockey/i18n.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
 <script type="module" src="game.js"></script>
 </body>
 </html>

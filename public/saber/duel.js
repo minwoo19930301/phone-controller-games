@@ -8,30 +8,34 @@
 import * as THREE from 'three';
 import { makeRobot, makeTelegraph, POSES, ROBOT_Z, R_BLADE, R_HILT, copyPose, mixPose, pose as mkPose } from './robot.js';
 import { HILT, ENEMY } from './models.js';
+import { t as tr } from '/common/i18n.js';
 
 // 난이도별 값. side/over/center = 칼 기울기(도) 기준, pre/post = 칠 때 앞뒤로 인정하는 시간(ms), hold = 그 안에서 버텨야 하는 시간(ms)
+// zk = 막는 자세 기준을 그만큼(0~1) 느슨하게(쉬움·보통은 살짝만 기울여도 막힘), blockCd = 로봇이 막은 뒤 다시 막기까지 최소 간격(ms)
+// 기본 난이도는 쉬움입니다. 보통은 예전 쉬움 정도, 어려움은 예전 그대로입니다. 위 막기·찌르기는 어려움에서만 나옵니다(쉬움·보통은 왼쪽·오른쪽 막기 + 베기뿐).
 export const DUEL_LEVEL = {
   easy: {
-    tel: 1.45, telCombo: 0.95, swing: 0.24, gap: [1.7, 2.6], combos: [1, 1, 1, 2], kinds: { left: 4, right: 4, overhead: 1, thrust: 0 },
-    side: 6, over: 38, center: 52, hold: 0, pre: 600, post: 250, swingParry: 'any',
-    open: 2.0, maxHits: 3, robotHp: 100, dmgIn: 8, dmgOut: 20, strikeMin: 200, slow: 0.4, botFail: 0.05
+    tel: 1.6, telCombo: 1.05, swing: 0.26, gap: [1.9, 2.8], combos: [1, 1, 1, 2], kinds: { left: 1, right: 1, overhead: 0, thrust: 0 },
+    side: 4, over: 38, center: 52, hold: 0, pre: 700, post: 300, swingParry: 'any', zk: 0.5, blockCd: 900,
+    open: 2.2, maxHits: 3, robotHp: 100, dmgIn: 6, dmgOut: 20, strikeMin: 160, slow: 0.4, botFail: 0.05
   },
   normal: {
-    tel: 1.05, telCombo: 0.72, swing: 0.21, gap: [1.1, 1.8], combos: [1, 1, 2, 2], kinds: { left: 3, right: 3, overhead: 2, thrust: 1 },
-    side: 15, over: 50, center: 38, hold: 45, pre: 400, post: 150, swingParry: 'zone',
-    open: 1.45, maxHits: 3, robotHp: 100, dmgIn: 12, dmgOut: 15, strikeMin: 260, slow: 0.5, botFail: 0.1
+    tel: 1.45, telCombo: 0.95, swing: 0.24, gap: [1.7, 2.6], combos: [1, 1, 1, 2], kinds: { left: 1, right: 1, overhead: 0, thrust: 0 },
+    side: 8, over: 44, center: 46, hold: 0, pre: 520, post: 220, swingParry: 'any', zk: 0.7, blockCd: 700,
+    open: 1.8, maxHits: 3, robotHp: 100, dmgIn: 10, dmgOut: 15, strikeMin: 220, slow: 0.5, botFail: 0.1
   },
   hard: {
     tel: 0.74, telCombo: 0.48, swing: 0.18, gap: [0.6, 1.25], combos: [1, 2, 2, 3], kinds: { left: 3, right: 3, overhead: 2, thrust: 2 },
-    side: 26, over: 60, center: 0, hold: 110, pre: 240, post: 90, swingParry: 'thrust', chainParry: true,
+    side: 26, over: 60, center: 0, hold: 110, pre: 240, post: 90, swingParry: 'thrust', chainParry: true, zk: 1, blockCd: 450,
     open: 0.95, maxHits: 2, robotHp: 120, dmgIn: 16, dmgOut: 12, strikeMin: 320, slow: 0.62, botFail: 0.16
   }
 };
+// 막기 카드는 한 줄(큰 글자)만 보입니다.
 export const KIND_TEXT = {
-  left: { main: '왼쪽 막기', sub: '칼끝을 왼쪽으로' },
-  right: { main: '오른쪽 막기', sub: '칼끝을 오른쪽으로' },
-  overhead: { main: '위 막기', sub: '칼을 옆으로 눕혀요' },
-  thrust: { main: '찌르기', sub: '칼을 세우거나 휘둘러 쳐내요' }
+  left: { main: '왼쪽 막기', sub: '' },
+  right: { main: '오른쪽 막기', sub: '' },
+  overhead: { main: '위 막기', sub: '' },
+  thrust: { main: '찌르기', sub: '' }
 };
 const ROBOT_NAMES = ['KR-07', 'KR-12', 'KR-21', 'KR-33'];
 const PARRY_PTS = 20;
@@ -206,7 +210,7 @@ export function createDuel(ctx) {
     D.eyeFlash = 1;
     D.telA = 0;
     if (!P.demo) {
-      sfx.windup(D.kind);
+      sfx.windup(D.kind, dur);
       const ms = Math.round((dur + lv.swing / lv.slow) * 1000);
       ctx.send('cue', { kind: 'duel', dir: D.kind, ms, n: D.comboN, of: D.comboN + D.comboLeft + 1 }, P.slot);
     }
@@ -234,7 +238,7 @@ export function createDuel(ctx) {
         prev = null;
         continue;
       }
-      if (zoneOk(D.kind, s.th, s.up, lv)) {
+      if (zoneOk(D.kind, s.th, s.up, lv, lv.zk || 1)) {
         run = prev ? run + (s.t - prev.t) : 0;
         best = Math.max(best, run);
         prev = s;
@@ -325,7 +329,7 @@ export function createDuel(ctx) {
       P.shake = Math.max(P.shake, 0.5);
       sfx.clash(true);
       ctx.hudFx(P, 'clash');
-      ctx.hudCall(P, how === 'swing' ? '쳐냈다!' : '막았다!', `+${PARRY_PTS}`, 'good', 700);
+      ctx.hudCall(P, tr(how === 'swing' ? '쳐냈다!' : '막았다!'), `+${PARRY_PTS}`, 'good', 700);
       ctx.send('hit', { kind: 'parry' }, P.slot);
       ctx.pushState();
     }
@@ -373,7 +377,7 @@ export function createDuel(ctx) {
       to(D, POSES.victory, 0.9);
       sfx.lose();
     } else {
-      ctx.hudCall(P, '베였어요', `체력 ${Math.ceil(P.hp)}`, 'bad', 700);
+      ctx.hudCall(P, tr('베였어요'), tr('체력 {hp}', { hp: Math.ceil(P.hp) }), 'bad', 700);
     }
     ctx.pushState();
   }
@@ -404,7 +408,7 @@ export function createDuel(ctx) {
       P.bestStreak = Math.max(P.bestStreak, P.streak);
       sfx.slash(D.hits);
       ctx.hudFx(P, 'dmg', { dmg, hits: D.hits });
-      ctx.hudCall(P, D.hits >= 2 ? `${D.hits}연타!` : '베기!', `+${pts}`, D.hits >= 2 ? 'streak' : 'good', 650);
+      ctx.hudCall(P, D.hits >= 2 ? tr('{n}연타!', { n: D.hits }) : tr('베기!'), `+${pts}`, D.hits >= 2 ? 'streak' : 'good', 650);
       ctx.send('hit', { kind: 'strike', n: D.hits }, P.slot);
     }
     if (D.hp <= 0) {
@@ -446,12 +450,9 @@ export function createDuel(ctx) {
     view.sparks.emit(_sp, P.demo ? 10 : 26, { color: '#ffffff', color2: ENEMY, speed: 2.6, life: 0.4, size: 0.026, hot: 3 });
     view.flash(_sp, '#ffffff', 0.4, 0.12, 'glow', 3.5);
     if (P.demo) return;
-    sfx.deflect(false);
+    sfx.clash(false);
     ctx.send('hit', { kind: 'blocked' }, P.slot);
-    if (D.blockHints < 3) {
-      D.blockHints += 1;
-      ctx.hudNote(P, '로봇이 막았어요 · 먼저 막고, 비틀거릴 때 베요', 2200);
-    } else ctx.hudCall(P, '막혔어요', '', 'bad', 500);
+    ctx.hudCall(P, tr('막혔어요'), '', 'bad', 500);
   }
 
   // ---------- 매 프레임 ----------
@@ -505,7 +506,7 @@ export function createDuel(ctx) {
         for (const sw of swings) {
           if (sw.used || sw.real < now - 400 || sw.speed < lv.strikeMin) continue;
           sw.used = true;
-          if (now - D.lastBlockAt > 450 && active) robotBlocks(P, D, now);
+          if (now - D.lastBlockAt > (lv.blockCd || 450) && active) robotBlocks(P, D, now);
         }
         if (D.state === 'guard' && active && D.t >= D.dur && !P.down) startAttack(P, D, now, false);
         break;

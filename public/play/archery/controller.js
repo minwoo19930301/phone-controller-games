@@ -1,30 +1,41 @@
 // 양궁 컨트롤러. 폰이 활입니다.
-// 폰을 활처럼 세워 큰 화면을 겨누면(deviceorientation → 중앙 맞추기 기준) 조준(도)을 aim {x, y} 로 보냅니다.
+// 폰을 활처럼 세워 큰 화면을 겨누면(deviceorientation → 기준 자세는 저절로 잡힘) 조준(도)을 aim {x, y} 로 보냅니다.
 // 화면의 시위를 아래로 끌면 draw {pull 0..1}, 손을 떼면 release {x, y, pull, steady} 로 쏩니다.
-// 세워 쥐면 폰 뒷면이, 눕혀 쥐면 윗부분이 겨누는 방향입니다(중앙 맞추는 순간 자세로 판단).
+// 세워 쥐면 폰 뒷면이, 눕혀 쥐면 윗부분이 겨누는 방향입니다(기준을 잡는 순간 자세로 판단).
+// 기준 자세: 센서가 처음 들어올 때와 내 차례가 시작될 때 저절로 잡고, 조준이 많이 벗어난 채로 시위를 누르면 그 자세로 다시 잡습니다.
+// 따로 맞추는 화면은 없고, 위쪽 '다시 맞추기' 로 언제든 다시 잡을 수 있습니다.
+// 시위를 끄는 대신 '바로 쏘기' 버튼으로도 똑같이 쏠 수 있습니다.
 // 센서가 없는 PC 에서는 조준 판을 끌어서 겨누고, 시위 영역을 끌거나 스페이스를 눌러 당겼다 뗍니다.
 //
-// 공통 모듈: haptics(당김 틱·놓는 쿵·10점 패턴·심박), phone-settings(난이도 알약), tutorial(처음이면 연습 4단계)
+// 공통 모듈: haptics(당김 틱·놓는 쿵·10점 패턴·심박), phone-settings(난이도 알약), tutorial(원할 때만 하는 연습 2단계)
 import { haptics } from '/common/haptics.js';
 import { createPhoneSettings } from '/common/phone-settings.js';
 import { createTutorial } from '/common/tutorial.js';
+import { FULL_PULL } from '/archery/ballistics.mjs'; // 큰 화면과 같은 만궁 기준
+import { t, mountSwitcher } from '/common/i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const RD = Math.PI / 180;
 const params = new URLSearchParams(location.search);
 const ROOM = (params.get('room') || '').toUpperCase();
 const DEBUG = params.has('debug');
-$('room').textContent = ROOM ? `방 ${ROOM}` : '';
+$('room').textContent = ROOM ? t('방 {c}', { c: ROOM }) : '';
+// 언어 고르기: 시작 화면에서만 보임(바꾸면 새로 고침)
+mountSwitcher($('langBox'), { reload: true, compact: true });
 
 // ---------- 조정 값 (실폰 검증 전이라 바뀔 수 있습니다) ----------
 const AIM_MS = 33; // aim·draw 전송 간격, 약 30Hz
 const SMOOTH = 0.5; // 센서 값 다듬기(0~1, 클수록 빠르게 따라감)
 const PAD_RANGE = 7; // 센서 없는 PC: 조준 판 가장자리 = 이 각도(도)
-const DRAW_FRAC = 0.62; // 시위 영역 높이의 이만큼 끌면 만궁
-const FULL_PULL = 0.92; // 이 이상이면 만궁(큰 화면과 같은 값)
+const DRAW_FRAC = 0.35; // 시위 영역 높이의 이만큼 끌면 만궁(예전 0.62)
+const DRAW_MIN_PX = 80; // 시위 끌기 최소 거리(예전 120px)
+const MIN_PULL = 0.15; // 이보다 약하게 당기고 놓으면 쏘지 않고 알려 줍니다(큰 화면의 MIN_PULL 과 같은 값, 예전 0.25)
+const RECENTER_DEG = 8; // 시위를 누를 때 조준이 이만큼(도) 넘게 벗어나 있으면 그 자세를 가운데로 다시 잡음
 const AIM_LOOKBACK_MS = 110; // 손가락을 뗄 때의 폰 흔들림을 피해 이만큼 전 조준을 씁니다
-const STEADY_WINDOW_MS = 450; // 놓기 전 이 시간 동안의 흔들림으로 안정도(steady)를 계산
-const STEADY_RMS_DEG = 0.5; // 이만큼(도) 흔들렸으면 steady = 0
+const STEADY_WINDOW_MS = 250; // 놓기 전 이 시간 동안의 흔들림으로 안정도(steady)를 계산(예전 450)
+const STEADY_RMS = { easy: 1.5, normal: 1.0, hard: 0.5 }; // 이만큼(도) 흔들렸으면 steady = 0 (예전 0.5 = 어려움 값)
+const STEADY_DEFAULT = 0.95; // 기록이 모자랄 때(예전 0.85)
+const BUTTON_STEADY = 0.9; // '바로 쏘기' 버튼은 (쉬움·보통에서) 이 이상의 안정도로 쏨: 버튼을 누르다 폰이 흔들려도 봐줌
 const CAL_BACK_MS = 120;
 const CAL_SPAN_MS = 280;
 const SENSOR_WAIT_MS = 1500; // 이 시간 안에 동작 센서 값이 없으면 버튼 모드
@@ -54,7 +65,6 @@ let gotOri = false;
 let fallback = false;
 let permDenied = false;
 let pendingCal = false;
-let pendingReady = false;
 let noRoomTries = 0;
 let helpOn = false;
 let readyList = [];
@@ -93,7 +103,7 @@ ps.onChange(() => paintDiff());
 function paintDiff() {
   const d = ps.difficulty();
   const e = $('dTag');
-  e.textContent = DIFF_LABEL[d] || '보통';
+  e.textContent = DIFF_LABEL[d] || '쉬움';
   e.dataset.d = d;
 }
 function flash(kind) {
@@ -188,13 +198,12 @@ function onOrientation(e) {
   ori = deviceVectors(e.alpha || 0, e.beta || 0, e.gamma || 0);
   oriBuf.push({ t, top: ori.top, face: ori.face });
   while (oriBuf.length && oriBuf[0].t < t - 700) oriBuf.shift();
-  if (!gotOri) { gotOri = true; fallback = false; sensorsChanged(); }
+  if (!gotOri) { gotOri = true; fallback = false; if (!basis) captureBasis(true); sensorsChanged(); }
   if (fallback || !basis || basis.fake) return;
   const a = aimDegOf(basis, ori.top, ori.face);
   cur.x = clamp(cur.x + (a.x - cur.x) * SMOOTH, -AIM_LIMIT, AIM_LIMIT);
   cur.y = clamp(cur.y + (a.y - cur.y) * SMOOTH, -AIM_LIMIT, AIM_LIMIT);
   recordAim(t);
-  if (aimWatch) aimWatch();
   if (streaming() && t >= nextSendAt) {
     nextSendAt = Math.max(nextSendAt + AIM_MS, t + AIM_MS * 0.4);
     send('aim', { x: r3(cur.x), y: r3(cur.y) }, true);
@@ -212,7 +221,6 @@ function startFake() {
     cur.x = FAKE.x;
     cur.y = FAKE.y;
     recordAim(performance.now());
-    if (aimWatch) aimWatch();
     if (streaming()) send('aim', { x: r3(cur.x), y: r3(cur.y) }, true);
     drawSightDot();
   }, AIM_MS);
@@ -284,9 +292,9 @@ function makeBowPad(zone, o = {}) {
   paint(0);
   let y0 = 0;
   let lastSend = 0;
-  const drawPx = () => Math.max(120, zone.getBoundingClientRect().height * DRAW_FRAC);
+  const drawPx = () => Math.max(DRAW_MIN_PX, zone.getBoundingClientRect().height * DRAW_FRAC);
   zone.addEventListener('pointerdown', (e) => {
-    if (!pad.enabled || (o.canStart && !o.canStart())) return;
+    if (!pad.enabled || (o.canStart && !o.canStart())) { if (o.onBlocked) o.onBlocked(); return; }
     e.preventDefault();
     pad.down = true;
     y0 = e.clientY;
@@ -325,7 +333,8 @@ let fullSent = false;
 let drawAt = 0;
 const pad = makeBowPad($('bowZone'), {
   canStart: () => myTurn(),
-  onStart: () => { drawSent = 0; drawStepSent = 0; fullSent = false; drawAt = performance.now(); feel('step'); send('draw', { pull: 0.01 }, true); },
+  onBlocked: () => blocked(),
+  onStart: () => { maybeRecenter(); drawSent = 0; drawStepSent = 0; fullSent = false; drawAt = performance.now(); feel('step'); send('draw', { pull: 0.01 }, true); },
   onPull: (p, due) => {
     const step = Math.floor(p * 4);
     if (step > drawStepSent) { drawStepSent = step; feel('step'); }
@@ -337,13 +346,26 @@ const pad = makeBowPad($('bowZone'), {
   },
   onRelease: (p) => doRelease(p)
 });
+// 내 차례가 아닐 때 눌렀거나 쏠 수 없을 때: 조용히 무시하지 않고 짧게 알려 줍니다
+function blocked() {
+  haptics.tick();
+  setStatusTemp(me && state.phase === 'playing' && state.stage === 'turn' ? '지금은 못 쏴요' : '내 차례가 아니에요');
+}
+// 시위를 누를 때 조준이 크게 벗어나 있으면(폰을 내려 든 채 차례가 시작됐을 때 등) 지금 자세를 가운데로 다시 잡습니다
+function maybeRecenter() {
+  if (fallback || !gotOri || mode !== 'play' || basis && basis.fake) return;
+  if (Math.hypot(cur.x, cur.y) <= RECENTER_DEG) return;
+  if (captureBasis(true)) setStatusTemp('가운데를 다시 잡았어요');
+}
+const steadyRmsNow = () => STEADY_RMS[state.difficulty || ps.difficulty()] || STEADY_RMS.easy;
 function steadyNow(t) {
+  if (fallback || !basis || basis.fake) return 1; // 센서 없이 끌어서 겨눌 때는 흔들림이 없음
   const w = hist.filter((h) => h.t >= t - STEADY_WINDOW_MS - AIM_LOOKBACK_MS && h.t <= t - AIM_LOOKBACK_MS);
-  if (w.length < 3) return 0.85;
+  if (w.length < 3) return STEADY_DEFAULT;
   const mx = w.reduce((s, h) => s + h.x, 0) / w.length;
   const my = w.reduce((s, h) => s + h.y, 0) / w.length;
   const rms = Math.sqrt(w.reduce((s, h) => s + (h.x - mx) ** 2 + (h.y - my) ** 2, 0) / w.length);
-  return clamp(1 - rms / STEADY_RMS_DEG, 0, 1);
+  return clamp(1 - rms / steadyRmsNow(), 0, 1);
 }
 function aimBefore(t) {
   // 놓는 순간 이전(AIM_LOOKBACK_MS 전)의 조준
@@ -352,10 +374,12 @@ function aimBefore(t) {
   for (let i = hist.length - 1; i >= 0; i--) { if (hist[i].t <= target) { best = hist[i]; break; } }
   return best;
 }
-function doRelease(p) {
+function doRelease(p, byButton) {
   const now = performance.now();
   const a = aimBefore(now);
-  const rel = { x: r3(a.x), y: r3(a.y), pull: r3(p), steady: r3(steadyNow(now)) };
+  let steady = steadyNow(now);
+  if (byButton && steadyRmsNow() > STEADY_RMS.hard) steady = Math.max(steady, BUTTON_STEADY);
+  const rel = { x: r3(a.x), y: r3(a.y), pull: r3(p), steady: r3(steady) };
   if (mode === 'tut' && tutStepId()) {
     // 튜토리얼 안에서의 놓기는 판정만 하고 큰 화면에는 보내지 않음
     feel(p >= FULL_PULL ? 'loose' : 'step');
@@ -363,32 +387,24 @@ function doRelease(p) {
     return;
   }
   send('draw', { pull: 0 }, true);
-  if (p < 0.25) { feel('step'); setStatusTemp('더 당겨야 쏠 수 있어요'); return; }
-  send('release', rel);
+  if (p < MIN_PULL) { feel('step'); setStatusTemp('더 당겨요'); return; }
+  if (!send('release', rel)) { haptics.tick(); setStatusTemp('연결이 끊겼어요'); return; }
   feel('loose');
   setStatusTemp('발사!');
 }
 function paintHint(p) {
-  pad.setHint(p >= FULL_PULL ? '만궁! 숨을 고르고 손을 떼요' : p > 0.04 ? '더 당겨요' : '');
+  pad.setHint(p >= FULL_PULL ? '만궁! 손을 떼요' : p > 0.04 ? '더 당겨요' : '');
 }
 
-// ---------- 처음 하는 사람 연습(튜토리얼): 중앙 맞추기 → 조준 → 당기기 → 놓기 ----------
+// ---------- 연습(튜토리얼): 원할 때만 하는 2단계(당기기 → 놓기). 저절로 시작하지 않음 ----------
 const el = (tag, cls, html) => {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (html != null) e.innerHTML = html;
   return e;
 };
-const PH = '<rect x="-17" y="-31" width="34" height="62" rx="7" class="pcgt-ph"/><rect x="-12.5" y="-24.5" width="25" height="46" rx="3" class="pcgt-scr"/><path d="M-5 -28h10" class="pcgt-spk"/>';
 const svgArt = (inner) => `<svg class="pcgt-svg" viewBox="0 0 200 160" aria-hidden="true">${inner}</svg>`;
 const ART = {
-  // 과녁 앞에서 조준핀이 움직이는 모습
-  aim: () => svgArt(
-    '<circle cx="100" cy="52" r="40" class="pcgt-tv"/><circle cx="100" cy="52" r="26" class="pcgt-tv"/><circle cx="100" cy="52" r="12" class="pcgt-tv"/>' +
-    '<g><animateTransform attributeName="transform" type="translate" values="-22 -10;22 -10;22 12;-22 12;-22 -10" dur="3.2s" repeatCount="indefinite"/>' +
-    '<circle cx="100" cy="52" r="5" class="pcgt-arrow" style="fill:currentColor"/></g>' +
-    `<g transform="translate(100 128)"><g><animateTransform attributeName="transform" type="rotate" values="-14;14;-14" dur="2.4s" calcMode="spline" keySplines=".45 0 .55 1;.45 0 .55 1" repeatCount="indefinite"/><g transform="translate(0 -6)">${PH}</g></g></g>`
-  ),
   // 시위를 아래로 당기는 모습
   draw: () => svgArt(
     '<path d="M60 40Q100 20 140 40" class="pcgt-arc" style="stroke-width:4"/><rect x="94" y="22" width="12" height="20" rx="4" class="pcgt-ph"/>' +
@@ -405,50 +421,8 @@ const ART = {
   )
 };
 let tutAuto = false;
-let aimWatch = null;
 const tutStepId = () => { const c = tut.current(); return c ? c.id : null; };
 function compact(stage) { const card = stage.closest('.pcgt-card'); if (card) card.classList.add('gt-compact'); }
-function stageCal(stage, api) {
-  const box = el('div', 'gt-col');
-  if (fallback) {
-    box.innerHTML = '<p class="gt-note">센서 대신 화면을 끌어서 하니까 맞추지 않아도 돼요.</p><button type="button" class="gt-btn">다음</button>';
-    box.querySelector('button').addEventListener('click', () => api.ok('준비 끝'));
-  } else {
-    box.innerHTML = '<button type="button" class="gt-btn">여기가 중앙</button><p class="gt-note">폰을 세워 쥐고 팔을 뻗어 큰 화면 가운데를 겨눠요</p>';
-    box.querySelector('button').addEventListener('click', () => {
-      if (!gotOri) { api.fail('방향 센서 값이 아직 없어요. 잠시 뒤 다시 눌러요'); return; }
-      if (captureBasis(true)) tut.signal('cal', { ok: true });
-      else api.fail('센서 값이 끊겼어요. 다시 눌러요');
-    });
-  }
-  stage.appendChild(box);
-}
-function stageAim(stage) {
-  compact(stage);
-  if (!basis && gotOri && !fallback) captureBasis(true);
-  if (fallback) startFake();
-  const seen = { l: false, r: false, u: false, d: false };
-  let sent = false;
-  const s = el('div', `gt-sight${fallback ? ' drag' : ''}`,
-    '<i class="zone u"><b>↑</b></i><i class="zone d"><b>↓</b></i><i class="zone l"><b>←</b></i><i class="zone r"><b>→</b></i><div class="dotp"></div>');
-  stage.appendChild(s);
-  if (fallback) dragAim(s);
-  const dotEl = s.querySelector('.dotp');
-  const mark = (k) => { if (!seen[k]) { seen[k] = true; s.querySelector(`.zone.${k}`).classList.add('on'); haptics.tick(); } };
-  const T = 2.5; // 이 각도(도) 이상 움직이면 그쪽으로 인정
-  const upd = () => {
-    dotEl.style.left = `${50 + clamp(cur.x / PAD_RANGE, -1, 1) * 40}%`;
-    dotEl.style.top = `${50 - clamp(cur.y / PAD_RANGE, -1, 1) * 40}%`;
-    if (cur.x < -T) mark('l');
-    if (cur.x > T) mark('r');
-    if (cur.y > T) mark('u');
-    if (cur.y < -T) mark('d');
-    if (seen.l && seen.r && seen.u && seen.d && !sent) { sent = true; tut.signal('aimed', seen); }
-  };
-  aimWatch = upd;
-  const tm = setInterval(upd, 50);
-  return () => { aimWatch = null; clearInterval(tm); };
-}
 function stageDraw(stage, api, needRelease) {
   compact(stage);
   const wrap = el('div', 'gt-col');
@@ -467,31 +441,26 @@ function stageDraw(stage, api, needRelease) {
         if (!needRelease) tut.signal('full', { pull: p });
       }
       if (p < FULL_PULL - 0.1) fullAnnounced = false;
-      tp.setHint(p >= FULL_PULL ? (needRelease ? '이제 손을 떼요!' : '만궁!') : p > 0.04 ? '더 당겨요' : '');
+      tp.setHint(p >= FULL_PULL ? (needRelease ? '손을 떼요!' : '만궁!') : p > 0.04 ? '더 당겨요' : '');
     },
     onRelease: (p) => {
       if (needRelease) { feel(p >= FULL_PULL ? 'loose' : 'step'); tut.signal('loosed', { pull: p }); }
     }
   });
-  tp.setHint('아래로 끌어 당겨요');
-  stage.appendChild(el('p', 'gt-note', fallback ? '버튼 모드: 스페이스를 꾹 눌러도 돼요' : '아무 데나 눌러 아래로 끌어요'));
+  tp.setHint('아래로 끌어요');
   return () => { tp.cancel(); };
 }
 const tut = createTutorial({
   key: 'archery',
   socket,
-  title: '처음이라 활 쏘는 법을 연습해요',
   steps: [
-    { id: 'cal', title: '활 세워 겨누기', body: '폰을 활처럼 세워 쥐고\n큰 화면 가운데를 겨눈 채 버튼을 눌러요.', svg: 'point', waitFor: 'cal', hint: '겨누고 버튼', okText: '조준을 맞췄어요!', render: stageCal },
-    { id: 'aim', title: '조준 움직이기', body: '폰을 위아래·좌우로 돌려서\n내 조준점을 네 방향 모두 보내 봐요.', svg: ART.aim, waitFor: 'aimed', hint: '← → ↑ ↓ 모두', okText: '잘 따라와요!', render: stageAim },
-    { id: 'draw', title: '시위 당기기', body: '화면을 눌러 아래로 끌어\n끝까지 당겨요.', svg: ART.draw, waitFor: 'full', hint: '만궁까지 끌기', okText: '만궁!', render: (st, api) => stageDraw(st, api, false) },
+    { id: 'draw', title: '당기기', body: '아래로 끌어요.', svg: ART.draw, waitFor: 'full', hint: '끝까지 끌기', render: (st, api) => stageDraw(st, api, false) },
     {
-      id: 'loose', title: '놓아서 쏘기', body: '끝까지 당긴 채 숨을 고르고 손을 떼요.\n오래 버티면 팔이 떨려요. 심박 뒤가 가장 안정!', svg: ART.loose, waitFor: 'loosed', hint: '끝까지 당겼다 손 떼기',
+      id: 'loose', title: '놓기', body: '당긴 채 손을 떼요.', svg: ART.loose, waitFor: 'loosed', hint: '손 떼기',
       render: (st, api) => stageDraw(st, api, true),
-      check: (d) => (d && d.pull >= FULL_PULL ? { ok: true, msg: '명중을 노려요!' } : '끝까지 당겨야 멀리 날아가요')
+      check: (d) => (d && d.pull >= FULL_PULL ? true : '더 당겨요')
     }
   ],
-  finish: { title: '연습 끝!', body: '이제 준비를 누르면 돼요.\n모두 준비하면 바로 시작해요.', button: '좋아요' },
   onDone: () => endTut()
 });
 tut.link($('tutLink'), {
@@ -508,15 +477,7 @@ function shouldAutoTutorial() {
   return !tutAuto && me && (gotOri || fallback) && (state.phase === 'lobby' || state.phase === 'over') && !tut.isRunning() && tut.firstTime();
 }
 
-// ---------- 자세 맞추기 ----------
-function openCal() {
-  mode = 'cal';
-  $('btnReady').classList.remove('hidden');
-  $('btnCalCancel').classList.toggle('hidden', !(basis || state.phase !== 'playing' || !myInfo()));
-  $('calT').textContent = basis ? '다시 맞춥니다' : '활을 세워 가운데를 겨눠요';
-  $('calB').textContent = '폰을 활처럼 세워 쥐고 팔을 뻗어\n큰 화면 정중앙을 향한 채 아래 버튼을 눌러요.\n(눕혀 쥐면 윗부분이, 세워 쥐면 뒷면이 겨눠요)';
-  show('vCal');
-}
+// ---------- 기준 자세 ----------
 function captureBasis(quiet) {
   const t = performance.now();
   let src = oriBuf.filter((o) => o.t >= t - CAL_BACK_MS - CAL_SPAN_MS && o.t <= t - CAL_BACK_MS);
@@ -567,21 +528,25 @@ function paintStatus() {
   const cp = state.current && roster.find((p) => p.slot === state.current);
   const cname = cp ? cp.name : `${state.current}P`;
   if (cueText) { st.textContent = cueText; st.classList.add('warn'); }
-  else if (state.stage === 'intro') st.textContent = `${state.endIdx + 1}엔드 곧 시작해요`;
+  else if (state.stage === 'intro') st.textContent = t('{n}엔드 곧 시작해요', { n: state.endIdx + 1 });
   else if (state.stage === 'endbreak') st.textContent = '엔드 종료 · 큰 화면을 보세요';
-  else if (myTurn()) { st.textContent = '내 차례! 시위를 당겨요'; st.classList.add('turn'); }
-  else if (state.stage === 'flight' || state.stage === 'result') st.textContent = state.current === (me && me.slot) ? '화살이 날아가요' : `${cname} 쏘는 중`;
-  else st.textContent = state.current ? `${cname} 차례 · 기다려요` : '곧 시작해요';
+  else if (myTurn()) { st.textContent = '내 차례! 아래로 당겨요'; st.classList.add('turn'); }
+  else if (state.stage === 'flight' || state.stage === 'result') st.textContent = state.current === (me && me.slot) ? '화살이 날아가요' : t('{p} 쏘는 중', { p: cname });
+  else st.textContent = state.current ? t('{p} 차례 · 기다려요', { p: cname }) : '곧 시작해요';
 }
 function showPlay(info) {
   mode = 'play';
-  if (fallback) { $('sight').classList.add('drag'); $('sightLabel').textContent = '끌어서 조준'; } else { $('sight').classList.remove('drag'); $('sightLabel').textContent = '조준 (폰을 돌려요)'; }
+  // 센서로 겨눌 때는 조준 판이 필요 없어서 감추고 시위 영역을 크게 씁니다. 끌어서 겨누는 경우에만 보임
+  $('sightWrap').classList.toggle('hidden', !fallback);
+  $('sight').classList.toggle('drag', fallback);
+  $('sightLabel').textContent = '끌어서 조준';
+  $('btnShoot').disabled = !myTurn();
   $('fallbackHint').classList.toggle('hidden', !fallback);
   $('fallbackHint').textContent = fallbackReason();
   $('score').textContent = String(info.total || 0);
-  $('endTxt').textContent = `${state.endIdx + 1}/${state.ends}엔드`;
+  $('endTxt').textContent = t('{a}/{b}엔드', { a: state.endIdx + 1, b: state.ends });
   const left = Math.max(0, (state.arrows || 3) - (myTurn() ? state.arrowIdx : (state.current === me.slot ? state.arrowIdx + 1 : state.arrowIdx)));
-  $('arrowTxt').textContent = `내 화살 ${(info.arrows && info.arrows[state.endIdx] ? info.arrows[state.endIdx].length : 0)}/${state.arrows || 3}발`;
+  $('arrowTxt').textContent = t('내 화살 {a}/{b}발', { a: info.arrows && info.arrows[state.endIdx] ? info.arrows[state.endIdx].length : 0, b: state.arrows || 3 });
   $('arrowsLeft').innerHTML = Array.from({ length: state.arrows || 3 }, (_, i) => `<i class="${i < (info.arrows && info.arrows[state.endIdx] ? info.arrows[state.endIdx].length : 0) ? 'spent' : ''}"></i>`).join('');
   void left;
   const w = state.wind || { speed: 0, dir: 0 };
@@ -602,7 +567,7 @@ function paintReadyRow() {
   const away = new Set(st.away || []);
   const waitFor = st.players.filter((s) => !ready.has(s));
   const mine = me && ready.has(me.slot);
-  const head = !waitFor.length ? '모두 준비 완료!' : mine ? `${waitFor.map((s) => `${s}P`).join('·')} 기다리는 중` : `준비 ${ready.size}/${st.players.length}`;
+  const head = !waitFor.length ? '모두 준비 완료!' : mine ? t('{who} 기다리는 중', { who: waitFor.map((s) => `${s}P`).join('·') }) : t('준비 {a}/{b}', { a: ready.size, b: st.players.length });
   box.innerHTML = `<span class="rr-h">${head}</span>` + st.players.map((s) =>
     `<span class="rr${ready.has(s) ? ' on' : ''}${away.has(s) ? ' away' : ''}${me && s === me.slot ? ' mine' : ''}" style="--pc:${COLORS[s] || '#fff'}">${s}P${ready.has(s) ? ' ✓' : ''}</span>`).join('');
   box.classList.remove('hidden');
@@ -618,9 +583,8 @@ function showWait(info) {
   mode = 'wait';
   const phase = state.phase;
   const chips = [];
-  if (roster.length) chips.push(['참가', `${roster.length}명`]);
+  if (roster.length) chips.push(['참가', t('{n}명', { n: roster.length })]);
   if (fallback) chips.push(['조작', '끌어서']);
-  else if (gotOri) chips.push(['조준', basis ? '맞춤' : '아직', basis ? 'ok' : '']);
   const mineReady = me && readyList.includes(me.slot);
   const go = $('btnGo');
   go.style.display = '';
@@ -629,8 +593,8 @@ function showWait(info) {
   const spectating = phase === 'playing' && !(info && info.play);
   if (phase === 'over') {
     if (lastResult) {
-      $('waitT').textContent = lastResult.rank === 1 ? '1위!' : `${lastResult.rank}위`;
-      $('waitB').textContent = `${lastResult.total}점 · X ${lastResult.xs} · 10점 ${lastResult.tens}\n큰 화면에서 순위를 확인해요.`;
+      $('waitT').textContent = lastResult.rank === 1 ? t('1위!') : t('{n}위', { n: lastResult.rank });
+      $('waitB').textContent = `${t('{a}점 · X {b} · 10점 {c}', { a: lastResult.total, b: lastResult.xs, c: lastResult.tens })}\n${t('큰 화면에서 순위를 확인해요.')}`;
     } else {
       $('waitT').textContent = '경기 종료';
       $('waitB').textContent = '큰 화면에서 순위를 확인해요.';
@@ -642,7 +606,7 @@ function showWait(info) {
     go.style.display = 'none';
   } else {
     $('waitT').textContent = '대기실';
-    $('waitB').textContent = basis || fallback || !gotOri ? '모두 준비를 누르면 시작해요.' : '준비를 누르면 먼저 활을 세워\n화면 한가운데를 겨누고 맞춰요.';
+    $('waitB').textContent = '모두 준비를 누르면 시작해요.';
     go.innerHTML = '준비';
   }
   if (mineReady && phase !== 'playing') {
@@ -656,19 +620,16 @@ function showWait(info) {
   setChips(chips, 'waitChips');
   paintReadyRow();
   paintScoreCard();
-  $('btnCalLobby').classList.toggle('hidden', !(gotOri && !fallback));
-  $('btnCalLobby').textContent = basis ? '조준 다시 맞추기' : '조준 맞추기';
   tut.setLinkVisible(phase !== 'playing');
   show('vWait');
 }
 function render() {
   if (!me) return;
   if (mode === 'start' || mode === 'connecting' || mode === 'msg') return;
-  if (mode === 'cal' || mode === 'tut') return;
+  if (mode === 'tut') return;
   const info = myInfo();
   if (fallback) startFake();
   if (state.phase === 'playing' && info && info.play) {
-    if (!basis && gotOri && !fallback) { openCal(); return; }
     showPlay(info);
     return;
   }
@@ -677,9 +638,9 @@ function render() {
 }
 function fallbackReason() {
   let why = '동작 센서가 없어 화면을 끌어서 겨눠요.';
-  if (!window.isSecureContext) why = 'https 주소가 아니라 동작 센서가 꺼져 있어요. 화면을 끌어서 겨눠요.';
+  if (!window.isSecureContext) why = 'https 주소가 아니라 센서가 꺼져 있어요. 화면을 끌어서 겨눠요.';
   else if (permDenied) why = '동작 권한이 거절돼 화면을 끌어서 겨눠요.';
-  return `${why} (키보드: 방향키 조준 · 스페이스를 꾹 눌렀다 떼기)`;
+  return isTouch ? t(why) : `${t(why)} ${t('(키보드: 방향키·스페이스)')}`;
 }
 function sensorsChanged() {
   if (!fallback && fakeTimer) {
@@ -692,7 +653,7 @@ function sensorsChanged() {
 }
 function sensorHelp() {
   message('동작 센서를 쓸 수 없어요',
-    'iPhone: Safari 를 앱 전환기에서 완전히 닫고 QR을 다시 찍은 뒤, 동작 접근을 허용해 주세요.\nAndroid: 주소창 자물쇠 → 사이트 설정 → 동작 센서를 허용해 주세요.',
+    'iPhone: Safari를 완전히 닫고 QR을 다시 찍어요.\nAndroid: 사이트 설정에서 동작 센서를 허용해요.',
     { label: '끌어서 겨눌게요', onClick: () => { fallback = true; join(); } });
   helpOn = true;
 }
@@ -764,7 +725,10 @@ socket.on('game_state', (s) => {
 });
 // 내 차례가 오면 진동 한 번
 socket.on('turn', (t) => {
-  if (me && t && t.slot === me.slot) feel('turn');
+  if (me && t && t.slot === me.slot) {
+    feel('turn');
+    if (gotOri && !fallback) captureBasis(true); // 내 차례가 시작될 때의 자세를 가운데로 삼음
+  }
 });
 socket.on('cue', (c) => {
   cueText = c && c.text ? String(c.text) : '';
@@ -807,28 +771,21 @@ $('btnGo').addEventListener('click', () => {
   keepAwake();
   if (me && readyList.includes(me.slot) && state.phase !== 'playing') return;
   if (!gotOri && !fallback) return;
-  if (!basis && gotOri && !fallback) { pendingReady = true; openCal(); return; }
   if (send('start_game', {})) {
     haptics.tick();
     if (me && !readyList.includes(me.slot)) readyList = [...readyList, me.slot];
     render();
   }
 });
-$('btnCalLobby').addEventListener('click', () => openCal());
 $('btnRecal').addEventListener('click', () => {
-  if (captureBasis()) { const st = $('status'); st.textContent = '조준을 다시 맞췄어요'; statusTempUntil = performance.now() + 1200; }
+  if (captureBasis()) { const st = $('status'); st.textContent = '다시 맞췄어요'; statusTempUntil = performance.now() + 1200; }
 });
-$('btnReady').addEventListener('click', () => {
-  if (!gotOri) { $('calB').textContent = '방향 센서 값이 들어오지 않아요.\n잠시 뒤 다시 눌러 주세요.'; return; }
-  if (!captureBasis()) { $('calB').textContent = '방향 센서 값이 끊겼어요.\n다시 눌러 주세요.'; return; }
-  mode = 'idle';
-  if (pendingReady) {
-    pendingReady = false;
-    if (send('start_game', {}) && me && !readyList.includes(me.slot)) readyList = [...readyList, me.slot];
-  }
-  render();
+$('btnShoot').addEventListener('click', () => {
+  if (!myTurn() || mode !== 'play') { blocked(); return; }
+  maybeRecenter();
+  drawSent = 1;
+  doRelease(1, true);
 });
-$('btnCalCancel').addEventListener('click', () => { pendingReady = false; mode = 'idle'; render(); });
 
 // 센서 없는 PC: 방향키 조준, 스페이스 꾹 = 당기기, 떼면 발사
 let keyPullTimer = null;
@@ -861,6 +818,8 @@ document.addEventListener('keyup', (e) => {
   pad.paint(0);
   if (mode === 'play') doRelease(p);
 });
+// 시위를 누르고 가만히 있어도 큰 화면이 '폰 소식 없음' 으로 취소하지 않도록 주기적으로 당김을 다시 알림
+setInterval(() => { if (pad.down && myTurn() && mode === 'play') send('draw', { pull: r3(pad.pull) }, true); }, 250);
 document.addEventListener('visibilitychange', () => { if (document.hidden) return; if (mode !== 'start') keepAwake(); render(); });
 
 if (!window.isSecureContext) $('httpNote').classList.remove('hidden');

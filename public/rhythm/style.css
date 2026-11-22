@@ -175,3 +175,27 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 2p
 
 /* 결과 화면에서는 '모두 준비하면 시작' 띠를 숨깁니다(폰의 '다음 곡 고르기'로 노래 고르기로 돌아감) */
 body[data-phase="over"] #readyBar { display: none !important; }
+
+/* 소리가 아직 안 켜졌을 때만 대기실 아래쪽에 뜨는 작은 안내 */
+.sound-chip { position: fixed; z-index: 5; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 7px 16px; border-radius: 99px;
+  background: rgba(8, 10, 22, 0.78); border: 1px solid var(--line); color: var(--dim); font-size: 14px; font-weight: 700; pointer-events: none; white-space: nowrap; }
+.sound-chip.hidden { display: none; }
+body:not([data-phase="select"]) .sound-chip { display: none; }
+
+/* 언어 고르기(대기실 오른쪽 아래: QR·CD·사람 카드를 가리지 않는 자리) */
+.langbox { position: absolute; right: 30px; bottom: 6px; z-index: 30; }
+
+/* 폭이 좁은 큰 화면(1500px 이하)과 영어·일본어처럼 글자가 긴 언어: 사람 카드의 칩과 화살표를 아래 줄로 내려 글자가 잘리지 않게 합니다 */
+@media (max-width: 1500px) {
+  .pc { padding: 12px 14px; gap: 3px 12px; }
+  .pc-badge { grid-row: 1 / span 4; }
+  .pc-state { grid-column: 2 / -1; grid-row: 4; flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 8px; }
+  .pc-chip { padding: 3px 9px; font-size: 12px; }
+  .pc-arrows i { width: 20px; height: 20px; }
+  .pc-mode { font-size: 17px; }
+  .pc-diff { font-size: 13px; }
+  .pc-mode, .pc-diff, .pc-sub { grid-column: 2 / -1; }
+  .pc-sub:empty { display: none; }
+  .pc.empty { grid-template-columns: 58px 1fr; }
+  .pc.empty .pc-sub { grid-column: 2; grid-row: 1 / span 4; }
+}

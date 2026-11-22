@@ -70,7 +70,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .join { width: 132px; padding: 8px; border-radius: 16px; background: var(--glass); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 5px; align-items: center; opacity: .9; }
 .join img { width: 108px; height: 108px; border-radius: 10px; background: #fff; padding: 5px; }
 .join div { display: flex; align-items: baseline; gap: 8px; }
-.join-k { color: var(--dim); font-size: 11px; font-weight: 700; }
+.join-k { color: var(--dim); font-size: 11px; font-weight: 700; white-space: nowrap; }
 .join b { font-family: var(--display); font-weight: 400; letter-spacing: .18em; font-size: 19px; }
 
 .center-top { position: absolute; left: 50%; top: 22px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 9px 26px 9px 20px;
@@ -141,13 +141,16 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .slot.on { border: 2px solid var(--c); background: linear-gradient(135deg, color-mix(in srgb, var(--c) 30%, transparent), transparent); color: var(--fg); box-shadow: 0 0 22px color-mix(in srgb, var(--c) 25%, transparent); }
 .slot.cal small { color: var(--c); }
 .slot.away { opacity: .45; }
-.slot.away small::after { content: " · 끊김"; }
 .slot.rdy { box-shadow: 0 0 0 2px var(--c), 0 0 26px color-mix(in srgb, var(--c) 45%, transparent); }
 .slot.rdy::after { content: "✓"; position: absolute; top: -9px; right: -9px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: #5ee07a; color: #062012; font: 900 13px/1 var(--sans); }
 .slot.rdy small { color: #9dffb4; }
 .slot.prac small { color: var(--gold); }
 .hint { color: var(--dim); font-size: 15px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .hint b { color: var(--fg); }
+/* 영어·일본어는 길어서 대기실 안내 첫 줄은 한 줄을 다 쓰고, 단축키 안내는 다음 줄로 */
+.lobby-copy .hint > span:first-child { flex: 0 0 100%; }
+.lobby-copy .hint .dot { display: none; }
+.hint kbd + span { margin-right: 6px; }
 .setbox { max-width: 720px; margin: 0 0 16px; }
 .setbox .pcgs-panel { --pcgs-accent: var(--accent); }
 #lobby .setbox .pcgs-label { width: 84px; }
@@ -160,6 +163,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 .qr-code b { font-family: var(--display); font-weight: 400; font-size: 54px; letter-spacing: .2em; line-height: 1; }
 .qr-url { margin-top: 6px; font-size: 13px; color: #5d6a7c; word-break: break-all; }
 .qr-warn { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: #fff1c7; color: #6a4b00; font-size: 13px; line-height: 1.45; font-weight: 600; }
+.langbox { position: absolute; top: clamp(14px, 2.4vh, 28px); right: 22px; z-index: 2; }
 .msg { position: fixed; left: 50%; bottom: 40px; transform: translate(-50%, 16px); padding: 14px 24px; border-radius: 16px; background: var(--glass-2); z-index: 8; border: 1px solid var(--line); font-weight: 700; opacity: 0; transition: opacity .25s, transform .35s; pointer-events: none; }
 .msg.on { opacity: 1; transform: translate(-50%, 0); }
 

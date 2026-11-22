@@ -12,7 +12,8 @@ export const DECEL = { green: 0.549, fringe: 1.35, rough: 3.4, bunker: 5.5 };
 export const MAX_BALL_SPEED = 4.4;
 
 // 컵 가운데에서 b 만큼 비켜 지나갈 때 빠지는 최고 속도: 컵 위를 지나는 동안 공 반지름만큼 떨어져야 합니다.
-export const captureSpeed = (b) => 2 * Math.sqrt(Math.max(0, CUP_R * CUP_R - b * b)) * Math.sqrt(G / (2 * BALL_R));
+// r: 컵 반지름(기본 CUP_R). 쉬움·보통은 판정만 조금 넓게 봐줍니다(opts.cupScale).
+export const captureSpeed = (b, r = CUP_R) => 2 * Math.sqrt(Math.max(0, r * r - b * b)) * Math.sqrt(G / (2 * BALL_R));
 export const flatDistance = (v) => (v * v) / (2 * DECEL.green);
 export const speedForFlat = (d) => Math.sqrt(2 * DECEL.green * Math.max(0, d));
 
@@ -22,6 +23,7 @@ export function simulate(hole, from, heading, speed, opts = {}) {
   const probe = Boolean(opts.probe); // 봇 계산용: 위치 목록을 만들지 않고 컵도 무시
   const every = Math.max(1, Math.round(1 / 60 / dt));
   const cup = hole.cup;
+  const cr = CUP_R * (opts.cupScale || 1); // 판정용 컵 반지름
   speed = Math.max(0, Math.min(MAX_BALL_SPEED, speed));
   let x = from.x;
   let z = from.z;
@@ -99,7 +101,7 @@ export function simulate(hole, from, heading, speed, opts = {}) {
 
     if (!probe) {
       const dc = Math.hypot(x - cup.x, z - cup.z);
-      if (dc < CUP_R) {
+      if (dc < cr) {
         if (!inside) {
           inside = true;
           const v = Math.hypot(vx, vz);
@@ -109,7 +111,7 @@ export function simulate(hole, from, heading, speed, opts = {}) {
           const oz = cup.z - z;
           const left = uz * ox - ux * oz; // + 면 컵 가운데가 공 진행 방향 왼쪽
           const b = Math.abs(ux * oz - uz * ox);
-          const vcap = captureSpeed(b);
+          const vcap = captureSpeed(b, cr);
           if (v <= vcap) {
             holed = true;
             holedFrame = pts.length / 3;
@@ -121,7 +123,7 @@ export function simulate(hole, from, heading, speed, opts = {}) {
           }
           // 너무 빨라 컵 가장자리를 맞고 튕겨 나갑니다. 가운데에서 벗어날수록, 느릴수록 많이 꺾입니다.
           const excess = v / Math.max(0.05, vcap);
-          const bn = Math.min(1, b / CUP_R);
+          const bn = Math.min(1, b / cr);
           const turn = (Math.min(125, (14 + 108 * bn) / Math.pow(excess, 0.6)) * Math.PI) / 180;
           const ang = -(Math.sign(left) || 1) * turn;
           const keep = Math.max(0.48, Math.min(0.82, 0.48 + 0.2 * (excess - 1)));
@@ -134,7 +136,7 @@ export function simulate(hole, from, heading, speed, opts = {}) {
           lips.push({ frame: pts.length / 3, kind: excess > 2.2 && bn < 0.35 ? 'hop' : 'lip', excess });
         }
         // 컵 위를 지나는 동안 살짝 가라앉아 보이게
-        dip = 0.011 * (1 - (dc / CUP_R) ** 2);
+        dip = 0.011 * (1 - (dc / cr) ** 2);
       } else {
         inside = false;
         dip = 0;

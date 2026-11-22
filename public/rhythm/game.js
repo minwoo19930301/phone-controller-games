@@ -9,12 +9,14 @@ import { createStage } from './stage.js';
 import { createHighways, newFx, LANE_GLYPH } from './highway.js';
 import { notesForLateJoin, rankFinishers } from './late-join.mjs';
 import { createJudge } from './judge.js';
-import { SONGS, getSong, beatToSec, secToBeat } from '/common/music/songs.js';
+import { SONGS, getSong, beatToSec, secToBeat, songTitle, songComposer } from '/common/music/songs.js';
 import { createSynth, createTransport, playPreview } from '/common/music/synth.js';
 import { genChart, chartInfo } from '/common/music/charts.js';
+import { createRhythmSounds } from './sounds.js';
 import { createDiscPicker, drawCover } from '/common/disc-picker.js';
 import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
 import { createTutorialBoard } from '/common/tutorial-board.js';
+import { t, lang, mountSwitcher } from '/common/i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -65,6 +67,12 @@ analyser.maxDecibels = -18;
 synth.output.connect(analyser);
 const bands = new Uint8Array(analyser.frequencyBinCount);
 const transport = createTransport(synth);
+// 실제 녹음 효과음(박자 소리·카운트다운·환호·결과). 못 받았으면 조용히 건너뜁니다.
+const sounds = createRhythmSounds(synth.ctx, analyser);
+sounds.preload();
+document.addEventListener('visibilitychange', () => sounds.mute(document.hidden));
+const chipEl = document.getElementById('soundChip');
+function syncChip() { if (chipEl) chipEl.classList.toggle('hidden', synth.ctx.state === 'running'); }
 let audioWaiters = [];
 function audioRunning() { return synth.ctx.state === 'running'; }
 function unlockAudio() {
@@ -78,7 +86,10 @@ function unlockAudio() {
 }
 window.addEventListener('pointerdown', unlockAudio);
 window.addEventListener('keydown', unlockAudio);
+window.addEventListener('touchstart', unlockAudio, { passive: true });
+syncChip();
 synth.ctx.addEventListener && synth.ctx.addEventListener('statechange', () => {
+  syncChip();
   if (audioRunning()) { const w = audioWaiters; audioWaiters = []; for (const f of w) f(); }
 });
 function whenAudio(fn) { if (audioRunning()) fn(); else { audioWaiters.push(fn); unlockAudio(); } }
@@ -132,14 +143,14 @@ const settings = createSettings({
   game: 'rhythm',
   fields: [
     // 난이도 D 키: 대기실에서 모두의 난이도를 돌립니다. 경기 중에는 설정이 잠겨 D 는 레인 키로만 씁니다.
-    fields.difficulty({ perPlayer: true, hints: { easy: '판정 넉넉 · 노트 적게', normal: '8분음표 · 가끔 동시에', hard: '16분음표 · 길게 누르기' } }),
+    fields.difficulty({ perPlayer: true, default: 'easy' }),
     fields.choice('input', '입력', [
-      { value: 'pad', label: '패드', hint: '폰 화면의 화살표를 눌러요' },
-      { value: 'motion', label: '모션', hint: '폰을 들고 화살표 쪽으로 휙' }
+      { value: 'pad', label: '패드' },
+      { value: 'motion', label: '모션' }
     ], { perPlayer: true, default: 'pad' }),
     fields.choice('lanes', '패드 배치', [
-      { value: 4, label: '4키', hint: 'DDR ← ↓ ↑ →' },
-      { value: 5, label: '5키', hint: '펌프 ↙ ↖ ● ↗ ↘' }
+      { value: 4, label: '4키' },
+      { value: 5, label: '5키' }
     ], { perPlayer: true, default: 4 })
   ],
   onChange: (vals, change) => {
@@ -196,7 +207,7 @@ socket.on('players', (p) => {
       game.players.sort((a, b) => a.slot - b.slot);
       stage.setPlayers(game.players.map((x) => x.color));
       highways.layout(game.players);
-      banner('중간 참가!', '지금부터 나오는 노트부터 점수에 반영돼요', 2500);
+      banner('중간 참가!', '다음 노트부터 점수에 반영돼요', 2500);
     }
   }
   renderRoster();
@@ -272,7 +283,7 @@ function cfgOf(P) {
   if (P.bot) return BOT_CFG[P.slot];
   const input = P.keys ? 'pad' : settings.get('input', P.slot) || 'pad';
   const lanes = input === 'motion' ? 4 : Number(settings.get('lanes', P.slot)) === 5 ? 5 : 4;
-  return { input, lanes, diff: settings.get('difficulty', P.slot) || 'normal' };
+  return { input, lanes, diff: settings.get('difficulty', P.slot) || 'easy' };
 }
 
 // ================================================================
@@ -288,10 +299,10 @@ let previewStop = null;
 let picker = null; // 만드는 도중에도 onChange 가 불려서 미리 이름만 둡니다
 picker = createDiscPicker($('picker'), {
   songs: SONGS,
-  difficulty: settings.get('difficulty') || 'normal',
+  difficulty: settings.get('difficulty') || 'easy',
   storageKey: 'pcg-rhythm-picker',
   title: '노래 고르기',
-  hint: '폰을 좌우로 밀어 넘기기 · 탭하면 그 곡',
+  hint: '',
   accent: '#7fd4ff',
   stopOnSelect: false,
   previewSeconds: 15,
@@ -305,13 +316,14 @@ picker = createDiscPicker($('picker'), {
   },
   onGesture: () => unlockAudio(),
   onChange: (song) => {
+    if (game.phase === 'select') sounds.cdMove();
     stage.setHue(song.cover ? song.cover.hue : 200);
     if (!picker) return;
     if (game.chosen && game.chosen.id !== song.id) { game.chosen = null; game.chosenBy = null; renderPicked(); }
     renderRoster();
     sendPickerSoon();
   },
-  onSelect: (song) => onPick(song, pickBy),
+  onSelect: (song) => { sounds.cdPick(); onPick(song, pickBy); },
   onDifficulty: (d) => { if (game.phase === 'select') settings.set('difficulty', d, 'display'); }
 });
 let pickBy = 'display';
@@ -320,8 +332,10 @@ function stopPreview() { picker.stopPreview(); if (previewStop) { try { previewS
 
 function songMeta(s) {
   if (!s) return null;
-  return { id: s.id, title: s.title, en: s.en, composer: s.composer, genre: s.genre, mood: s.mood, cover: s.cover, bpm: s.bpm, lengthSec: Math.round(s.lengthSec) };
+  return { id: s.id, title: s.title, en: s.en, composer: s.composer, composerEn: s.composerEn, genre: s.genre, mood: s.mood, cover: s.cover, bpm: s.bpm, lengthSec: Math.round(s.lengthSec) };
 }
+// 곡 부제: 한국어는 '영문 제목 · 작곡가', 그 밖의 언어는 제목이 이미 영문이라 작곡가만
+const songSub = (s) => (lang() === 'ko' ? `${s.en} · ${s.composer}` : songComposer(s));
 // 폰에 지금 가운데 CD 와, 그 사람 설정으로 본 난이도별 별·노트 수를 알려 줍니다
 function sendPicker() {
   if (!picker) return;
@@ -368,7 +382,7 @@ function onPick(song, by) {
   // 폰이 하나도 없으면(봇·키보드 시험) 고르는 순간 시작합니다.
   if (by === 'display' && !phones().length) { startGame(); return; }
   renderPicked();
-  send('cue', { type: 'picked', by: game.chosenBy, title: song.title });
+  send('cue', { type: 'picked', by: game.chosenBy, title: song.title, en: song.en });
   pushState();
   sendPicker();
 }
@@ -377,7 +391,7 @@ function renderPicked() {
   if (!game.chosen) { el.classList.add('hidden'); return; }
   const P = game.chosenBy ? roster.get(game.chosenBy) : null;
   el.style.setProperty('--pc', P ? P.color : '#7fd4ff');
-  el.innerHTML = `${P ? `<b>${P.name}</b>` : ''}이 곡으로 정했어요 ✓ <span>모두 준비하면 시작</span>`;
+  el.innerHTML = P ? t('{p}이 곡으로 정했어요 ✓', { p: `<b>${esc(P.name)}</b>` }) : t('이 곡으로 정했어요 ✓');
   el.classList.remove('hidden');
 }
 
@@ -404,30 +418,30 @@ function renderRoster() {
     const P = roster.get(s);
     const c = SLOT_INFO[s].color;
     if (!P || !P.present) {
-      html += `<div class="pc empty" style="--c:${c}"><div class="pc-badge">${s}P</div><div class="pc-sub">빈 자리 · QR을 찍으면 들어와요</div></div>`;
+      html += `<div class="pc empty" style="--c:${c}"><div class="pc-badge">${s}P</div><div class="pc-sub">${t('빈 자리')}</div></div>`;
       continue;
     }
     const cfg = cfgOf(P);
     const ci = song ? chartInfo(song, cfg.diff, { lanes: cfg.lanes, input: cfg.input }) : null;
-    const modeTxt = cfg.input === 'motion' ? '모션' : cfg.lanes === 5 ? '패드 5키' : '패드 4키';
-    const who = P.bot ? '봇' : P.keys ? '키보드' : '';
+    const modeTxt = t(cfg.input === 'motion' ? '모션' : cfg.lanes === 5 ? '패드 5키' : '패드 4키');
+    const who = t(P.bot ? '봇' : P.keys ? '키보드' : '');
     const ready = readySet.has(s);
     const tut = tutState[s];
     let chip = '';
-    if (!P.connected) chip = '<span class="pc-chip off">연결 끊김</span>';
-    else if (tut) chip = `<span class="pc-chip tut">연습 중 ${tut.step}/${tut.total}</span>`;
-    else if (ready) chip = '<span class="pc-chip ok">준비 ✓</span>';
+    if (!P.connected) chip = `<span class="pc-chip off">${t('연결 끊김')}</span>`;
+    else if (tut) chip = `<span class="pc-chip tut">${t('연습 중 {a}/{b}', { a: tut.step, b: tut.total })}</span>`;
+    else if (ready) chip = `<span class="pc-chip ok">${t('준비 ✓')}</span>`;
     else if (P.bot || P.keys) chip = `<span class="pc-chip">${who}</span>`;
-    else chip = '<span class="pc-chip">준비 전</span>';
+    else chip = `<span class="pc-chip">${t('준비 전')}</span>`;
     const lanes = cfg.lanes;
     const arrows = LANE_GLYPH[lanes].map((g, i) => `<i data-l="${i}">${g}</i>`).join('');
     const sub = cfg.input === 'motion'
-      ? (P.bot ? '폰을 휙휙 움직여요' : P.motionFallback ? '센서 없음 · 화면 버튼으로' : P.motionOk ? '모션 센서 확인 ✓' : '폰을 세워 들고 휙')
-      : (lanes === 5 ? '펌프 ↙ ↖ ● ↗ ↘' : 'DDR ← ↓ ↑ →');
+      ? (P.motionFallback ? t('화면 버튼으로') : '')
+      : '';
     html += `<div class="pc${ready ? ' ready' : ''}${P.connected ? '' : ' away'}" data-slot="${s}" style="--c:${P.color}">` +
       `<div class="pc-badge">${P.name}</div>` +
       `<div class="pc-mode">${MODE_SVG[cfg.input]}${modeTxt}</div>` +
-      `<div class="pc-diff">${DIFF_LABEL[cfg.diff] || '보통'} ${ci ? starsHtml(ci.stars) + ` · 노트 ${ci.count}` : ''}</div>` +
+      `<div class="pc-diff">${ci ? t('{d} {stars} · 노트 {n}', { d: DIFF_LABEL[cfg.diff] || '보통', stars: starsHtml(ci.stars), n: ci.count }) : t(DIFF_LABEL[cfg.diff] || '보통')}</div>` +
       `<div class="pc-sub">${esc(sub)}</div>` +
       `<div class="pc-state">${chip}<div class="pc-arrows">${arrows}</div></div></div>`;
   }
@@ -442,11 +456,12 @@ function flashCard(slot, lane) {
 }
 
 function renderFoot() {
-  const keyTxt = '<span><kbd>←</kbd><kbd>→</kbd> 곡 넘기기</span><span><kbd>↑</kbd><kbd>↓</kbd> 또는 <kbd>D</kbd> 난이도(모두)</span><span><kbd>Enter</kbd> 이 곡으로</span>';
-  const off = `<span><kbd>[</kbd><kbd>]</kbd> 싱크 ${userOffset >= 0 ? '+' : ''}${Math.round(userOffset * 1000)}ms</span>`;
-  $('foot').innerHTML = keyTxt + off + '<span>폰 없이 시험: 주소에 <b>?keys</b>(키보드 D F J K) 또는 <b>?bots=3</b></span>';
+  const off = `<span><kbd>[</kbd><kbd>]</kbd> ${t('싱크 {ms}ms', { ms: `${userOffset >= 0 ? '+' : ''}${Math.round(userOffset * 1000)}` })}</span>`;
+  $('foot').innerHTML = off;
 }
 renderFoot();
+// 언어 고르기: 대기실에서만 보입니다(#select 안). 바꾸면 캔버스 글자까지 새로 그리려고 페이지를 다시 불러옵니다.
+mountSwitcher($('langBox'), { reload: true, compact: true });
 
 // ================================================================
 // 폰에 알리기
@@ -527,8 +542,8 @@ function startGame() {
   highways.layout(game.players);
   showScreen('play');
   $('sbCover').src = drawCover(song, 92);
-  $('sbTitle').textContent = song.title;
-  $('sbSub').textContent = `${song.en} · ${song.composer}`;
+  $('sbTitle').textContent = songTitle(song);
+  $('sbSub').textContent = songSub(song);
   pushState();
   whenAudio(() => {
     if (game.phase !== 'playing' || game.song !== song) return;
@@ -541,7 +556,8 @@ function startGame() {
     game.t0 = at;
     game.startPerf = performance.now();
     countdown();
-    banner(song.title, `${song.en} · ${song.composer}`, 2600);
+    sounds.countdown(at);
+    banner(songTitle(song), songSub(song), 2600);
     send('cue', { type: 'start', in: LEAD_S, song: songMeta(song) });
     pushState();
   });
@@ -582,6 +598,7 @@ function applyStep(p, lane, songT) {
   highways.press(p, lane);
   const ev = p.judge.step(lane, songT - userOffset);
   if (ev) onJudged(p, ev);
+  else if (!p.bot && !p.keys) send('cue', { type: 'stray' }, p.slot); // 맞는 노트가 없는 누름: 폰이 짧게 알려 줍니다
 }
 function onJudged(p, ev) {
   highways.judged(p, ev, performance.now() / 1000);
@@ -591,6 +608,13 @@ function onJudged(p, ev) {
     send('judge', { j: ev.j, lane: ev.lane, c: st.combo, s: p.judge.score, l: Math.round(st.life * 100), early: ev.early ? 1 : 0, wrong: ev.wrongLane ? 1 : 0 }, p.slot);
   }
   if (ev.j === 'perfect' && p.judge.st.combo > 0 && p.judge.st.combo % 25 === 0) stage.flash(p.color, 0.6);
+  if (ev.kind === 'judge') {
+    const n = game.players.length;
+    const idx = Math.max(0, game.players.indexOf(p));
+    const pan = n > 1 ? ((idx / (n - 1)) * 2 - 1) * 0.6 : 0;
+    sounds.judged(ev.j, { pan, scale: n > 1 ? 1 / Math.sqrt(n) : 1 });
+    if (ev.j !== 'miss' && p.judge.st.combo > 0 && p.judge.st.combo % 25 === 0) sounds.combo(p.judge.st.combo);
+  }
 }
 
 function onRemoteStep(d) {
@@ -660,12 +684,13 @@ function finishGame() {
   stage.setMood('select');
   const best = rows[0];
   if (best) stage.flash(best.p.color, 1);
+  sounds.result({ failedAll: rows.every((r) => r.s.failed), bestFull: rows.some((r) => r.s.fullCombo || r.s.perfectAll) });
   renderResults();
   showScreen('over');
   for (const r of rows) {
     if (r.p.bot || r.p.keys) continue;
     send('result', { rank: r.rank, of: rows.length, late: Boolean(r.p.late), grade: r.s.grade, score: r.s.score, acc: Math.round(r.s.acc * 1000) / 10, maxCombo: r.s.maxCombo,
-      counts: r.s.counts, fc: r.s.fullCombo, pfc: r.s.perfectAll, failed: r.s.failed, song: game.song.title, overMs: OVER_MS }, r.p.slot);
+      counts: r.s.counts, fc: r.s.fullCombo, pfc: r.s.perfectAll, failed: r.s.failed, song: game.song.title, songEn: game.song.en, overMs: OVER_MS }, r.p.slot);
   }
   pushState();
   clearTimeout(game.overTimer);
@@ -674,27 +699,27 @@ function finishGame() {
 
 function renderResults() {
   const song = game.song;
-  $('ovTitle').textContent = song ? `${song.title}` : '결과';
+  $('ovTitle').textContent = song ? songTitle(song) : t('결과');
   $('ovEyebrow').textContent = 'RESULT';
   const GC = { S: '#ffd23a', A: '#5ef0a0', B: '#7fd4ff', C: '#c9a6ff' };
   $('ranks').innerHTML = game.results.map((r, i) => {
     const s = r.s, p = r.p;
     const tags = [];
-    if (p.late) tags.push('<span class="mode">중간 참가 · 남은 노트 기준</span>');
+    if (p.late) tags.push(`<span class="mode">${t('중간 참가 · 남은 노트 기준')}</span>`);
     if (s.perfectAll) tags.push('<span class="pfc">ALL PERFECT</span>');
     else if (s.fullCombo) tags.push('<span class="fc">FULL COMBO</span>');
-    if (s.failed) tags.push('<span class="fail">클리어 실패</span>');
-    tags.push(`<span class="mode">${p.input === 'motion' ? '모션' : p.lanes === 5 ? '패드 5키' : '패드'} · ${DIFF_LABEL[p.diff]}</span>`);
+    if (s.failed) tags.push(`<span class="fail">${t('클리어 실패')}</span>`);
+    tags.push(`<span class="mode">${t('{mode} · {diff}', { mode: p.input === 'motion' ? '모션' : p.lanes === 5 ? '패드 5키' : '패드', diff: DIFF_LABEL[p.diff] })}</span>`);
     return `<div class="rk${r.rank === 1 && game.results.length > 1 ? ' first' : ''}" style="--c:${p.color};--gc:${GC[s.grade]};animation-delay:${i * 0.12}s">` +
-      `<div class="rk-top"><div class="rk-rank">${p.late ? '–' : `${r.rank}<small>위</small>`}</div><div class="rk-badge">${p.name}</div></div>` +
+      `<div class="rk-top"><div class="rk-rank">${p.late ? '–' : t('{n}<small>위</small>', { n: r.rank })}</div><div class="rk-badge">${p.name}</div></div>` +
       `<div class="rk-grade">${s.grade}</div>` +
       `<div class="rk-tags">${tags.join('')}</div>` +
       `<div class="rk-score">${s.score.toLocaleString('en-US')}</div>` +
-      `<div class="rk-acc">정확도 <b>${(s.acc * 100).toFixed(1)}%</b> · 최대 콤보 <b>${s.maxCombo}</b></div>` +
+      `<div class="rk-acc">${t('정확도 <b>{acc}%</b> · 최대 콤보 <b>{c}</b>', { acc: (s.acc * 100).toFixed(1), c: s.maxCombo })}</div>` +
       `<div class="rk-counts"><div class="p"><span>PERFECT</span><b>${s.counts.perfect}</b></div><div class="g"><span>GREAT</span><b>${s.counts.great}</b></div>` +
       `<div class="o"><span>GOOD</span><b>${s.counts.good}</b></div><div class="m"><span>MISS</span><b>${s.counts.miss}</b></div></div></div>`;
   }).join('');
-  $('ovHint').innerHTML = `잠시 뒤 노래 고르기로 돌아가요 · 폰에서 <b>다음 곡 고르기</b> 또는 <kbd>Space</kbd>`;
+  $('ovHint').textContent = t('잠시 뒤 노래 고르기로 돌아가요');
 }
 
 function goSelect(msg) {
@@ -760,7 +785,7 @@ window.addEventListener('keydown', (e) => {
     userOffset = Math.round(userOffset * 1000) / 1000;
     try { localStorage.setItem('pcg-rhythm-offset', String(userOffset)); } catch (err) {}
     renderFoot();
-    toast(`싱크 ${userOffset >= 0 ? '+' : ''}${Math.round(userOffset * 1000)}ms · 판정이 늦게 느껴지면 ]`);
+    toast(t('싱크 {ms}ms · 판정이 늦게 느껴지면 ]', { ms: `${userOffset >= 0 ? '+' : ''}${Math.round(userOffset * 1000)}` }));
   }
 });
 window.addEventListener('keyup', (e) => {
@@ -833,13 +858,14 @@ if (AUTOSTART && BOTS) setTimeout(() => { if (game.phase === 'select' && !phones
 // ================================================================
 // 시험용
 // ================================================================
+window.__rhythmSfx = sounds.stat;
 window.__rhythm = {
   get phase() { return game.phase; },
   get game() { return game; },
   get players() { return game.players; },
   get roster() { return [...roster.values()]; },
   get song() { return game.song || picker.song; },
-  picker, settings, stage, synth, transport,
+  picker, settings, stage, synth, transport, sounds,
   songTime: () => songTimeAt(performance.now()),
   start: (id) => { if (id) picker.goToId(id, { instant: true }); if (game.phase !== 'select') goSelect(); startGame(); },
   finish: finishGame,
@@ -863,6 +889,8 @@ window.__rhythm = {
     }
     return true;
   },
+  /** 시험용: 효과음 재생 횟수와 받은 샘플 */
+  sfxStat: () => ({ played: sounds.stat.played, missed: sounds.stat.missed }),
   offset: () => userOffset,
   displayRtt
 };

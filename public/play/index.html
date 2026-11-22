@@ -87,12 +87,11 @@
   .pad canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   .pstate { font-size: 30px; font-weight: 900; min-height: 1.25em; }
   .ptypes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 100%; max-width: 360px; }
-  .ptypes button { font-size: 15px; padding: 12px 2px; border-radius: 12px; }
-  .ptypes.pick button { background: transparent; color: var(--fg); border: 2px solid #33475b; }
-  .ptypes.pick button.on { background: var(--c); color: #111; border-color: var(--c); }
-  .howto { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; width: 100%; max-width: 360px; text-align: left;
-    color: var(--dim); font-size: 13px; line-height: 1.4; }
-  .howto b { color: var(--fg); margin-right: 4px; }
+  .ptypes button { font-size: 16px; padding: 22px 2px; border-radius: 14px; min-height: 64px; }
+  /* 내 타석에서 늘 쓸 수 있는 큰 스윙 버튼 */
+  button.swing { width: 100%; max-width: 380px; min-height: 120px; font-size: 34px; font-weight: 900; border-radius: 26px; touch-action: manipulation;
+    box-shadow: 0 10px 30px color-mix(in srgb, var(--c) 32%, transparent); }
+  button.swing:active { transform: scale(.98); }
   #dbg { margin: 0; max-width: 360px; font-size: 11px; color: var(--dim); text-align: left; white-space: pre-wrap; }
 </style>
 </head>
@@ -104,7 +103,7 @@
 <main id="main">
   <div id="vStart">
     <h1>홈런 더비</h1>
-    <p style="margin:14px 0 26px">폰이 방망이가 됩니다.<br>두 손으로 세로로 쥐고 휘두르세요.</p>
+    <p style="margin:14px 0 26px">폰을 방망이처럼 휘두르세요.</p>
     <button id="btnStart">시작하기</button>
   </div>
 
@@ -134,8 +133,8 @@
       <div class="chips" id="readyChips" hidden></div>
       <div class="tutLinks" id="tutLinks"></div>
     </div>
-    <button id="btnTest" class="ghost hidden">테스트 스윙 (센서 없음)</button>
-    <p id="sensorHelp" class="hidden" style="font-size:13px">센서로 치려면 — iPhone: Safari 를 앱 전환기에서 완전히 닫고 QR을 다시 찍은 뒤 동작 접근을 허용해요. Android: 주소창 자물쇠 → 사이트 설정 → 동작 센서 허용.</p>
+    <button id="btnSwing" class="swing hidden">휘두르기</button>
+    <p id="sensorHelp" class="hidden" style="font-size:13px">센서 허용이 필요해요</p>
   </div>
 
   <!-- 투타 대결: 내가 던질 차례 -->
@@ -143,13 +142,9 @@
     <div class="ptop"><b id="pTitle">투구 차례</b><span id="pCount"></span></div>
     <div class="pad" id="pad"><canvas id="padCv"></canvas></div>
     <div class="pstate" id="pState">기다려요</div>
-    <p id="pHint" style="font-size:15px">존을 누르거나 끌어 코스를 정하고 손을 떼세요. 폰을 세로로, 화면이 나를 보게 쥐고 큰 화면 쪽으로 던지세요.</p>
-    <div class="ptypes hidden" id="pTypes">
+    <p id="pHint" style="font-size:15px">코스를 누르고 구질을 눌러요</p>
+    <div class="ptypes" id="pTypes">
       <button data-type="fastball">직구</button><button data-type="slider">슬라이더</button><button data-type="curve">커브</button><button data-type="fork">포크볼</button>
-    </div>
-    <div class="howto">
-      <span><b>직구</b>그냥 세게</span><span><b>슬라이더</b>놓을 때 손목 비틀기</span>
-      <span><b>커브</b>손목을 앞으로 꺾기</span><span><b>포크볼</b>손목 고정, 내리꽂기</span>
     </div>
     <pre id="dbg" class="hidden"></pre>
   </div>

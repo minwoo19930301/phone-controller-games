@@ -7,6 +7,7 @@
 //   const c = cam.grab(1.37);       // 지금 보이는 그대로(가로/세로 비율) 잘라 캔버스로
 //   const url = encode(c);          // JPEG data URL(350KB 이하)
 import { drawAvatar } from '/photobooth/avatar.js';
+import { t as T } from '/common/i18n.js';
 
 export const MAX_EDGE = 900;
 export const MAX_BYTES = 350 * 1024;
@@ -107,7 +108,7 @@ export function createCamera(opts = {}) {
     }
     fake.slot = slot;
     fake.color = color;
-    const draw = () => drawAvatar(fake.cv.getContext('2d'), fake.cv.width, fake.cv.height, { slot: fake.slot, t: performance.now() / 1000, pose: fake.pose, badge: '시험', color: fake.color });
+    const draw = () => drawAvatar(fake.cv.getContext('2d'), fake.cv.width, fake.cv.height, { slot: fake.slot, t: performance.now() / 1000, pose: fake.pose, badge: T('시험'), color: fake.color });
     draw();
     clearInterval(fake.timer);
     fake.timer = setInterval(draw, 80);

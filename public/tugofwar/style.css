@@ -60,7 +60,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 800; padding: 3p
 .ph b { font-size: 27px; font-weight: 900; letter-spacing: -.02em; }
 .ph .sub { font-size: 15px; font-weight: 800; color: var(--dim); }
 .meters { display: grid; gap: 7px; }
-.meter { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 10px; font-size: 16px; font-weight: 900; }
+.meter { display: grid; grid-template-columns: 84px 1fr; align-items: center; gap: 10px; font-size: 16px; font-weight: 900; }
 .meter > div { height: 18px; border-radius: 10px; background: rgba(27,34,51,.14); overflow: hidden; border: 2px solid rgba(27,34,51,.65); }
 .meter i { display: block; height: 100%; width: 0%; border-radius: 8px; transition: width .2s; }
 .meter.force i { background: linear-gradient(90deg, var(--tc), color-mix(in srgb, var(--tc) 55%, #fff)); }
@@ -130,6 +130,9 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 800; padding: 3p
 .eyebrow { display: inline-flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 900; letter-spacing: .06em; padding: 5px 14px; border-radius: 999px; background: var(--ink); color: #fff; }
 .wordmark { margin: 12px 0 6px; font-size: 104px; line-height: 1; font-weight: 900; letter-spacing: -.05em; color: #fff; -webkit-text-stroke: 12px var(--ink); paint-order: stroke fill; text-shadow: 0 8px 0 var(--ink); }
 .wordmark.sm { font-size: 84px; }
+/* 영어는 글자가 길어 제목을 한 줄로 두고 조금 줄입니다 */
+html:lang(en) .wordmark:not(.sm), html:lang(ja) .wordmark:not(.sm) { font-size: 76px; white-space: nowrap; }
+.tcard h3 span, .tcard h3 small { white-space: nowrap; }
 .lede { margin: 12px 0 0; padding: 10px 16px; display: inline-block; border-radius: 14px; background: rgba(255,246,226,.92); border: 3px solid var(--ink); font-size: 20px; line-height: 1.5; font-weight: 700; }
 .lede b { color: var(--red); }
 .teams { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -159,6 +162,8 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 800; padding: 3p
 .msg { position: absolute; left: 50%; top: 52%; transform: translateX(-50%); padding: 10px 22px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 20px; font-weight: 800; opacity: 0; transition: opacity .3s; }
 .msg.on { opacity: 1; }
 .setbox, .tutbox { pointer-events: auto; }
+.lang-box { margin-top: 12px; pointer-events: auto; }
+.lang-box .pcg-lang { background: rgba(255,246,226,.92); color: var(--ink); border: 3px solid var(--ink); }
 .pcgs { color: var(--ink); }
 
 /* ============ 결과 ============ */
@@ -173,15 +178,17 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 800; padding: 3p
 .ov-card b { display: block; font-size: 32px; font-weight: 900; margin-top: 2px; }
 .ov-card b em { font-style: normal; font-family: var(--display); font-weight: 400; padding: 0 10px; margin-right: 8px; border-radius: 10px; color: #0b0f17; background: var(--pc, #fff); }
 .ov-card span { font-size: 16px; font-weight: 800; color: var(--dim); }
-.ov-table { position: absolute; right: 34px; top: 250px; width: min(520px, 44vw); border-radius: 20px; background: var(--paper); border: 4px solid var(--ink); box-shadow: 0 5px 0 rgba(27,34,51,.85); overflow: hidden; text-align: left; }
+.ov-table { position: absolute; right: 34px; top: 262px; width: min(580px, 47vw); border-radius: 20px; background: var(--paper); border: 4px solid var(--ink); box-shadow: 0 5px 0 rgba(27,34,51,.85); overflow: hidden; text-align: left; }
 .ov-table table { width: 100%; border-collapse: collapse; font-size: 17px; font-weight: 800; }
-.ov-table th { padding: 8px 8px; background: var(--ink); color: #fff; font-size: 14px; letter-spacing: .04em; }
+.ov-table th { padding: 8px 5px; background: var(--ink); color: #fff; font-size: 13px; letter-spacing: .02em; white-space: nowrap; }
 .ov-table td { padding: 6px 8px; border-top: 2px solid rgba(27,34,51,.12); text-align: center; font-variant-numeric: tabular-nums; }
 .ov-table td:first-child { text-align: left; }
 .ov-table .tn { display: inline-block; min-width: 40px; text-align: center; padding: 1px 8px; border-radius: 999px; background: var(--pc); color: #0b0f17; font-family: var(--display); font-weight: 400; letter-spacing: .03em; }
 .ov-table .tt { display: inline-block; width: 14px; height: 14px; border-radius: 50%; margin-left: 8px; vertical-align: -1px; border: 2px solid var(--ink); }
 .ov-table tr.mvp td { background: #fff3b8; }
-.over-foot { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.over-foot { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 80px); display: flex; flex-direction: column; align-items: center; gap: 10px; }
+/* 영어·일본어는 점수 글자가 길어 조금 줄입니다 */
+html:lang(en) .ov-score, html:lang(ja) .ov-score { font-size: 44px; }
 .diff { padding: 1px 10px; border-radius: 999px; font-style: normal; font-size: 13px; font-weight: 900; background: #8fd8ff; color: #0b1420; }
 .diff[data-d="easy"] { background: #5ee07a; }
 .diff[data-d="hard"] { background: #ff8a66; }
@@ -189,3 +196,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 800; padding: 3p
 /* 작은 화면(노트북 720p 등)에서는 HUD 를 통째로 줄여 줄 당기는 사람들이 가려지지 않게 합니다 */
 @media (max-height: 860px) { .hud { zoom: 0.74; } }
 @media (max-height: 640px) { .hud { zoom: 0.58; } }
+
+/* 소리가 막혀 있을 때만 대기실 아래쪽에 보이는 작은 안내(눌러서 소리가 켜지면 사라짐) */
+.sound-chip { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); padding: 5px 14px; border-radius: 999px; background: rgba(20, 20, 30, .62); color: #fff; font-size: 13px; letter-spacing: .01em; pointer-events: none; opacity: 0; transition: opacity .25s; white-space: nowrap; }
+.sound-chip.on { opacity: .85; }

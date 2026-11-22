@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
+<script src="/common/i18n-wait.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0a1322">
 <title>탁구 컨트롤러</title>
@@ -79,10 +80,17 @@
   .res .t.good { color: #7ef0a0; }
   .res .t.bad { color: #ff9a9d; }
   .res .t.mine { color: var(--fg); font-size: 22px; }
-  .pads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+  .pads { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 10px; }
   .pads button { padding: 18px 0; border-radius: 16px; background: rgba(255,255,255,.08); color: var(--fg); border: 1.5px solid var(--line);
     font-size: 17px; font-weight: 800; }
-  .pads button:first-child { background: var(--c); color: #0b0f17; border-color: var(--c); }
+  .primary.swing { margin-top: 8px; padding: 22px; font-size: 24px; touch-action: manipulation; }
+  .primary.swing:active { transform: scale(.98); }
+  .hint { padding: 8px 16px; border-radius: 999px; background: rgba(255,255,255,.14); color: var(--fg); font-size: 18px; font-weight: 800; }
+  .intro { font-size: 20px; color: var(--fg); line-height: 1.45; word-break: keep-all; }
+  .adv { text-align: center; color: var(--dim); font-size: 14px; }
+  .adv summary { cursor: pointer; padding: 8px; list-style: none; }
+  .adv summary::-webkit-details-marker { display: none; }
+  .adv[open] { display: flex; flex-direction: column; gap: 8px; }
   .pads-hint { margin-top: 8px; font-size: 12px; text-align: center; }
   /* 낮은 화면(안드로이드 크롬 360×560 등): 빈 자리 확보용 최소 높이를 없애고 글자를 줄입니다. */
   @media (max-height: 640px) {
@@ -152,6 +160,7 @@
   /* 연습(공통 tutorial) 글이 낱말 가운데서 끊기지 않게(한국어) */
   body .pcgt-title, body .pcgt-body, body .pcgt-msg, body .pcgt-hint { word-break: keep-all; overflow-wrap: break-word; }
   body.dbg main { padding-bottom: 30px; }
+  .lang-box { margin-top: 18px; display: flex; justify-content: center; }
   .debug { position: fixed; left: 8px; right: 8px; bottom: calc(env(safe-area-inset-bottom) + 4px); font: 11px ui-monospace, monospace;
     color: rgba(255,255,255,.4); white-space: pre-wrap; pointer-events: none; }
 </style>
@@ -175,12 +184,9 @@
       <rect x="55" y="32" width="40" height="92" rx="5" fill="var(--c)" opacity=".35"/>
       <path d="M68 26h14" stroke="#fff" stroke-width="2"/>
     </svg>
-    <h1>폰이 탁구채가 됩니다</h1>
-    <p>폰 아래쪽을 탁구채 손잡이처럼 쥐고
-화면이 TV를 보게 듭니다.</p>
-    <p class="note hidden" id="httpNote">https 주소가 아니라서 동작 센서가 꺼질 수 있습니다.
-그때는 버튼으로 칠 수 있습니다.</p>
+    <p class="intro">폰을 탁구채처럼 쥐고 공이 오면 휘둘러요.</p>
     <button class="primary" id="btnStart" style="margin-top:10px">시작하기</button>
+    <div id="langBox" class="lang-box"></div>
   </section>
 
   <!-- 메시지 -->
@@ -194,13 +200,16 @@
       <div class="chips" id="waitChips"></div>
     </div>
     <div class="setbox" id="setBox"></div>
-    <div class="player-controls"><label for="dominantHand">잡는 손</label><select id="dominantHand"><option value="right">오른손</option><option value="left">왼손</option></select></div>
     <div class="practice" id="practice"></div>
     <div class="wait-bottom">
       <div class="readyrow hidden" id="readyRow"></div>
       <button class="primary go" id="btnGo">준비</button>
-      <button class="ghost" id="btnCalLobby">탁구채 자세 맞추기</button>
-      <button class="ghost" id="btnSteerLobby">좌우 조작 맞추기</button>
+      <details class="adv" id="adv">
+        <summary>옵션</summary>
+        <div class="player-controls"><label for="dominantHand">잡는 손</label><select id="dominantHand"><option value="right">오른손</option><option value="left">왼손</option></select></div>
+        <button class="ghost" id="btnCalLobby">자세 다시 맞추기</button>
+        <button class="ghost" id="btnSteerLobby">좌우 조작 맞추기</button>
+      </details>
       <div class="tutlink" id="tutLink"></div>
     </div>
   </section>
@@ -230,13 +239,7 @@
     </svg>
     <div class="count hidden" id="calN">3</div>
     <h1 id="calT">탁구채처럼 쥡니다</h1>
-    <p id="calB">폰 아래쪽을 탁구채 손잡이처럼 쥐고,
-화면이 TV를 보게 한 뒤 준비를 누릅니다.</p>
-    <div class="legend" id="calLegend">
-      <div><b>쓸어 올리기</b><span>드라이브</span></div>
-      <div><b>깎아 내리기</b><span>커트</span></div>
-      <div><b>손목 비틀기</b><span>사이드</span></div>
-    </div>
+    <p id="calB">화면이 TV를 보게 쥐고 누르세요.</p>
     <button class="primary" id="btnReady" style="margin-top:6px">준비</button>
     <button class="ghost hidden" id="btnCalCancel">돌아가기</button>
   </section>
@@ -252,25 +255,27 @@
     </div>
     <div class="stage">
       <div class="orb" id="orb"><span class="orb-t" id="orbT">준비</span><span class="orb-h" id="orbH"></span></div>
-      <p class="status" id="status">공이 느려지면 타이밍을 맞춰 휘두릅니다.</p>
+      <div class="hint hidden" id="hint" role="status"></div>
+      <p class="status" id="status">링이 닫힐 때 휘둘러요</p>
       <div class="res">
         <div class="t" id="resT"></div>
         <div class="chips" id="resChips"></div>
       </div>
     </div>
+    <button class="primary swing" id="btnSwing" type="button">치기</button>
     <div class="hidden" id="fallback">
       <div class="pads">
-        <button data-kind="flat">스윙</button>
         <button data-kind="top">드라이브</button>
         <button data-kind="back">커트</button>
       </div>
-      <p class="pads-hint" id="fallbackHint">동작 센서가 없어 버튼으로 칩니다. (키보드: Space · T · B)</p>
     </div>
+    <p class="pads-hint hidden" id="fallbackHint">버튼으로 칩니다.</p>
   </section>
 </main>
 <div class="debug" id="debug"></div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/pingpong/i18n.js"></script>
 <script type="module" src="controller.js"></script>
 </body>
 </html>

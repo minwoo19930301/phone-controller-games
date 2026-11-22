@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { TABLE, BALL_R } from './physics.js';
+import { t as tr } from '/common/i18n.js'; // 경기장 글자판은 만들 때 지금 언어로 그립니다(언어를 바꾸면 페이지가 새로 열립니다)
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const FONT_D = 'Anton, Impact, "Pretendard Variable", sans-serif';
@@ -1169,7 +1170,7 @@ export function makeArena(tableXs) {
   }
   // 펜스: 남색 낮은 칸막이에 글자 인쇄
   const fenceTexA = fenceTex('PHONE CONTROLLER GAMES');
-  const fenceTexB = fenceTex('TABLE TENNIS · 탁구');
+  const fenceTexB = fenceTex(tr('TABLE TENNIS · 탁구'));
   const fenceMats = [fenceTexA, fenceTexB].map((t) => new THREE.MeshStandardMaterial({ map: t, roughness: 0.55 }));
   const edgeM = new THREE.MeshStandardMaterial({ color: '#0e1838', roughness: 0.6 });
   const footM = metal('#20242b', 0.5, 0.5);
@@ -1283,7 +1284,7 @@ export function makeArena(tableXs) {
   const ledTex = tex(canvas(2048, 128, (c, w, h) => {
     c.fillStyle = '#05070c';
     c.fillRect(0, 0, w, h);
-    const items = [['PHONE CONTROLLER GAMES', '#ffffff'], ['TABLE TENNIS', '#3ab4ff'], ['탁구 · 1~4인', '#ffc93c'], ['SLOW · TIMING · SPIN', '#ff5a5f'], ['PCG ARENA', '#5ee07a']];
+    const items = [['PHONE CONTROLLER GAMES', '#ffffff'], ['TABLE TENNIS', '#3ab4ff'], [tr('탁구 · 1~4인'), '#ffc93c'], ['SLOW · TIMING · SPIN', '#ff5a5f'], ['PCG ARENA', '#5ee07a']];
     c.textBaseline = 'middle';
     let x = 30;
     let i = 0;

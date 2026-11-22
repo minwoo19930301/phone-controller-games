@@ -32,6 +32,7 @@ p { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.55; white-spac
 .ghost { width: 100%; padding: 16px; border-radius: 18px; background: transparent; color: var(--fg); border: 1.5px solid var(--line); font-size: 17px; font-weight: 800; }
 .art { width: 220px; height: 210px; }
 #vStart .primary { margin-top: 8px; }
+.lang-box { margin-top: 6px; }
 .privacy { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--dim); font-weight: 600; }
 .privacy i { width: 8px; height: 8px; border-radius: 50%; background: #7ef0c8; box-shadow: 0 0 8px #7ef0c8; }
 
@@ -149,7 +150,9 @@ p { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.55; white-spac
 .s-status { text-align: center; font-size: 15px; font-weight: 800; color: var(--dim); min-height: 22px; }
 .s-status b { color: var(--fg); }
 .s-btns { display: flex; gap: 8px; }
-.s-btns .ghost, .s-btns .primary { flex: 1; padding: 16px 8px; font-size: 18px; }
+.s-btns .ghost, .s-btns .primary { flex: 1; padding: 20px 8px; font-size: 20px; }
+.s-btns .ghost.big { flex: 1.2; border-color: var(--fg); }
+#btnSnapFile { padding: 22px; font-size: 22px; }
 .s-btns .ghost small { display: block; font-size: 11px; font-weight: 700; color: var(--dim); margin-top: 2px; }
 .s-bar { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
 .s-bar i { display: block; height: 100%; width: 100%; background: var(--c); transform-origin: left; }
@@ -165,7 +168,7 @@ p { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.55; white-spac
 .d-tab.on { border-color: var(--c); color: var(--fg); background: color-mix(in srgb, var(--c) 16%, transparent); }
 .d-bar { display: flex; align-items: center; gap: 8px; }
 .d-zoom { flex: 1; display: flex; gap: 3px; padding: 3px; border-radius: 13px; background: var(--glass); border: 1px solid var(--line); }
-.d-zoom button { flex: 1; padding: 7px 0; border-radius: 10px; background: transparent; font-size: 13px; font-weight: 800; color: var(--dim); }
+.d-zoom button { flex: 1; padding: 10px 0; border-radius: 10px; background: transparent; font-size: 13px; font-weight: 800; color: var(--dim); }
 .d-zoom button.on { background: var(--fg); color: #140e16; }
 .d-timer { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line); }
 .d-timer i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--c); border-top-color: transparent; animation: spin 1.4s linear infinite; }
@@ -179,7 +182,7 @@ p { margin: 0; color: var(--dim); font-size: 16px; line-height: 1.55; white-spac
 .d-hint.on { opacity: 1; }
 .d-sel { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; gap: 4px; padding: 4px; border-radius: 14px; background: rgba(20, 14, 22, 0.86);
   border: 1px solid var(--line); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
-.d-sel button { min-width: 42px; height: 38px; padding: 0 10px; border-radius: 10px; background: var(--glass); font-size: 17px; font-weight: 900; }
+.d-sel button { min-width: 46px; height: 44px; padding: 0 10px; border-radius: 10px; background: var(--glass); font-size: 17px; font-weight: 900; }
 .d-sel button.del { min-width: 54px; font-size: 13px; white-space: nowrap; background: rgba(255, 90, 95, 0.2); color: #ffb3b5; }
 .d-cover { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(14, 9, 16, 0.6); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); z-index: 3; }
 .d-cover-in { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px 22px; border-radius: 20px; background: rgba(30, 22, 34, 0.94); border: 1.5px solid var(--c); text-align: center; max-width: 86%; }

@@ -286,7 +286,13 @@ body[data-phase="playing"] .keys { display: none; }
 }
 @media (max-height: 760px) {
   .wordmark { font-size: 52px; }
-  .lede { display: none; }
   .slot { min-height: 74px; padding: 10px 12px; }
   .qr-card img { width: 150px; }
 }
+
+/* 소리가 아직 막혀 있을 때만 대기실 아래쪽에 뜨는 작은 안내 칩 */
+.sound-chip { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 20; padding: 6px 14px; border-radius: 999px;
+  font-size: 12px; color: #f3e3bd; background: rgba(20, 16, 10, .62); border: 1px solid rgba(233, 196, 122, .35); pointer-events: none; white-space: nowrap; }
+
+/* 언어 고르기(대기실 QR 카드 아래 · 연주 중에는 대기실이 숨겨져 안 보임) */
+.langbox { align-self: center; }

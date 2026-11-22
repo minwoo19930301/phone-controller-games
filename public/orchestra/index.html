@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
+<script src="/common/i18n-wait.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#060407">
 <title>폰 오케스트라</title>
@@ -28,7 +29,7 @@
     <div class="lob-left">
       <div class="eyebrow">PHONE ORCHESTRA · 1~4인</div>
       <h1 class="wordmark">오케스트라<span>각자 폰이 악기가 돼요</span></h1>
-      <p class="lede">폰마다 악기를 하나씩 골라요. 소리는 각자 폰에서 나고,<br>맡지 않은 파트는 큰 화면이 조용히 반주해요.</p>
+      <p class="lede">QR을 찍고 폰에서 악기를 골라요.</p>
       <div class="setbox" id="settingsBox"></div>
       <div class="insts" id="insts"></div>
     </div>
@@ -37,15 +38,12 @@
         <img id="qr" alt="참가 QR">
         <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
         <div class="qr-url" id="url"></div>
-        <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰의 동작 센서·마이크가 꺼질 수 있어요. https 주소에서 열어 주세요.</div>
+        <div class="qr-warn hidden" id="warn">https로 열어 주세요</div>
       </div>
-      <ol class="howto">
-        <li><b>QR</b>을 찍고 폰에서 <b>악기</b>를 골라요</li>
-        <li>처음 고른 악기는 폰에서 <b>연습</b>부터 해요</li>
-        <li>폰을 밀어 <b>CD</b>를 넘겨 곡을 고르고, 모두 <b>준비</b>하면 연주</li>
-      </ol>
+      <div class="langbox" id="langBox"></div>
     </div>
   </div>
+  <div class="sound-chip hidden" id="soundChip" role="status">화면을 한 번 눌러 소리 켜기</div>
   <div class="lob-bottom">
     <div class="slots" id="slots"></div>
     <div class="tutboard" id="tutBoard"></div>
@@ -58,7 +56,6 @@
     <div>
       <div class="eyebrow">STEP 1 · 연습</div>
       <h2>각자 폰으로 연습해요</h2>
-      <p>처음 고른 악기는 폰에 튜토리얼이 떠요. 악기는 지금 바꿀 수 있어요(연주 중엔 못 바꿔요). 다 되면 폰에서 <b>준비</b>.</p>
     </div>
   </div>
   <div class="tiles" id="tiles" data-n="1"></div>
@@ -106,7 +103,7 @@
         <a class="dlbtn off" id="oDlBtn" download><b>아까 한 거 다운받기</b><span>연주 영상 · 소리 포함</span></a>
         <p id="oDlSub"></p>
       </div>
-      <div class="ov-next"><b id="oReady"></b><span>폰에서 모두 준비하면 다음 곡을 골라요</span></div>
+      <div class="ov-next"><b id="oReady"></b><span>모두 준비하면 다음 곡을 골라요</span></div>
     </div>
   </div>
 </section>
@@ -120,6 +117,8 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
+<script type="module" src="/orchestra/i18n.js"></script>
 <script type="module" src="game.js"></script>
 </body>
 </html>

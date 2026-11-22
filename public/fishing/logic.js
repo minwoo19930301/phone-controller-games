@@ -170,7 +170,7 @@ export function bigness(species, weight) {
 }
 
 // ---------- 난이도별 도움 ----------
-// 어려움 = 예전 그대로(사용자가 "생각보다 어렵다"고 한 값). 보통은 눈에 띄게 너그럽고, 쉬움은 아주 너그럽습니다.
+// 어려움 = 예전 그대로. 보통 = 예전의 쉬움(꽤 너그러움). 쉬움 = 아주 너그러움(기본값).
 //  hookWin   찌가 들어간 뒤 챔질할 수 있는 시간(초)
 //  early     톡톡(예신)에 일찍 챘을 때 물고기가 놀라 도망갈 확률(나머지는 "아직이에요"만 알려 주고 그대로 둠)
 //  notice    찌를 알아채는 거리 배율 / curious 다가올 확률 더하기 / commit 살피는·망설이는 시간 배율(작을수록 빨리 묾)
@@ -180,24 +180,29 @@ export function bigness(species, weight) {
 //  reelEx    드랙이 풀리는데 계속 감을 때 장력에 더해지는 몫 배율 / slack 느슨해도 바늘이 버티는 시간 배율
 //  jump      점프 때 바늘이 털릴 확률 배율 / drain 물고기가 지치는 속도 배율 / run 달리기를 고를 확률 배율
 //  hookQ     챔질이 약해도 보장하는 바늘 걸림 / land 이 거리 안으로 오면 들어 올림(m)
+//  reelDist  핸들 한 바퀴로 감기는 줄 길이 배율(장력에는 영향 없음) / autoReel 물고기가 달리지 않고 장력이 낮을 때 자동으로 감기는 최소 속도(바퀴/초)
+//  snap      던질 때 가까운 물고기 쪽으로 보정하는 폭: aim(도) · dist(m). 0 이면 보정 없음
 export const ASSIST = {
   easy: {
-    hookWin: 1.7, early: 0.12, notice: 1.6, curious: 0.32, commit: 0.45, nibMin: 2, biteP: 0.3, ignore: 0.25, approach: 24,
-    pull: 0.62, breakT: 1.08, breakRate: 0.3, reelEx: 0.4, slack: 2.2, jump: 0.15, drain: 1.8, run: 0.6, hookQ: 0.8, land: 3.2
+    hookWin: 2.6, early: 0, notice: 1.6, curious: 0.32, commit: 0.45, nibMin: 2, biteP: 0.3, ignore: 0.25, approach: 24,
+    pull: 0.62, breakT: 1.2, breakRate: 0.3, reelEx: 0.4, slack: 2.5, jump: 0.15, drain: 1.8, run: 0.6, hookQ: 0.85, land: 6,
+    reelDist: 2, autoReel: 0.8, snap: { aim: 14, dist: 8 }
   },
   normal: {
-    hookWin: 1.25, early: 0.45, notice: 1.3, curious: 0.16, commit: 0.7, nibMin: 1, biteP: 0.14, ignore: 0.55, approach: 18,
-    pull: 0.85, breakT: 1, breakRate: 0.55, reelEx: 0.85, slack: 1.5, jump: 0.5, drain: 1.35, run: 0.82, hookQ: 0.55, land: 2.7
+    hookWin: 1.7, early: 0.12, notice: 1.6, curious: 0.32, commit: 0.45, nibMin: 2, biteP: 0.3, ignore: 0.25, approach: 24,
+    pull: 0.62, breakT: 1.08, breakRate: 0.3, reelEx: 0.4, slack: 2.2, jump: 0.15, drain: 1.8, run: 0.6, hookQ: 0.8, land: 3.2,
+    reelDist: 1.3, autoReel: 0.4, snap: { aim: 7, dist: 3.5 }
   },
   hard: {
     hookWin: HOOK_WINDOW, early: 1, notice: 1, curious: 0, commit: 1, nibMin: 0, biteP: 0, ignore: 1, approach: 14,
-    pull: 1, breakT: 1, breakRate: 1, reelEx: 1, slack: 1, jump: 1, drain: 1, run: 1, hookQ: 0.3, land: LAND_DIST
+    pull: 1, breakT: 1, breakRate: 1, reelEx: 1, slack: 1, jump: 1, drain: 1, run: 1, hookQ: 0.3, land: LAND_DIST,
+    reelDist: 1, autoReel: 0, snap: { aim: 0, dist: 0 }
   }
 };
 // 처음 해 보는 사람(튜토리얼) 파이팅: 쉬움보다 조금 더 순하게 해서 첫 물고기는 거의 꼭 잡게 합니다.
 export const TUTORIAL_ASSIST = { ...ASSIST.easy, pull: 0.5, breakRate: 0.15, reelEx: 0.3, slack: 3, jump: 0, drain: 2.4, run: 0.4, hookQ: 1 };
 export function assistFor(level) {
-  return ASSIST[level] || ASSIST.normal;
+  return ASSIST[level] || ASSIST.easy;
 }
 
 // ---------- 파이팅 ----------
@@ -270,9 +275,11 @@ export function stepFight(f, dt, input, rand = Math.random) {
   if (f.modeT <= 0) chooseMode(f, rand, events);
   const S = f.S;
   const P = f.P;
-  const omega = clamp(Number(input.omega) || 0, 0, 5);
+  let omega = clamp(Number(input.omega) || 0, 0, 5);
+  // 쉬움·보통: 물고기가 달리지 않고 줄이 팽팽하지 않으면 손을 쉬어도 천천히 감깁니다.
+  if (A.autoReel && f.T < 0.7 && f.mode !== 'run') omega = Math.max(omega, A.autoReel);
   const tilt = clamp(Number(input.tilt) || 0, -1, 1);
-  const vReel = omega * LINE_PER_TURN;
+  const vReel = omega * LINE_PER_TURN * (A.reelDist || 1);
 
   let F;
   let vRun = 0;

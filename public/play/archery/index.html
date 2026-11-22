@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#08130d">
 <title>양궁 컨트롤러</title>
+<script src="/common/i18n-wait.js"></script>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
 <style>
@@ -20,6 +21,7 @@
   .room { flex: 1; color: var(--dim); font-size: 13px; letter-spacing: .1em; }
   .recal { padding: 8px 12px; border-radius: 12px; background: rgba(255,255,255,.08); color: var(--fg); border: 1.5px solid var(--line); font-size: 13px; font-weight: 700; }
   .hidden { display: none !important; }
+  .langbox { position: absolute; top: 0; right: 0; z-index: 3; }
   .banner { position: relative; z-index: 2; margin: 6px 0 0; padding: 9px 12px; border-radius: 12px; background: rgba(255,90,95,.14); color: #ffb3b5; font-size: 13px; text-align: center; flex: none; }
   main { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .view { flex: 1; display: none; flex-direction: column; min-height: 0; }
@@ -74,10 +76,10 @@
   .arrowsleft i { width: 22px; height: 5px; border-radius: 3px; background: var(--c); }
   .arrowsleft i.spent { opacity: .2; }
   .windchip { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 62px; }
-  .windchip svg { width: 38px; height: 38px; overflow: visible; }
+  .windchip svg { width: 46px; height: 46px; overflow: visible; }
   .windchip .wc-bg { fill: rgba(255,255,255,.06); stroke: rgba(255,255,255,.3); stroke-width: 2; }
   .windchip .wc-ar { fill: none; stroke: #f4c542; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
-  .windchip b { font-size: 13px; font-weight: 900; }
+  .windchip b { font-size: 15px; font-weight: 900; }
   .windchip span { font-size: 10.5px; color: var(--dim); font-weight: 700; }
   .status { min-height: 26px; text-align: center; font-size: 16px; font-weight: 800; color: var(--fg); margin: 4px 0; flex: none; }
   .status.turn { color: var(--c); font-size: 18px; animation: pulse 1.1s infinite alternate; }
@@ -93,10 +95,12 @@
   .sight .dotp { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 16px var(--c), 0 0 0 3px rgba(0,0,0,.5); left: 50%; top: 50%; }
   .sight.drag { border-style: dashed; border-color: var(--c); }
   .sightlabel { position: absolute; left: 0; right: 0; bottom: -2px; text-align: center; font-size: 11.5px; font-weight: 800; color: var(--dim); }
-  .bowzone { position: relative; flex: 1; min-height: 150px; margin-top: 6px; border-radius: 26px; background: linear-gradient(180deg, rgba(255,255,255,.04), color-mix(in srgb, var(--c) 10%, rgba(255,255,255,.03)));
+  .bowzone { position: relative; flex: 1; min-height: 200px; margin-top: 6px; border-radius: 26px; background: linear-gradient(180deg, rgba(255,255,255,.04), color-mix(in srgb, var(--c) 10%, rgba(255,255,255,.03)));
     border: 1.5px solid var(--line); touch-action: none; overflow: hidden; }
   .bowzone.mine { border-color: var(--c); box-shadow: 0 0 30px color-mix(in srgb, var(--c) 30%, transparent), inset 0 0 40px color-mix(in srgb, var(--c) 10%, transparent); }
   .bowzone.off { opacity: .5; }
+  .shootbtn { flex: none; margin-top: 8px; padding: 16px; font-size: 19px; }
+  .shootbtn:disabled { background: rgba(255,255,255,.1); color: var(--dim); box-shadow: none; }
   .bowzone svg { position: absolute; inset: 0; width: 100%; height: 100%; }
   .bowzone .limb { fill: none; stroke: #e5e9ee; stroke-width: 7; stroke-linecap: round; }
   .bowzone .limb2 { fill: none; stroke: var(--c); stroke-width: 3; stroke-linecap: round; opacity: .9; }
@@ -148,21 +152,19 @@
 <header>
   <span class="me" id="me">…</span>
   <span class="room" id="room"></span>
-  <button class="recal hidden" id="btnRecal">중앙 다시 맞추기</button>
+  <button class="recal hidden" id="btnRecal">다시 맞추기</button>
 </header>
 <div class="banner hidden" id="banner"></div>
 <main>
   <section class="view center on" id="vStart">
+    <div class="langbox" id="langBox"></div>
     <svg class="art aimart" viewBox="0 0 130 150" aria-hidden="true">
       <path d="M22 14Q65 60 108 14"/><path d="M22 14Q16 70 65 70Q114 70 108 14" style="stroke:#fff;stroke-width:2;stroke-dasharray:3 5;opacity:.6"/>
       <path d="M65 70V10"/><path d="M60 16L65 6L70 16"/><rect x="45" y="92" width="40" height="52" rx="9" style="stroke:#fff;fill:#08130d"/>
     </svg>
     <h1>폰이 활이 됩니다</h1>
-    <p>폰을 활처럼 세워 큰 화면을 겨누고,
-화면의 시위를 아래로 당겼다가 손을 떼면 쏴요.
-바람을 읽고, 오래 버티면 팔이 떨려요.</p>
-    <p class="note hidden" id="httpNote">https 주소가 아니라서 동작 센서가 꺼질 수 있어요.
-그때는 화면을 끌어서 조준할 수 있어요.</p>
+    <p>폰으로 겨누고, 아래로 당겼다 놓아요.</p>
+    <p class="note hidden" id="httpNote">https 주소가 아니라 센서가 꺼질 수 있어요.</p>
     <button class="primary" id="btnStart" style="margin-top:4px">시작하기</button>
   </section>
 
@@ -176,24 +178,12 @@
     <div class="setbox" id="setBox"></div>
     <div class="readyrow hidden" id="readyRow"></div>
     <button class="primary go" id="btnGo">준비</button>
-    <button class="ghost" id="btnCalLobby">조준 맞추기</button>
     <div id="tutLink"></div>
-  </section>
-
-  <section class="view center" id="vCal">
-    <svg class="art aimart" viewBox="0 0 120 150" aria-hidden="true">
-      <circle cx="60" cy="60" r="38"/><circle cx="60" cy="60" r="8"/><path d="M60 8v18M60 94v18M8 60h18M94 60h18"/>
-    </svg>
-    <h1 id="calT">활을 세워 가운데를 겨눠요</h1>
-    <p id="calB">폰을 활처럼 세워 쥐고 팔을 뻗어
-큰 화면 정중앙을 향한 채 아래 버튼을 눌러요.</p>
-    <button class="primary" id="btnReady" style="margin-top:6px">여기가 중앙</button>
-    <button class="ghost hidden" id="btnCalCancel">돌아가기</button>
   </section>
 
   <section class="view" id="vPlay">
     <div class="hudrow">
-      <div class="sc"><b id="score">0</b><span>총점 <i class="dtag" id="dTag" data-d="normal">보통</i></span></div>
+      <div class="sc"><b id="score">0</b><span>총점 <i class="dtag" id="dTag" data-d="easy">쉬움</i></span></div>
       <div class="mid"><b id="endTxt">1엔드</b><span id="arrowTxt">3발</span><div class="arrowsleft" id="arrowsLeft"></div></div>
       <div class="windchip" id="windChip">
         <svg viewBox="-24 -24 48 48"><circle r="21" class="wc-bg"/><g id="wArrow"><path d="M-13 0H10M10 0l-6 -5M10 0l-6 5" class="wc-ar"/></g></svg>
@@ -201,8 +191,9 @@
       </div>
     </div>
     <div class="status" id="status">곧 시작해요</div>
-    <div class="sightwrap"><div class="sight" id="sight"><div class="dotp" id="sightDot"></div></div><div class="sightlabel" id="sightLabel">조준</div></div>
+    <div class="sightwrap hidden" id="sightWrap"><div class="sight" id="sight"><div class="dotp" id="sightDot"></div></div><div class="sightlabel" id="sightLabel">조준</div></div>
     <div class="bowzone off" id="bowZone"></div>
+    <button class="primary shootbtn" id="btnShoot" disabled>바로 쏘기</button>
     <p class="pads-hint hidden" id="fallbackHint"></p>
   </section>
 </main>
@@ -210,6 +201,8 @@
 <div class="debug" id="debug"></div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/archery/i18n.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
 <script type="module" src="controller.js"></script>
 </body>
 </html>

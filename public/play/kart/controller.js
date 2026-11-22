@@ -1,4 +1,6 @@
-// 카트 컨트롤러. 폰을 가로로 세워 핸들처럼 기울이고(roll), 왼쪽 브레이크·오른쪽 액셀, 가운데 아이템 버튼을 씁니다.
+// 카트 컨트롤러. 폰을 가로로 세워 핸들처럼 기울이고(roll), 왼쪽 브레이크를 씁니다. 가운데 어디든 누르면 아이템을 씁니다.
+// 쉬움·보통은 액셀을 저절로 밟고(큰 화면 game.js 가 정함) 오른쪽 큰 버튼이 아이템(스피드전이면 브레이크)입니다. 어려움만 오른쪽이 액셀입니다.
+// 핸들 영점은 맞추기 화면 없이 처음 가로로 가만히 쥔 자세로 저절로 잡습니다(준비 누를 때·카운트다운·경기 중). '다시 맞추기'는 선택입니다.
 //
 // 핸들 각도: deviceorientation 의 beta/gamma 로 "세계의 위쪽" 벡터를 폰 화면 평면(x 오른쪽, y 위)에 옮기고, 그 벡터의 회전각을 영점에 대해 잽니다.
 // beta/gamma 는 폰 몸체 기준 값이라 화면이 돌아가도(자동 회전) 바뀌지 않습니다. 그래서 화면 방향은 핸들 계산에 전혀 쓰지 않습니다.
@@ -13,7 +15,11 @@
 import { haptics } from '/common/haptics.js';
 import { createPhoneSettings } from '/common/phone-settings.js';
 import { createTutorial } from '/common/tutorial.js';
+import { createSamples } from '/common/samples.js';
+import { SFX } from '/common/sfx/manifest.js';
 import { ITEM_ICONS, ITEM_NAMES, CHASE_ICON } from '/kart/icons.js';
+import { t, mountSwitcher } from '/common/i18n.js';
+import '/kart/i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -38,10 +44,9 @@ function send(event, data, volatile) {
 let me = null;
 let state = { phase: 'lobby' };
 let result = null;
-let mode = 'start'; // start | connecting | msg | wait | cal | tut | play
+let mode = 'start'; // start | connecting | msg | wait | tut | play
 let noRoomTries = 0;
 let readyPressed = false;
-let backTo = 'wait'; // 핸들 맞추기를 끝내고 돌아갈 곳
 
 function show(id) {
   for (const v of document.querySelectorAll('.view')) v.classList.toggle('on', v.id === id);
@@ -66,14 +71,23 @@ haptics.listen(socket, { slot: () => (me ? me.slot : null) });
 
 // ---------- 소리 ----------
 let actx = null;
+let samp = null; // 녹음 샘플(폰은 즉각 피드백용 딱 3개: 신호음·클릭·부딪힘)
 function audio() {
   if (!actx) {
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (AC) actx = new AC();
+    if (AC) {
+      actx = new AC();
+      const sub = {};
+      for (const n of ['ui/beep', 'ui/click', 'kart/crash-2']) sub[n] = SFX[n];
+      samp = createSamples(actx, null, { manifest: sub });
+      samp.preload();
+    }
   }
   if (actx && actx.state === 'suspended') actx.resume();
   return actx;
 }
+// 녹음을 틀고, 아직 못 받았으면 false → 예전 합성음
+const rec = (name, opts) => Boolean(samp && actx && actx.state === 'running' && samp.play(name, opts));
 function tone(freq, sec, gain, type = 'sine', when = 0) {
   const a = actx;
   if (!a || a.state !== 'running') return;
@@ -99,8 +113,13 @@ const wrap = (a) => {
 };
 const wrapDeg = (d) => ((((d + 180) % 360) + 360) % 360) - 180;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const RANGE_DEG = 38; // 이만큼 돌리면 끝까지 꺾음
-const DEAD_DEG = 2.5; // 이 안은 직진
+// 난이도별 핸들 감도: range = 이만큼 돌리면 끝까지 꺾음(도), dead = 이 안은 직진(도), exp = 반응 곡선. 어려움 = 예전 값
+const STEER = {
+  easy: { range: 22, dead: 4, exp: 1 },
+  normal: { range: 30, dead: 3.5, exp: 1.1 },
+  hard: { range: 38, dead: 2.5, exp: 1.2 }
+};
+const steerCfg = () => STEER[ps.difficulty()] || STEER.easy;
 let ang = 0; // 지금 위쪽 벡터의 각도
 let upLen = 0; // 위쪽 벡터가 화면 평면에 얼마나 누워 있는지(0 = 폰이 바닥에 눕혀짐, 1 = 똑바로 섬)
 let flat = true; // 폰이 눕혀져 있어 각도를 믿을 수 없음
@@ -148,24 +167,37 @@ function setZero() {
   return true;
 }
 
+// 맞추기 화면 없이 영점 잡기: 폰을 가로로 세워 가만히 쥔 순간(최근 각도가 거의 안 흔들림)의 자세를 직진으로 삼습니다.
+function stillSideways() {
+  if (!gotSensor || flat || upLen < 0.5 || !sideways(holdLive) || recent.length < 8) return false;
+  const m = circMean(recent);
+  return recent.every((a) => Math.abs(wrap(a - m)) < 0.1);
+}
+function autoZero() {
+  if (zero != null || fallback || !stillSideways()) return;
+  if (!setZero()) return;
+  if (mode === 'play') { holdRace = holdLive; applyLayout(); }
+}
+
 /** 지금 핸들 값(-1..1). 키보드 → 화면 슬라이더 → 센서 순. */
 function readSteer() {
   let target = 0;
+  const cfg = steerCfg();
   const kb = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
   if (kb) {
     target = kb;
-    steerDeg = kb * RANGE_DEG;
+    steerDeg = kb * cfg.range;
   } else if (fallback) {
     target = slideVal;
-    steerDeg = slideVal * RANGE_DEG;
+    steerDeg = slideVal * cfg.range;
   } else if (gotSensor && zero != null) {
     if (!flat) {
       const deg = (wrap(ang - zero) * 180) / Math.PI;
       steerDeg = clamp(deg, -70, 70);
     }
     const a = Math.abs(steerDeg);
-    const x = clamp((a - DEAD_DEG) / (RANGE_DEG - DEAD_DEG), 0, 1);
-    target = Math.sign(steerDeg) * Math.pow(x, 1.2);
+    const x = clamp((a - cfg.dead) / (cfg.range - cfg.dead), 0, 1);
+    target = Math.sign(steerDeg) * Math.pow(x, cfg.exp);
   } else {
     steerDeg = 0;
   }
@@ -212,7 +244,7 @@ function trackHold() {
     applyLayout();
   }
 }
-setInterval(() => { checkFlip(); checkLateGrip(); }, 100);
+setInterval(() => { autoZero(); checkFlip(); checkLateGrip(); playHints(); }, 100);
 function rawScreenAngle() {
   if (fakeAngle != null) return fakeAngle;
   const so = screen.orientation;
@@ -288,7 +320,7 @@ const sideways = (h) => h === 90 || h === -90;
 function alignForRace(final) {
   const live = holdLive;
   const liveOk = live != null && !flat && upLen >= 0.5 && recent.length;
-  if (liveOk && live !== holdCal && (sideways(live) || holdCal == null)) {
+  if (liveOk && live !== holdCal && sideways(live)) {
     zero = circMean(recent);
     holdCal = live;
     send('calibrate', {});
@@ -305,7 +337,7 @@ let gripSince = 0;
 function checkLateGrip() {
   if (mode !== 'play' || !racePinned || lateGrip || holdRace == null || sideways(holdRace)) { gripSince = 0; return; }
   const now = performance.now();
-  if (now - goAt > 6000) { lateGrip = true; return; }
+  if (now - goAt > 10000) { lateGrip = true; return; }
   if (flat || !sideways(holdLive) || upLen < 0.5) { gripSince = 0; return; }
   if (!gripSince) { gripSince = now; return; }
   if (now - gripSince < 450 || !recent.length) return;
@@ -315,7 +347,6 @@ function checkLateGrip() {
   holdCal = holdLive;
   applyLayout();
   send('calibrate', {});
-  $('sub').textContent = '가로로 잡은 자세를 직진으로 맞췄어요';
 }
 // 경기 중 폰을 아예 반대로(180°) 바꿔 쥐었으면(1초 넘게) 영점과 배치를 같이 뒤집습니다. 핸들로 135° 넘게 꺾는 일은 없어서 헷갈리지 않습니다.
 function checkFlip() {
@@ -351,6 +382,7 @@ const rtt = () => {
 
 // ---------- 페달 ----------
 const pedal = { gas: 0, brake: 0 };
+const held = { l: 0, r: 0 }; // 왼쪽·오른쪽 큰 버튼을 누르고 있는지
 let sentCount = 0;
 let lastSig = '';
 function sendDrive(force) {
@@ -363,20 +395,32 @@ function sendDrive(force) {
 }
 setInterval(() => { sendDrive(false); tutSteerTick(); }, 33);
 
-function bindPedal(el, key) {
+// 오른쪽 큰 버튼의 역할: 어려움 = 액셀, 쉬움·보통 = 아이템(아이템전) 또는 브레이크(스피드전)
+function padRole() {
+  if (ps.difficulty() === 'hard') return 'gas';
+  return itemsOn() ? 'item' : 'brake';
+}
+function applyPedals() {
+  const role = padRole();
+  pedal.brake = held.l || (role === 'brake' && held.r) ? 1 : 0;
+  pedal.gas = role === 'gas' && held.r ? 1 : 0;
+  $('pBrake').classList.toggle('down', Boolean(held.l));
+  $('pGas').classList.toggle('down', Boolean(held.r));
+  sendDrive(true);
+}
+function bindPad(el, side) {
   const ids = new Set();
   const set = () => {
-    const on = ids.size > 0;
-    pedal[key] = on ? 1 : 0;
-    el.classList.toggle('down', on);
-    sendDrive(true);
+    held[side] = ids.size > 0 ? 1 : 0;
+    applyPedals();
   };
   el.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     audio();
     try { el.setPointerCapture(e.pointerId); } catch (err) {}
     ids.add(e.pointerId);
-    haptics.tick({ noFlash: true, silent: true });
+    if (side === 'r' && padRole() === 'item') itemTap();
+    else haptics.tick({ noFlash: true, silent: true });
     set();
   });
   const up = (e) => {
@@ -388,9 +432,33 @@ function bindPedal(el, key) {
   el.addEventListener('lostpointercapture', up);
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
-bindPedal($('pBrake'), 'brake');
-bindPedal($('pGas'), 'gas');
+bindPad($('pBrake'), 'l');
+bindPad($('pGas'), 'r');
+const PAD_SVG = {
+  gas: '<svg class="pi" viewBox="0 0 48 48"><path d="M10 26l14-14 14 14"/><path d="M10 40l14-14 14 14"/></svg>',
+  brake: '<svg class="pi" viewBox="0 0 48 48"><rect x="10" y="10" width="28" height="28" rx="6"/></svg>'
+};
+// 오른쪽 큰 버튼 모양을 지금 역할·아이템 상태에 맞춥니다.
+function paintPad() {
+  const role = padRole();
+  const el = $('pGas');
+  const ico = $('pGasIco');
+  const lbl = $('pGasLbl');
+  el.className = `pedal ${role}${role === 'item' ? ` ${itemState}` : ''}${held.r ? ' down' : ''}`;
+  if (role === 'item') {
+    const kinds = Object.keys(ITEM_ICONS);
+    ico.innerHTML = itemState === 'have' && itemKind ? ITEM_ICONS[itemKind] || '' : itemState === 'roll' ? ITEM_ICONS[kinds[Math.floor(Math.random() * kinds.length)]] || '' : ITEM_ICONS.banana;
+    lbl.textContent = itemState === 'have' && itemKind ? ITEM_NAMES[itemKind] || '' : itemState === 'roll' ? '뽑는 중…' : '아이템';
+    el.setAttribute('aria-label', '아이템 쓰기');
+  } else {
+    ico.innerHTML = PAD_SVG[role];
+    lbl.textContent = role === 'gas' ? '액셀' : '브레이크';
+    el.setAttribute('aria-label', lbl.textContent);
+  }
+}
 function releaseAll() {
+  held.l = 0;
+  held.r = 0;
   pedal.gas = 0;
   pedal.brake = 0;
   $('pGas').classList.remove('down');
@@ -433,27 +501,57 @@ function bindSlider(el, knob, onVal) {
 }
 bindSlider($('slide'), $('slideKnob'));
 
-// 경기 중 가운데(아이템 버튼 밖)를 길게 누르면 영점을 다시 맞춥니다.
+// 경기 중 위쪽 이름 띠를 길게(1.2초) 누르면 영점을 다시 맞춥니다. 가운데 나머지는 모두 아이템 버튼입니다.
 let holdTimer = null;
 const mid = $('mid');
-mid.addEventListener('pointerdown', (e) => {
-  if (e.target.closest('#slide') || e.target.closest('#btnItem')) return;
+mid.querySelector('.top').addEventListener('pointerdown', () => {
   clearTimeout(holdTimer);
   holdTimer = setTimeout(() => {
-    if (setZero()) {
-      if (mode === 'play' && sideways(holdLive)) { holdRace = holdLive; applyLayout(); }
-      haptics.play('success', 0.6, { noFlash: true });
-      $('sub').textContent = '핸들 영점을 다시 맞췄어요';
-      tone(880, 0.12, 0.1, 'triangle');
-    }
-  }, 800);
+    if (recalibrate()) hint('핸들을 다시 맞췄어요', true);
+  }, 1200);
 });
-for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) mid.addEventListener(ev, () => clearTimeout(holdTimer));
+for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) mid.querySelector('.top').addEventListener(ev, () => clearTimeout(holdTimer));
+mid.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('#slide') || e.target.closest('.top')) return;
+  e.preventDefault();
+  audio();
+  itemTap();
+});
+function recalibrate() {
+  if (!setZero()) return false;
+  if (mode === 'play' && sideways(holdLive)) { holdRace = holdLive; applyLayout(); }
+  haptics.play('success', 0.6, { noFlash: true });
+  tone(880, 0.12, 0.1, 'triangle');
+  return true;
+}
+// 짧은 안내 한 줄(폰 가운데 아래). 무시된 입력이 조용히 사라지지 않게 보여 주고 살짝 진동합니다.
+let hintTimer = null;
+function hint(text, quiet) {
+  const el = mode === 'play' ? $('sub') : $('waitHint');
+  el.textContent = text;
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => { el.textContent = ''; }, 1800);
+  if (!quiet) haptics.play('warn', 0.45, { noFlash: true, silent: true });
+}
+// 경기 중 조용히 실패하기 쉬운 두 경우: 영점이 아직 없거나, 폰이 너무 눕혀짐
+let hintAt = 0;
+let flatSince = 0;
+function playHints() {
+  if (mode !== 'play' || state.sub !== 'race' || fallback || !gotSensor) { flatSince = 0; return; }
+  const now = performance.now();
+  if (flat) {
+    if (!flatSince) flatSince = now;
+  } else flatSince = 0;
+  if (now - hintAt < 2500) return;
+  if (zero == null && now - goAt > 600) { hintAt = now; hint('폰을 가로로 세워요'); }
+  else if (flatSince && now - flatSince > 800) { hintAt = now; hint('폰을 세워요'); }
+}
 
 // ---------- 아이템 ----------
 let itemState = 'none'; // none | roll | have
 let itemKind = null;
 let rollTimer = null;
+let lastRole = '';
 function paintItem() {
   const btn = $('btnItem');
   const on = itemsOn();
@@ -465,25 +563,27 @@ function paintItem() {
     btn.className = 'itembtn off';
     $('itemIco').innerHTML = SPEED_ICON;
     lbl.className = 'ilbl off';
-    lbl.textContent = '스피드전 · 아이템 없음';
+    lbl.textContent = '스피드전';
+    paintPad();
     return;
   }
   btn.className = `itembtn ${itemState}`;
   lbl.className = `ilbl ${itemState}`;
   if (itemState === 'have' && itemKind) {
     $('itemIco').innerHTML = ITEM_ICONS[itemKind] || '';
-    lbl.textContent = `${ITEM_NAMES[itemKind] || ''} · 눌러서 쓰기`;
+    lbl.textContent = '눌러서 써요';
   } else if (itemState === 'roll') {
     const kinds = Object.keys(ITEM_ICONS);
     let i = Math.floor(Math.random() * kinds.length);
-    const step = () => { i = (i + 1) % kinds.length; $('itemIco').innerHTML = ITEM_ICONS[kinds[i]]; };
+    const step = () => { i = (i + 1) % kinds.length; $('itemIco').innerHTML = ITEM_ICONS[kinds[i]]; if (padRole() === 'item') { $('pGasIco').innerHTML = ITEM_ICONS[kinds[i]]; } };
     step();
     rollTimer = setInterval(step, 90);
     lbl.textContent = '뽑는 중…';
   } else {
     $('itemIco').innerHTML = ITEM_ICONS.banana;
-    lbl.textContent = '상자를 먹으면 아이템';
+    lbl.textContent = '';
   }
+  paintPad();
 }
 const itemsOn = () => state.items !== false;
 // 스피드전일 때 가운데 버튼 자리: 속도계
@@ -499,17 +599,25 @@ function fireItem() {
   if (mode !== 'play' || itemState !== 'have') return false;
   send('item', {});
   haptics.hit(0.55);
-  tone(660, 0.08, 0.08, 'triangle');
+  if (!rec('ui/click', { gain: 0.8 })) tone(660, 0.08, 0.08, 'triangle');
   const btn = $('btnItem');
   setItem('none', null);
   btn.classList.add('used');
   setTimeout(() => btn.classList.remove('used'), 460);
   return true;
 }
+// 아이템 버튼(가운데 그림·오른쪽 큰 버튼·가운데 아무 곳). 쓸 수 없는 때도 이유를 한 줄로 알려 줍니다.
+function itemTap() {
+  if (fireItem()) return;
+  if (mode !== 'play') return;
+  if (!itemsOn()) hint('아이템이 없는 판이에요');
+  else if (itemState === 'roll') hint('뽑는 중…');
+  else hint('상자를 먹으면 아이템');
+}
 $('btnItem').addEventListener('pointerdown', (e) => {
   e.preventDefault();
   audio();
-  fireItem();
+  itemTap();
 });
 $('chaseIco').innerHTML = CHASE_ICON;
 
@@ -526,48 +634,32 @@ window.addEventListener('keydown', (e) => {
   if (!k || (mode !== 'play' && mode !== 'tut')) return;
   e.preventDefault();
   keys[k] = true;
-  if (mode === 'tut') {
-    if (k === 'up') tut.signal('pedal', { key: 'gas' });
-    if (k === 'down') tut.signal('pedal', { key: 'brake' });
-    return;
-  }
-  if (k === 'up') { pedal.gas = 1; $('pGas').classList.add('down'); }
-  if (k === 'down') { pedal.brake = 1; $('pBrake').classList.add('down'); }
+  if (mode === 'tut') return;
+  if (k === 'up') { held.r = 1; applyPedals(); }
+  if (k === 'down') { held.l = 1; applyPedals(); }
 });
 window.addEventListener('keyup', (e) => {
   const k = KEYMAP[e.code];
   if (!k) return;
   keys[k] = false;
-  if (k === 'up') { pedal.gas = 0; $('pGas').classList.remove('down'); }
-  if (k === 'down') { pedal.brake = 0; $('pBrake').classList.remove('down'); }
+  if (k === 'up') { held.r = 0; applyPedals(); }
+  if (k === 'down') { held.l = 0; applyPedals(); }
 });
 
 // ================================================================
-// 처음 하는 사람 연습(튜토리얼): 왼쪽·오른쪽 꺾기, 액셀, 브레이크, 아이템 쓰기
+// 연습(튜토리얼): 저절로 시작하지 않고 '튜토리얼 다시 하기' 링크로만. 2단계: 기울여서 꺾기, 아이템 쓰기
 // ================================================================
 const svgWrap = (inner) => `<svg class="pcgt-svg" viewBox="0 0 200 160" aria-hidden="true">${inner}</svg>`;
 const PHONE_L = '<rect x="-46" y="-25" width="92" height="50" rx="9" class="pcgt-ph"/><rect x="-38" y="-19" width="76" height="38" rx="4" class="pcgt-scr"/>';
-function tiltArt(dir) {
-  const to = dir * 26;
-  const arc = dir < 0 ? '<path class="pcgt-arc" d="M60 36 A62 62 0 0 1 100 22"/><path class="pcgt-arrow" d="M66 26 L58 37 L71 40"/>'
-    : '<path class="pcgt-arc" d="M100 22 A62 62 0 0 1 140 36"/><path class="pcgt-arrow" d="M134 26 L142 37 L129 40"/>';
+function tiltArt() {
+  const to = 26;
+  const arc = '<path class="pcgt-arc" d="M60 36 A62 62 0 0 1 100 22"/><path class="pcgt-arrow" d="M66 26 L58 37 L71 40"/>' +
+    '<path class="pcgt-arc" d="M100 22 A62 62 0 0 1 140 36"/><path class="pcgt-arrow" d="M134 26 L142 37 L129 40"/>';
   return svgWrap(
     arc +
-    `<g transform="translate(100 90)"><g><animateTransform attributeName="transform" type="rotate" values="0;${to};${to};0" keyTimes="0;.35;.75;1" calcMode="spline" keySplines=".45 0 .55 1;0 0 1 1;.45 0 .55 1" dur="2.2s" repeatCount="indefinite"/>` +
+    `<g transform="translate(100 90)"><g><animateTransform attributeName="transform" type="rotate" values="0;${-to};${-to};${to};${to};0" keyTimes="0;.2;.4;.6;.8;1" calcMode="spline" keySplines=".45 0 .55 1;0 0 1 1;.45 0 .55 1;0 0 1 1;.45 0 .55 1" dur="3s" repeatCount="indefinite"/>` +
     `<g transform="scale(1.25)">${PHONE_L}<circle r="9" fill="none" stroke="#fff" stroke-width="3"/><path d="M0 -9v-6" stroke="#ffd23a" stroke-width="3" stroke-linecap="round"/></g>` +
     '<rect x="-74" y="-16" width="20" height="32" rx="9" class="pcgt-hand"/><rect x="54" y="-16" width="20" height="32" rx="9" class="pcgt-hand"/></g></g>'
-  );
-}
-function pedalArt(which) {
-  const gas = which === 'gas';
-  const x = gas ? 34 : -34;
-  return svgWrap(
-    `<g transform="translate(100 82) scale(1.45)">${PHONE_L}` +
-    `<rect x="-36" y="-16" width="20" height="32" rx="5" fill="#e0384a" opacity="${gas ? 0.35 : 1}"/>` +
-    `<rect x="16" y="-16" width="20" height="32" rx="5" fill="#2ccf6f" opacity="${gas ? 1 : 0.35}"/>` +
-    `<circle cx="${x * 0.76}" cy="0" r="5" fill="none" stroke="#fff" stroke-width="2"><animate attributeName="r" values="3;15" dur="1.1s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0" dur="1.1s" repeatCount="indefinite"/></circle>` +
-    `<g transform="translate(${gas ? 34 : -34} 18)"><g><animateTransform attributeName="transform" type="translate" values="0 6;0 0;0 0;0 6" keyTimes="0;.25;.7;1" dur="1.1s" repeatCount="indefinite"/>` +
-    `<rect x="-7" y="-14" width="14" height="30" rx="7" class="pcgt-hand"/></g></g></g>`
   );
 }
 function itemArt() {
@@ -581,54 +673,19 @@ function itemArt() {
   );
 }
 // 조향 단계: 지금 핸들 값을 보여 주는 막대(센서가 없으면 이 막대를 밀어서 연습)
-function steerStage(dir) {
-  return (stage) => {
-    stage.innerHTML = `<div class="tk"><div class="tk-gauge"><span class="goal" style="${dir < 0 ? 'left:0' : 'right:0'}"></span><b></b><i></i>` +
-      `${fallback ? '<em>센서가 없어요 · 여기를 밀어 보세요</em>' : ''}</div></div>`;
-    const g = stage.querySelector('.tk-gauge');
-    const knob = stage.querySelector('.tk-gauge i');
-    if (fallback) bindSlider(g, null);
-    let raf = 0;
-    const loop = () => {
-      knob.style.left = `${50 + clamp(steerSmooth, -1, 1) * 44}%`;
-      raf = requestAnimationFrame(loop);
-    };
-    loop();
-    return () => cancelAnimationFrame(raf);
+function steerStage(stage) {
+  stage.innerHTML = `<div class="tk"><div class="tk-gauge"><span class="goal" style="left:0"></span><span class="goal" style="right:0"></span><b></b><i></i>` +
+    `${fallback ? '<em>여기를 밀어 보세요</em>' : ''}</div></div>`;
+  const g = stage.querySelector('.tk-gauge');
+  const knob = stage.querySelector('.tk-gauge i');
+  if (fallback) bindSlider(g, null);
+  let raf = 0;
+  const loop = () => {
+    knob.style.left = `${50 + clamp(steerSmooth, -1, 1) * 44}%`;
+    raf = requestAnimationFrame(loop);
   };
-}
-// 페달 단계: 작은 브레이크·액셀을 0.5초 꾹 누르면 성공
-function pedalStage(which) {
-  return (stage, api) => {
-    stage.innerHTML = '<div class="tk"><div class="tk-pedals">' +
-      `<button type="button" class="b${which === 'gas' ? ' dim' : ''}" data-k="brake">브레이크<s></s></button>` +
-      `<button type="button" class="g${which === 'brake' ? ' dim' : ''}" data-k="gas">액셀<s></s></button></div></div>`;
-    const timers = [];
-    for (const b of stage.querySelectorAll('button')) {
-      const bar = b.querySelector('s');
-      let t = null;
-      b.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        try { b.setPointerCapture(e.pointerId); } catch (err) {}
-        b.classList.add('down');
-        haptics.tick({ noFlash: true, silent: true });
-        if (b.dataset.k !== which) { api.signal('pedal', { key: b.dataset.k }); return; }
-        bar.style.transition = 'width .5s linear';
-        bar.style.width = '100%';
-        t = setTimeout(() => api.signal('pedal', { key: b.dataset.k }), 500);
-        timers.push(t);
-      });
-      const up = () => {
-        b.classList.remove('down');
-        clearTimeout(t);
-        bar.style.transition = 'none';
-        bar.style.width = '0';
-      };
-      b.addEventListener('pointerup', up);
-      b.addEventListener('pointercancel', up);
-    }
-    return () => timers.forEach(clearTimeout);
-  };
+  loop();
+  return () => cancelAnimationFrame(raf);
 }
 function itemStage(stage, api) {
   stage.innerHTML = `<div class="tk"><button type="button" class="tk-item"><span>${ITEM_ICONS.banana}</span></button></div>`;
@@ -642,36 +699,34 @@ function itemStage(stage, api) {
 const tut = createTutorial({
   key: 'kart',
   socket,
-  title: '처음이라 핸들 연습해 봐요',
+  title: '처음이라 연습해 봐요',
   steps: [
-    { title: '왼쪽으로 꺾기', body: '핸들처럼 폰을 왼쪽으로 기울여요.', svg: () => tiltArt(-1), waitFor: 'steer', hint: '왼쪽으로 끝까지',
-      check: (d) => d.dir < 0 || '반대쪽이에요 · 왼쪽으로 기울여요', render: steerStage(-1) },
-    { title: '오른쪽으로 꺾기', body: '이번엔 오른쪽으로 기울여요.', svg: () => tiltArt(1), waitFor: 'steer', hint: '오른쪽으로 끝까지',
-      check: (d) => d.dir > 0 || '반대쪽이에요 · 오른쪽으로 기울여요', render: steerStage(1) },
-    { title: '액셀', body: '오른쪽 엄지로 초록 버튼을 꾹 눌러요.', svg: () => pedalArt('gas'), waitFor: 'pedal', hint: '꾹 누르고 있기',
-      check: (d) => d.key === 'gas' || '그건 브레이크예요 · 오른쪽 초록 버튼', render: pedalStage('gas') },
-    { title: '브레이크', body: '왼쪽 엄지로 빨간 버튼. 멈춘 뒤 계속 누르면 후진해요.', svg: () => pedalArt('brake'), waitFor: 'pedal', hint: '꾹 누르고 있기',
-      check: (d) => d.key === 'brake' || '그건 액셀이에요 · 왼쪽 빨간 버튼', render: pedalStage('brake') },
-    { title: '아이템 쓰기', body: '아이템전에서 상자를 먹으면 가운데에 아이템이 떠요. 눌러서 써요.', svg: itemArt, waitFor: 'item', hint: '가운데 버튼 누르기',
-      render: itemStage, okText: '바나나 투척!' }
-  ],
-  finish: { title: '연습 끝!', body: '이제 준비를 누르면 돼요.\n경기 중 가운데를 길게 누르면 핸들 영점을 다시 맞춰요.', button: '좋아요' }
+    { title: '기울여서 꺾기', body: '핸들처럼 기울여요.', svg: tiltArt, waitFor: 'steer', hint: '좌우로 기울여요',
+      check: (d) => d.dir !== 0 || '더 크게!', render: steerStage },
+    { title: '아이템 쓰기', body: '가운데 버튼을 눌러요.', svg: itemArt, waitFor: 'item', render: itemStage }
+  ]
 });
 tut.link($('tutLink'), { mount: null, before: () => { startTutorial(); return false; } });
 
-// 튜토리얼 동안 핸들 감지: 한쪽으로 0.25초 넘게 크게 꺾으면 신호 한 번, 가운데로 돌아와야 다음 신호
-const tutSteer = { arm: true, dir: 0, since: 0 };
+// 튜토리얼 동안 핸들 감지: 한쪽으로 0.15초만 꺾어도 신호 한 번. 조금만 기울이고 머물면 '더 크게!'
+const tutSteer = { arm: true, dir: 0, since: 0, smallSince: 0 };
 function tutSteerTick() {
   if (mode !== 'tut' || !tut.isRunning()) return;
   // 아직 영점이 없으면(세로로 든 채 맞추기를 끝냄) 처음 가로로 잡는 자세를 직진으로 삼습니다.
   if (zero == null && gotSensor && !flat && sideways(holdLive) && recent.length >= 6) setZero();
   const v = readSteer();
   const now = performance.now();
-  if (Math.abs(v) < 0.3) { tutSteer.arm = true; tutSteer.dir = 0; return; }
-  if (!tutSteer.arm || Math.abs(v) < 0.6) return;
+  if (Math.abs(v) < 0.12) { tutSteer.arm = true; tutSteer.dir = 0; tutSteer.smallSince = 0; return; }
+  if (Math.abs(v) < 0.4) {
+    if (!tutSteer.smallSince) tutSteer.smallSince = now;
+    else if (now - tutSteer.smallSince > 2500) { tutSteer.smallSince = now; tut.signal('steer', { dir: 0 }); } // 작게만 기울이면 '더 크게!'
+    return;
+  }
+  tutSteer.smallSince = 0;
+  if (!tutSteer.arm) return;
   const dir = Math.sign(v);
   if (tutSteer.dir !== dir) { tutSteer.dir = dir; tutSteer.since = now; return; }
-  if (now - tutSteer.since > 250) {
+  if (now - tutSteer.since > 150) {
     tutSteer.arm = false;
     tut.signal('steer', { dir });
   }
@@ -680,7 +735,7 @@ async function startTutorial() {
   if (tut.isRunning()) return;
   mode = 'tut';
   releaseAll();
-  show(''); // 뒤에 있던 화면(핸들 맞추기·대기실)이 연습 화면 사이로 비치지 않게 숨깁니다
+  show(''); // 뒤에 있던 화면(대기실)이 연습 화면 사이로 비치지 않게 숨깁니다
   const box = document.querySelector('#stage .stage-in');
   await tut.run(box, { inline: true });
   if (mode === 'tut') {
@@ -691,30 +746,13 @@ async function startTutorial() {
 
 // ---------- 화면 갱신 ----------
 const wheel = $('wheel');
-const calWheel = $('calWheel');
 function paintSteer() {
-  if (mode === 'play' || mode === 'cal') {
-    const v = mode === 'cal' ? readSteerPreview() : steerSmooth;
-    const deg = clamp(steerDeg, -90, 90);
-    if (mode === 'play') {
-      // 폰이 돌아간 만큼 반대로 돌려 그리면 헷갈리니, 조향 방향 그대로 핸들 그림을 돌립니다.
-      wheel.style.transform = `rotate(${deg}deg)`;
-      $('bar').style.left = `${50 + v * 45}%`;
-    } else {
-      calWheel.style.transform = `rotate(${deg}deg)`;
-      $('calBar').style.left = `${50 + v * 45}%`;
-      $('holdHint').classList.toggle('hidden', !(gotSensor && holdLive === 0 || holdLive === 180));
-    }
+  if (mode === 'play') {
+    // 폰이 돌아간 만큼 반대로 돌려 그리면 헷갈리니, 조향 방향 그대로 핸들 그림을 돌립니다.
+    wheel.style.transform = `rotate(${clamp(steerDeg, -90, 90)}deg)`;
+    $('bar').style.left = `${50 + steerSmooth * 45}%`;
   }
   requestAnimationFrame(paintSteer);
-}
-// 맞추는 중에도 핸들 그림이 따라 돌도록(아직 영점이 없으면 지금 자세 기준 0)
-function readSteerPreview() {
-  if (zero == null && gotSensor && holdLive != null) {
-    if (!flat) steerDeg = clamp(wrapDeg((ang * 180) / Math.PI - (90 - holdLive)), -70, 70);
-    return clamp(steerDeg / RANGE_DEG, -1, 1);
-  }
-  return readSteer();
 }
 requestAnimationFrame(paintSteer);
 
@@ -724,17 +762,13 @@ function mine() {
 function statusText() {
   const p = mine();
   if (!p) return '';
-  return p.late ? `중간 참가 · 차량 현재 ${p.rank}등 · ${p.lap}/${state.laps || 3}바퀴` : p.fin ? `${p.rank}등으로 들어왔어요` : `${p.rank}등 · ${p.lap}/${state.laps || 3}바퀴`;
+  const v = { r: p.rank, lap: p.lap, laps: state.laps || 3 };
+  return p.late ? t('중간 참가 · {r}등 · {lap}/{laps}바퀴', v) : p.fin ? t('{r}등으로 들어왔어요', v) : t('{r}등 · {lap}/{laps}바퀴', v);
 }
-const MODE_NOTE = {
-  item: `<i>${ITEM_ICONS.missile}</i><span>아이템전 · 상자를 먹고 가운데 버튼으로 써요. 뒤처질수록 센 아이템이 나와요.</span>`,
-  speed: `<i>${CHASE_ICON}</i><span>스피드전 · 아이템 없이 달려요. 뒤처지면 추격 부스트가 붙어요.</span>`
-};
 function render() {
   if (!me) return;
   const phase = state.phase;
   const p = mine();
-  if (mode === 'cal') return; // 맞추는 중에는 화면을 바꾸지 않습니다
   if (mode === 'tut') {
     if (!(phase === 'playing' && p)) return; // 연습 중에는 그대로(경기가 시작돼 내 카트가 있으면 연습을 닫음)
     tut.cancel();
@@ -745,10 +779,12 @@ function render() {
       if (holdRace == null) alignForRace(false);
       show('vPlay');
       paintItem();
+      applyPedals();
       keepAwake();
       tut.setLinkVisible(false);
     }
     $('status').textContent = state.sub === 'countdown' ? '곧 출발!' : statusText();
+    if (padRole() !== lastRole) { lastRole = padRole(); releaseAll(); paintPad(); }
     $('chaseP').classList.toggle('on', state.sub === 'race' && !p.fin && (p.chase || 0) >= 0.035);
     // 늦게 붙었거나 신호를 놓쳤으면 화면 상태로 아이템 칸을 맞춥니다.
     if (itemsOn() && itemState !== 'roll') {
@@ -775,21 +811,17 @@ function render() {
     bigEl.classList.remove('hidden');
     bigEl.classList.toggle('win', r === 1);
     bigEl.textContent = result && result.late ? '중간 참가' : r ? `${r}등` : '';
-    $('waitT').textContent = result && result.late ? '중간 참가 완료' : r === 1 ? '우승!' : r ? `${total}대 중 ${r}등` : '경기 끝';
-    const t = result && result.finished ? `기록 ${fmt(result.time)}${result.best ? ` · 베스트 랩 ${fmt(result.best)}` : ''}` : '완주하지 못했어요';
-    $('waitB').textContent = result && result.late ? 'CPU 차량을 이어받아 참가했어요.\n순위에는 포함되지 않아요.' : `${t}\n큰 화면에서 전체 결과를 확인하세요.`;
+    $('waitT').textContent = result && result.late ? '중간 참가' : r === 1 ? '우승!' : r ? t('{total}대 중 {r}등', { total, r }) : '경기 끝';
+    const rec0 = result && result.finished ? (result.best ? t('기록 {time} · 베스트 랩 {best}', { time: fmt(result.time), best: fmt(result.best) }) : t('기록 {time}', { time: fmt(result.time) })) : '완주하지 못했어요';
+    $('waitB').textContent = result && result.late ? '순위에는 포함되지 않아요.' : rec0;
   } else if (phase === 'playing') {
     $('waitT').textContent = '경기 중';
-    $('waitB').textContent = '지금 경기가 끝나면 다음 판부터 함께해요.';
+    $('waitB').textContent = '다음 판부터 같이 해요.';
     $('btnReady').style.display = 'none';
   } else {
     $('waitT').textContent = '대기실';
-    $('waitB').textContent = fallback ? '화면 가운데를 밀어서 조향해요.\n모두 준비하면 바로 출발해요.'
-      : zero == null ? '핸들 맞추기를 한 번 해 보세요.\n모두 준비를 누르면 시작해요.'
-        : '폰을 가로로 들고 준비를 눌러요.\n모두 준비하면 바로 출발해요.';
+    $('waitB').textContent = fallback ? '화면 가운데를 밀어서 조향해요.' : '폰을 가로로 들고 준비를 눌러요.';
   }
-  const note = $('modeNote');
-  note.innerHTML = state.settings ? MODE_NOTE[itemsOn() ? 'item' : 'speed'] : '';
   paintReady();
   show('vWait');
 }
@@ -803,7 +835,7 @@ function paintReady() {
   const b = $('btnReady');
   b.classList.toggle('waiting', readyPressed);
   b.disabled = readyPressed;
-  if (readyPressed) b.textContent = '준비 완료 ✓ · 기다리는 중';
+  if (readyPressed) b.textContent = '준비 완료 ✓';
   else b.textContent = state.phase === 'over' ? '다시 하기' : '준비';
 }
 
@@ -822,8 +854,6 @@ socket.on('assigned', (p) => {
   $('meP').textContent = p.name;
   if (mode === 'msg' || mode === 'connecting') {
     mode = 'wait';
-    // 처음 들어오면 핸들부터 맞춥니다(맞춘 뒤 처음이면 연습).
-    if (zero == null && state.phase !== 'playing') { openCal('wait'); return; }
   }
   render();
 });
@@ -840,11 +870,11 @@ socket.on('replaced', () => message('다른 탭에서 열었어요', '마지막�
 socket.on('room_closed', () => message('방이 닫혔어요', '큰 화면의 새 QR을 찍어 주세요.'));
 socket.on('display_status', (d) => {
   const b = $('banner');
-  b.textContent = '큰 화면 연결이 끊겼어요. 다시 열리면 이어서 해요.';
+  b.textContent = '큰 화면 연결이 끊겼어요';
   b.classList.toggle('hidden', Boolean(d && d.connected));
 });
 socket.on('disconnect', () => {
-  if (mode === 'play') $('sub').textContent = '연결이 잠깐 끊겼어요…';
+  if (mode === 'play') hint('연결이 잠깐 끊겼어요…', true);
 });
 socket.on('game_state', (s) => {
   const prev = state.phase;
@@ -882,7 +912,7 @@ socket.on('cue', (c) => {
     if (mode === 'play') alignForRace(false);
     popCd(c.n);
     haptics.play('tick', 1, { noFlash: true });
-    tone(520, 0.12, 0.1, 'square');
+    if (!rec('ui/beep', { gain: 0.8, jitter: 0 })) tone(520, 0.12, 0.1, 'square');
   } else if (c.type === 'go') {
     if (mode === 'play') alignForRace(true);
     popCd('GO!');
@@ -894,79 +924,49 @@ socket.on('cue', (c) => {
     haptics.play('strong', 1, { noFlash: true });
     tone(1040, 0.3, 0.12, 'square');
   } else if (c.type === 'boost') {
-    $('sub').textContent = '부스트!';
+    hint('부스트!', true);
   } else if (c.type === 'lap') {
     haptics.play('good', 1, { noFlash: true });
-    $('sub').textContent = `${c.lap}바퀴째`;
+    hint(t('{n}바퀴째', { n: c.lap }), true);
   } else if (c.type === 'finish') {
     haptics.buzz([80, 50, 80, 50, 200]);
     popCd('완주!');
     [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.2, 0.12, 'triangle', i * 0.1));
   } else if (c.type === 'item') {
-    if (c.state === 'roll') { setItem('roll', null); tone(1500, 0.05, 0.05, 'square'); }
-    else if (c.state === 'have') { setItem('have', c.kind); $('sub').textContent = `${ITEM_NAMES[c.kind] || '아이템'}! 가운데를 눌러 써요`; }
+    if (c.state === 'roll') { setItem('roll', null); if (!rec('ui/click', { gain: 0.3, rate: 1.5 })) tone(1500, 0.05, 0.05, 'square'); }
+    else if (c.state === 'have') { setItem('have', c.kind); hint('눌러서 써요', true); }
     else setItem('none', null);
   } else if (c.type === 'hit') {
     haptics.flash('#ff3b4a', { opacity: 0.5, ms: 420 });
-    $('sub').textContent = (c.by ? `${c.by} · ` : '') + (HIT_TEXT[c.cause] || '꽈당!');
-    tone(300, 0.3, 0.1, 'sawtooth');
+    hint((c.by ? `${t(c.by)} · ` : '') + t(HIT_TEXT[c.cause] || '꽈당!'), true); // 이름과 문장을 각자 번역해서 이어 붙입니다
+    if (!rec('kart/crash-2', { gain: 0.9, rate: 0.9 })) tone(300, 0.3, 0.1, 'sawtooth');
   }
 });
 
 // ---------- 버튼 ----------
-function openCal(back) {
-  backTo = back || 'wait';
-  mode = 'cal';
-  $('calT').textContent = zero == null ? '핸들 맞추기' : '핸들 다시 맞추기';
-  show('vCal');
-}
-$('btnCal').addEventListener('click', () => { audio(); openCal('wait'); });
-$('btnZero').addEventListener('click', () => {
+// 다시 맞추기(선택): 폰을 가로로 든 채 누르면 지금 자세가 직진이 됩니다. 안 되면 이유를 한 줄로 보여 줍니다.
+$('btnCal').addEventListener('click', () => {
   audio();
-  if (fallback && !gotSensor) {
-    $('calB').textContent = '동작 센서가 없어서 맞출 게 없어요.\n경기 중에는 화면 가운데를 밀어서 조향해요.';
-    return;
-  }
-  if (flat) {
-    $('calB').textContent = '폰이 너무 눕혀져 있어요.\n핸들처럼 세워서 다시 눌러 주세요.';
-    return;
-  }
-  // 세로로 세워 든 자세는 운전 자세가 아니라 영점으로 삼지 않습니다(출발 카운트다운 때 가로 자세로 다시 맞춤).
-  if (holdLive != null && !sideways(holdLive)) {
-    $('calB').textContent = '폰을 가로로 눕혀 양손으로 잡은 뒤\n다시 눌러 주세요.';
-    haptics.play('warn', 0.5, { noFlash: true });
-    return;
-  }
-  if (setZero()) {
-    haptics.play('success', 0.7, { noFlash: true });
-    tone(880, 0.12, 0.1, 'triangle');
-    $('calB').textContent = '맞췄어요! 좌우로 기울여 보고\n핸들 그림이 따라 돌면 완료를 누르세요.';
-  } else {
-    $('calB').textContent = '센서 값이 아직 안 들어와요. 잠시 뒤에 다시 눌러 주세요.';
-  }
-});
-$('btnCalDone').addEventListener('click', () => {
-  audio();
-  if (zero == null && gotSensor && !flat && sideways(holdLive)) setZero(); // 누르지 않고 완료해도 가로로 쥐고 있으면 지금 자세를 영점으로
-  mode = backTo;
-  $('calB').textContent = '폰을 가로로 세워, 핸들을 똑바로 잡은 자세에서\n영점 맞추기를 누르세요. 그 자세가 직진이에요.';
-  // 처음 해 보는 폰이면 바로 연습으로
-  if (tut.firstTime() && state.phase !== 'playing') { startTutorial(); return; }
-  render();
+  if (fallback && !gotSensor) { hint('동작 센서가 없어요'); return; }
+  if (!gotSensor || flat) { hint('폰을 세워서 눌러요'); return; }
+  if (holdLive == null || !sideways(holdLive)) { hint('폰을 가로로 들고 눌러요'); return; }
+  if (recalibrate()) hint('맞췄어요!', true);
+  else hint('잠시 뒤에 다시 눌러요');
 });
 $('btnReady').addEventListener('click', () => {
   keepAwake();
   audio();
   // 영점은 출발 카운트다운 때 지금 쥔 자세로 다시 확인합니다(alignForRace). 여기서 세로로 들고 누른 자세를 영점으로 삼지 않습니다.
-  if (zero == null && gotSensor && !flat && holdLive != null && holdLive !== 0) setZero();
+  if (zero == null && gotSensor && !flat && holdLive != null && sideways(holdLive)) setZero();
   if (!send('start_game', {})) {
-    $('waitB').textContent = '연결 중이에요. 다시 연결되면 준비를 눌러 주세요.';
+    hint('연결 중이에요. 잠시 뒤에 눌러요');
     return;
   }
   readyPressed = true;
   paintReady();
   haptics.play('good', 0.8, { noFlash: true });
 });
+mountSwitcher($('langBox'), { reload: true, compact: true }); // 시작 화면에서만 보입니다(vStart 안)
 $('btnStart').addEventListener('click', async () => {
   if (mode !== 'start') return;
   mode = 'connecting';
@@ -1003,7 +1003,7 @@ $('btnStart').addEventListener('click', async () => {
     if (gotSensor && !denied) return;
     fallback = true;
     $('mid').classList.add('fallback');
-    $('banner').textContent = '동작 센서를 쓸 수 없어서 화면 가운데를 밀어 조향해요.';
+    $('banner').textContent = '센서가 없어요 · 화면 가운데를 밀어요';
     $('banner').classList.remove('hidden');
     setTimeout(() => $('banner').classList.add('hidden'), 5000);
   }, 1500);

@@ -6,6 +6,10 @@ import { recommendClub } from './clubs.js';
 import { analyzeSwing, summarize, renderPanel } from './analysis.js';
 import { displayMayReceiveFollow, displayShowsFollow } from './follow-through.mjs';
 import { nextFarthest, nextTeeOrder, skipHole, rankedScores } from './turn-order.mjs';
+import { createSettings, fields } from '/common/settings.js';
+import { levelOf, shapePower, shapeAngle, shapePutterSpeed, nominalSwing, WIND_MAX } from './assist.mjs';
+import { mountSoundGate } from './sound-gate.js';
+import { createGolfSfx } from './real-sfx.js';
 
 const ROUNDS = 3;
 const RD = Math.PI / 180;
@@ -15,27 +19,42 @@ await Promise.race([
   Promise.all([document.fonts.load('400 64px Anton'), document.fonts.load('800 64px "Pretendard Variable"')]),
   new Promise((r) => setTimeout(r, 2000))
 ]).catch(() => {});
-let selectedCourse = COURSES[0], hole = selectedCourse.holes[0], difficulty = 'normal';
+// 난이도는 공통 설정 알약으로 고르고, 기본은 쉬움입니다.
+let selectedCourse = COURSES[0], hole = selectedCourse.holes[0], difficulty = 'easy';
+const settings = createSettings({
+  game: 'golf',
+  fields: [fields.difficulty({ hints: { easy: '가까운 티 · 약한 바람', normal: '보통 티 · 보통 바람', hard: '먼 티 · 센 바람' } })],
+  onChange: () => { difficulty = levelOf(settings.difficulty()); view.setHole(hole, selectedCourse, difficulty); pushState(); }
+});
+difficulty = levelOf(settings.difficulty());
 const view = createScene($('cv'), hole, selectedCourse, difficulty);
 const height=(x,z)=>hole.height(x,z), surface=(x,z)=>hole.surface(x,z), slope=(x,z)=>hole.slope(x,z);
 const pinDist=()=>Math.round(hole.distToPin(...game.scores[game.order[game.turn]].pos));
 const waterY=(x,z)=>hole.waterLevel(x,z) ?? height(x,z);
 for(const c of COURSES){const o=document.createElement('option');o.value=c.id;o.textContent=`${c.name} · ${c.blurb}`;$('courseChoice').appendChild(o)}
 $('courseChoice').addEventListener('change', e=>{selectedCourse=COURSES.find(c=>c.id===e.target.value)||COURSES[0];hole=selectedCourse.holes[0];view.setHole(hole,selectedCourse,difficulty)});
-$('difficultyChoice').addEventListener('change', e=>{difficulty=e.target.value;view.setHole(hole,selectedCourse,difficulty)});
+settings.mount($('setBox'));
 
 // ---------- 소리 ----------
 let actx = null;
+let real = null; // 실제 녹음 재생기(못 받은 소리는 아래 합성음이 대신 납니다)
 function audio() {
   if (!actx) {
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (AC) actx = new AC();
+    if (AC) {
+      actx = new AC();
+      real = createGolfSfx(actx);
+      real.preload(); // 대기실에서 미리 받아 둡니다(소리가 잠겨 있어도 받아 두기는 됩니다)
+    }
   }
-  if (actx && actx.state === 'suspended') actx.resume();
+  if (actx && actx.state === 'suspended') actx.resume().catch(() => {});
   return actx;
 }
-window.addEventListener('pointerdown', audio);
-window.addEventListener('keydown', audio);
+// 큰 화면은 폰에서 시작해서 클릭이 없을 수 있으니, 어떤 키·포인터 입력이든 소리를 켭니다.
+for (const ev of ['pointerdown', 'keydown', 'touchstart', 'mousedown']) window.addEventListener(ev, audio, { capture: true });
+audio();
+// 소리가 잠겨 있으면(브라우저 자동재생 정책) 대기실에 작은 안내를 띄웁니다.
+mountSoundGate(() => actx, audio, () => game.phase === 'lobby');
 function noise(sec, freq, q, gain, attack) {
   const a = actx;
   if (!a || a.state !== 'running') return;
@@ -74,14 +93,15 @@ const sfx = {
   // 티타늄 드라이버 헤드의 높고 쨍한 '팅'(비조화 배음이 길게 남음)
   strike: (q) => { if (!actx || actx.state !== 'running') return; modal(actx, actx.destination, [[3150, 1, 0.38], [4720, 0.6, 0.3], [7300, 0.35, 0.2], [1880, 0.4, 0.15]], { gain: 0.12 + q * 0.1 }); grit(actx, actx.destination, { sec: 0.02, freq: 5000, gain: 0.3 + q * 0.2 }); },
   whoosh: () => noise(0.5, 900, 0.5, 0.25, 0.5),
-  land: () => noise(0.08, 300, 1, 0.5, 0),
-  splash: () => noise(0.7, 600, 0.4, 0.6, 0.05),
-  clap: (n) => { for (let i = 0; i < n; i++) setTimeout(() => noise(0.04, 1500 + Math.random() * 800, 1, 0.25, 0), Math.random() * 1600); },
-  cup: () => { if (!actx || actx.state !== 'running') return; [0, 0.1, 0.17].forEach((w, i) => modal(actx, actx.destination, [[1250 - i * 90, 1, 0.08], [2900, 0.4, 0.05]], { gain: 0.25 - i * 0.06, when: w })); bell(actx, actx.destination, 1568, { when: 0.35, gain: 0.07, ratio: 4, depth: 1.2 }); }
+  land: (surface) => { if (real && real.land(surface)) return; noise(0.08, 300, 1, 0.5, 0); },
+  splash: () => { if (real && real.splash()) return; noise(0.7, 600, 0.4, 0.6, 0.05); },
+  clap: (n, kind) => { if (real && real.clap(kind)) return; for (let i = 0; i < n; i++) setTimeout(() => noise(0.04, 1500 + Math.random() * 800, 1, 0.25, 0), Math.random() * 1600); },
+  cup: () => { if (real && real.cup()) return; if (!actx || actx.state !== 'running') return; [0, 0.1, 0.17].forEach((w, i) => modal(actx, actx.destination, [[1250 - i * 90, 1, 0.08], [2900, 0.4, 0.05]], { gain: 0.25 - i * 0.06, when: w })); bell(actx, actx.destination, 1568, { when: 0.35, gain: 0.07, ratio: 4, depth: 1.2 }); }
 };
 
 // ---------- 연결 ----------
 const socket = io({ transports: ['websocket', 'polling'], tryAllTransports: true });
+settings.attach(socket);
 let players = [];
 socket.on('connect', () => {
   let saved = null;
@@ -117,7 +137,7 @@ socket.on('cancel', (d) => {
   game.activity = performance.now();
   view.resetSwing();
   view.setAim(game.aim, pinDist());
-  prompt(`${playerInfo(d.slot).name} 차례`, '폰에서 방향을 맞추고 어드레스를 눌러요');
+  prompt(`${playerInfo(d.slot).name} 차례`, '');
   pushState();
 });
 socket.on('aim', (d) => {
@@ -147,12 +167,13 @@ socket.on('address', (d) => {
   game.sub = 'swing';
   game.activity = performance.now();
   pushState();
-  prompt('스윙하세요', '폰을 휘두르는 그대로 클럽이 움직여요');
+  prompt('스윙!', '');
   renderShotInfo();
 });
 socket.on('pose', (d) => {
   const follow = displayMayReceiveFollow(game.sub, game.flight, performance.now());
   if (!isTurn(d.slot) || (game.sub !== 'swing' && !follow) || !Array.isArray(d.s) || !Array.isArray(d.fc)) return;
+  game.activity = performance.now(); // 스윙 화면에서 폰이 움직이고 있으면 자리를 비운 것이 아닙니다
   view.pose(d.s, d.fc);
 });
 let lastAnalysis=null,analysisPanel=null;
@@ -224,13 +245,13 @@ function pushState() {
     event: 'game_state',
     data: {
       phase: game.phase, sub: game.sub, turn: game.phase === 'playing' ? game.order[game.turn] : null,
-      round: game.round, rounds: ROUNDS, pin: game.phase === 'playing' ? pinDist() : null, scores, shot: game.shot, lastSlot: game.lastSlot, club: game.club
+      round: game.round, rounds: ROUNDS, pin: game.phase === 'playing' ? pinDist() : null, scores, shot: game.shot, lastSlot: game.lastSlot, club: game.club, difficulty
     }
   });
 }
 
 function newWind() {
-  const speed = Math.random() * 4.5; // m/s
+  const speed = Math.random() * WIND_MAX[difficulty]; // m/s, 난이도가 낮을수록 약한 바람
   const dir = Math.random() * Math.PI * 2;
   game.wind = { x: Math.sin(dir) * speed, z: Math.cos(dir) * speed, speed, dir };
   const kmh = Math.round(speed * 3.6);
@@ -243,11 +264,12 @@ function startGame() {
   if (game.phase === 'playing') return;
   const connected = players.filter((p) => p.connected).map((p) => p.slot);
   if (!connected.length) {
-    callout('폰을 먼저 연결해 주세요', 'QR을 찍고 시작하기를 누르면 자리가 생겨요', 'miss', 2200);
+    callout('폰을 먼저 연결해 주세요', '', 'miss', 2200);
     return;
   }
   audio();
   if(hole!==selectedCourse.holes[0]){hole=selectedCourse.holes[0];view.setHole(hole,selectedCourse,difficulty);}
+  settings.lock(true);
   game.phase = 'playing';
   game.order = [];
   game.scores = {};
@@ -288,8 +310,8 @@ function beginTurn() {
   $('bRound').textContent = `${selectedCourse.name} ${game.round}홀 · PAR ${hole.par} · ${score.strokes+1}타`;
   $('bPin').textContent = pinDist();
   renderShotInfo();
-  callout(p.name, '폰에서 방향과 클럽을 고르고 어드레스를 눌러요', 'player', 2200);
-  prompt(`${p.name} 차례`, '폰에서 방향을 맞추고 어드레스를 눌러요');
+  callout(p.name, '', 'player', 2200);
+  prompt(`${p.name} 차례`, '');
   cutNext = true;
   pushState();
   renderBoard();
@@ -306,6 +328,7 @@ function nextTurn() {
 }
 
 function backToLobby(why) {
+  settings.lock(false);
   game.phase = 'lobby';
   game.sub = 'idle';
   game.order = [];
@@ -338,7 +361,7 @@ function watchTurn(now) {
   if (!p || !p.connected) {
     if (!game.awaySince) {
       game.awaySince = now;
-      prompt(`${slot}P 연결을 기다려요`, '15초 안에 돌아오지 않으면 다음 사람 차례로 넘어가요');
+      prompt(`${slot}P 연결을 기다려요`, '');
     }
     if (now - game.awaySince > 15000) {
       skipHole(game.scores[slot], hole.par);
@@ -349,16 +372,17 @@ function watchTurn(now) {
   }
   if (game.awaySince) {
     game.awaySince = null;
-    prompt(`${playerInfo(slot).name} 차례`, '폰에서 방향을 맞추고 어드레스를 눌러요');
+    prompt(`${playerInfo(slot).name} 차례`, '');
   }
-  if (now - game.activity > 75000) {
+  if (now - game.activity > 120000) {
     skipHole(game.scores[slot], hole.par);
-    callout(`${slot}P 건너뜀`, '오래 기다려서 다음 차례로 넘어가요', 'miss', 1800);
+    callout(`${slot}P 건너뜀`, '', 'miss', 1800);
     nextTurn();
   }
 }
 
 function endGame() {
+  settings.lock(false);
   game.phase = 'over';
   game.sub = 'idle';
   $('hud').classList.add('hidden');
@@ -382,7 +406,7 @@ function endGame() {
     box.appendChild(el);
   });
   $('over').classList.remove('hidden');
-  sfx.clap(30);
+  sfx.clap(30, 'end');
   pushState();
 }
 
@@ -508,23 +532,49 @@ function simulate(shot) {
   return { pts, carry: carry || Math.hypot(x-origin[0], z-origin[1]), landedOn, rest: [x, z], surface: surface(x, z), clubSpeed, ballSpeed, launch, face, path, holed };
 }
 
+// 퍼터의 이상적인 세기(도/초): 핀까지 거리 + 40cm 를 평지에서 굴러가는 속도(simulate 의 퍼터 공식을 거꾸로 계산)
+function idealPuttSwing() {
+  const pos = game.scores[game.order[game.turn]].pos;
+  const ball = Math.sqrt(2 * 0.549 * (hole.distToPin(...pos) + 0.4));
+  return ball / 1.2 / (RD * 0.9);
+}
+// 난이도 보정: 약한 스윙도 어느 정도 나가고, 손목 흔들림(페이스·궤도)은 작게 반영합니다. hard 는 예전 그대로.
+function assistShot(d, club) {
+  const putter = club === 'pt';
+  const level = difficulty;
+  const auto = Boolean(d.auto); // 폰의 '탭으로 치기': 보통 세기로 똑바로
+  const nominal = putter ? idealPuttSwing() : nominalSwing(CLUBS[club]);
+  let speed = auto ? nominal : Math.max(0, Number(d.speed) || 0);
+  if (!auto) speed = putter ? shapePutterSpeed(speed, nominal, level) : shapePower(speed, nominal, level);
+  const face = auto ? 0 : Number(d.face) || 0;
+  const path = auto ? 0 : Number(d.path) || 0;
+  // 시뮬레이터는 0.8·0.2·0.16 계수를 쓰므로 배율만 미리 곱해 넘기고, 화면에 보이는 값은 원래 값으로 되돌립니다.
+  return { shown: { face, path }, speed, face: shapeAngle(face, level), path: shapeAngle(path, level) };
+}
+
 function hitShot(d) {
+  const club = CLUBS[d.club] ? d.club : game.club;
+  const a = assistShot(d, club);
   const shot = {
-    speed: Math.max(0, Number(d.speed) || 0),
-    face: Number(d.face) || 0,
-    path: Number(d.path) || 0,
+    speed: a.speed,
+    face: a.face,
+    path: a.path,
     miss: Math.max(0, Number(d.miss) || 0),
-    club: CLUBS[d.club] ? d.club : game.club,
+    club,
     aim: game.aim
   };
   const r = simulate(shot);
+  r.face = a.shown.face; // 칩에는 실제로 잰 페이스·궤도를 보여 줍니다
+  r.path = a.shown.path;
   game.sub = 'flight';
   game.flight = { ...r, t0: performance.now(), shot, done: false };
   pushState();
   const p = playerInfo(game.order[game.turn]);
   view.setTrail(r.pts, p.color);
-  sfx.strike(Math.min(1, r.clubSpeed / 40));
-  setTimeout(sfx.whoosh, 80);
+  // 휘두르는 소리 → 타구 순서의 녹음. 못 받은 쪽만 예전 합성음으로 대신합니다.
+  const played = real ? real.shot(Math.min(1, r.clubSpeed / 40), (CLUBS[club] || {}).kind) : {};
+  if (!played.strike) sfx.strike(Math.min(1, r.clubSpeed / 40));
+  if (!played.whoosh) setTimeout(sfx.whoosh, 80);
   prompt('', '');
   // 타구 정보
   const kmh = (v) => `${Math.round(v * 3.6)}`;
@@ -559,7 +609,7 @@ function finishShot(now) {
     kind = 'hr';
     counted = 0;
     sfx.cup();
-    sfx.clap(60);
+    sfx.clap(60, sc.strokes === 1 ? 'hio' : 'hole');
   } else if (f.surface === 'water') {
     sc.strokes++;sc.total++;
     title = '물에 빠졌어요 · 1벌타';
@@ -575,11 +625,12 @@ function finishShot(now) {
     if (f.surface === 'green') {
       title = dist < 3 ? 'NICE SHOT' : '온 그린';
       kind = dist < 3 ? 'hr' : '';
-      sfx.clap(dist < 3 ? 40 : 18);
+      if (real) real.land('green'); // 그린에 떨어져 튀는 소리(녹음만 있고 합성음은 없음)
+      sfx.clap(dist < 3 ? 40 : 18, dist < 3 ? 'near' : 'green');
     } else {
       title = { fringe: '그린 프린지', fairway: '페어웨이', rough: '러프', bunker: '벙커', trees: '숲', tee: '티 근처' }[f.surface] || '';
       kind = '';
-      sfx.land();
+      sfx.land(f.surface);
     }
     note = `핀까지 ${dist.toFixed(1)}m`;
   }
@@ -712,4 +763,4 @@ function debugSwing(phiDeg) {
   for (let a = 0; Math.abs(a) <= Math.abs(phiDeg); a += step) view.pose(at(a), [0, 0, 1]);
   game.sub = 'swing';
 }
-window.__golf = { game, simulate, view, debugSwing, get hole(){ return hole; } };
+window.__golf = { game, simulate, view, debugSwing, get real(){ return real; }, get hole(){ return hole; } };

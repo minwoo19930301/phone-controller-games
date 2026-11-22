@@ -3,10 +3,12 @@
 import { createScene } from './scene.js';
 import { COURT, clamp, fwdOf, rightOf, simulate, sampleFlight, flightEnd, aimShot, planContact, inCourt, inBox } from './physics.js';
 import { athletePose, blendPose, contactOffset, SERVE_TOSS_LEAD } from './motion.js';
-import { sfx, audio, crowd } from './sfx.js';
+import { sfx, audio, crowd, bed } from './sfx.js';
 import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
 import { createTutorialBoard } from '/common/tutorial-board.js';
 import { sendHaptic } from '/common/haptics.js';
+import '/tennis/i18n.js';
+import { t as T, mountSwitcher } from '/common/i18n.js';
 
 const GAMES_TO_WIN = 2; // 2게임 선승(게임 안에서는 15·30·40·듀스·어드밴티지)
 const WINDOW = 0.14; // 어려움(예전 그대로)의 판정 창(경기 초). CPU 타구 계산에도 씁니다.
@@ -18,11 +20,12 @@ const OVER_RAW = 1.25; // 폰 raw 힘이 이 값을 넘으면 너무 세게 친 
 //   cpu: CPU 가 놓치는 확률(miss + missP·압박^missE), 타구 품질 q, 세기, 조준 폭
 const LEVEL = {
   easy: {
-    window: 0.30, perfect: 0.07, good: 0.16, squeeze: 0.15, pressure: 0.45, retoss: 3, lateSnap: 0.04, floor: 0.45,
+    window: 0.45, perfect: 0.10, good: 0.22, squeeze: 0, pressure: 0.3, retoss: 4, lateSnap: 0.08, floor: 0.55,
     cpu: { miss: 0.11, missP: 0.6, missE: 1.4, q: [0.38, 0.4], serve: [0.3, 0.35], power: [0.25, 0.4], aim: 0.5 }
   },
+  // 보통 = 예전 쉬움과 비슷하게(창 ±0.3초)
   normal: {
-    window: 0.20, perfect: 0.05, good: 0.11, squeeze: 0.3, pressure: 0.7, retoss: 2, lateSnap: 0.07, floor: 0.3,
+    window: 0.30, perfect: 0.07, good: 0.16, squeeze: 0.15, pressure: 0.45, retoss: 3, lateSnap: 0.05, floor: 0.45,
     cpu: { miss: 0.06, missP: 0.55, missE: 1.5, q: [0.45, 0.42], serve: [0.38, 0.45], power: [0.3, 0.5], aim: 0.75 }
   },
   hard: {
@@ -31,12 +34,12 @@ const LEVEL = {
   }
 };
 // 큰 화면이 정하고 기억하는 옵션(종목별 localStorage). 폰 대기 화면에도 같은 알약·질문 카드가 뜹니다.
-// 슬로우는 처음엔 비어 있어서 먼저 물어봅니다(?slow=on|off, 예전 ?noslow 도 됨).
+// 슬로우는 기본 켜짐이고 묻지 않습니다(?slow=on|off, 예전 ?noslow 도 됨).
 let booted = false; // 아래 코드가 다 준비되기 전에 D·L 키가 눌려도 그리지 않습니다
 const settings = createSettings({
   game: 'tennis',
   fields: [
-    fields.difficulty({ hints: { easy: '타이밍 ±0.3초 · 거의 다 들어가요', normal: '타이밍 ±0.2초 · 조준은 살짝만', hard: '예전 그대로 · 세게 치면 홈런' } }),
+    fields.difficulty({ hints: { easy: '±0.45초 · 알아서 들어가요', normal: '±0.3초 · 조준은 살짝만', hard: '±0.14초 · 세게 치면 홈런' } }),
     fields.slow()
   ],
   onChange: () => {
@@ -58,7 +61,8 @@ const SLOW_TAU = 0.05; // 슬로우로 들어갈 때 배율이 내려가는 시�
 const PHONE_SWING_MS = 110;
 const LATE_SLACK_MS = 90; // 폰 스윙 도착을 기다릴 때 더하는 여유(전달 시간 흔들림)
 // 폰의 '지금!'을 타점보다 이만큼(실제 ms) 먼저 띄웁니다. 보고 휘두르기까지 걸리는 반응 시간입니다(실폰 검증 전).
-const NOW_LEAD_MS = 180;
+const NOW_LEAD_MS = 180; // 어려움
+const NOW_LEAD_EASY_MS = 320; // 쉬움·보통은 '지금!'을 더 일찍 띄웁니다
 const TOSS_VY = 4.95;
 const SLOT_INFO = {
   1: { name: '1P', color: '#ff5a5f' },
@@ -78,6 +82,10 @@ const num = (v, d) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Nu
 // 시계: 평소에는 performance.now(), 시험용 빨리 감기(fastForward) 때는 앞으로 당겨집니다.
 let timeShift = 0;
 const nowMs = () => performance.now() + timeShift;
+// 글자 안의 굵은 글씨·키 표시는 번역한 문장을 만든 뒤에 입힙니다(어순이 언어마다 달라서 조각내지 않습니다).
+const bold = (s) => `\u0001${s}\u0002`;
+const kbd = (s) => `\u0003${s}\u0004`;
+const richT = (tpl, vars) => esc(T(tpl, vars)).replace(/\u0001/g, '<b>').replace(/\u0002/g, '</b>').replace(/\u0003/g, '<kbd>').replace(/\u0004/g, '</kbd>');
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 await Promise.race([
@@ -150,6 +158,9 @@ socket.on('start_game', () => startGame());
 settings.attach(socket);
 settings.mount($('setBox'));
 settings.mount($('setBoxOver'), { compact: true });
+mountSwitcher($('langBox'), { reload: true, compact: true });
+// 결과 화면 안내(어순이 언어마다 달라 한 문장으로 만듭니다)
+$('overHint').innerHTML = richT('폰에서 모두 {b}를 누르면 다음 판 · 폰이 없을 때는 {k}', { b: bold(T('다시 하기')), k: kbd('Enter') });
 const board = createTutorialBoard({ mount: $('tutBoard') });
 board.attach(socket);
 // 연습 현황 판은 하나를 대기실·결과 화면 사이로 옮겨 씁니다(경기 중에는 숨김).
@@ -307,7 +318,7 @@ function prepareServe(m, first, quiet) {
   if (!m.demo && !quiet) {
     const sv = m.server;
     const who = sv.kind === 'cpu' ? 'CPU' : sv.name;
-    prompt(`${who} ${m.serveNo === 2 ? '세컨드 서브' : '서브'}`, m.box === 'deuce' ? '듀스 코트(오른쪽)에서' : '애드 코트(왼쪽)에서');
+    prompt(T(m.serveNo === 2 ? '{who} 세컨드 서브' : '{who} 서브', { who }), T(m.box === 'deuce' ? '듀스 코트(오른쪽)에서' : '애드 코트(왼쪽)에서'));
     if (sv.kind === 'human' && !sv.bot) send('cue', { kind: 'serve', stage: 'ready', second: m.serveNo === 2 }, sv.slot);
     pushState();
   }
@@ -391,7 +402,7 @@ function startToss(m) {
   if (p.cpuSwing) sv.stroke.spin = p.cpuSwing.spin;
   // 서브 안내는 서브 준비 동안만 띄웁니다. 화면 아래 가운데라 토스 슬로우 동안 가까운 쪽 서버의 다리를 가립니다.
   if (!m.demo) prompt('', '');
-  if (!m.demo && sv.kind === 'human') hudNote(p.assisted ? '이번 서브는 자동으로 넣어 줄게요' : m.retoss ? '토스를 다시 올려요' : '', 2200);
+  if (!m.demo && sv.kind === 'human') hudNote(T(p.assisted ? '이번 서브는 자동으로 넣어 줄게요' : m.retoss ? '토스를 다시 올려요' : ''), 2200);
 }
 
 // ---------- 타점 계획 ----------
@@ -415,7 +426,8 @@ function setPlan(m, pl, plan, kind, pressure = 0) {
   };
   if (p.bot) {
     const r = Math.random();
-    const err = r < 0.07 ? (Math.random() < 0.5 ? -1 : 1) * (0.15 + Math.random() * 0.08) : clamp(gauss() * 0.05, -0.14, 0.14);
+    // 시험용 봇은 가끔(7%) 판정 창 밖에서 칩니다. 창이 넓은 쉬움에서도 실수가 나와야 경기가 끝납니다.
+    const err = r < 0.07 ? (Math.random() < 0.5 ? -1 : 1) * (p.window * 1.15 + 0.03 + Math.random() * 0.05) : clamp(gauss() * 0.05, -0.14, 0.14);
     p.botAt = plan.t + err;
     p.botSwing = randomSwing(kind === 'serve');
   }
@@ -514,7 +526,7 @@ function updatePlan(m, p, now) {
   }
   // 폰의 '지금!': 타점까지 실제로 남은 시간이 반응 시간 + 화면→서버→폰 전달 시간 안으로 들어오면 보냅니다.
   if (p.human && p.cued && !p.nowCued) {
-    const lead = NOW_LEAD_MS + displayRtt() / 2 + num(p.pl.rtt, 80) / 2;
+    const lead = (m.diff === 'hard' ? NOW_LEAD_MS : NOW_LEAD_EASY_MS) + displayRtt() / 2 + num(p.pl.rtt, 80) / 2;
     if (realMsUntil(m, p.t - gt) <= lead) {
       p.nowCued = true;
       send('cue', { kind: p.kind === 'serve' ? 'serve' : 'incoming', stage: 'now', hand: p.hand }, p.pl.slot);
@@ -565,7 +577,8 @@ function readSwing(d, m) {
     spin: d.spin === 'top' || d.spin === 'slice' ? d.spin : 'none',
     spinAmt: clamp(num(d.spinAmt, 0.6), 0, 1),
     aim: clamp(num(d.aim, 0), -45, 45),
-    hand: d.hand === 'back' ? 'back' : d.hand === 'fore' ? 'fore' : null
+    // 쉬움·보통은 손을 화면이 알아서 정합니다(폰이 뒤집혀 있는지 보지 않음). 어려움만 폰이 정한 손을 씁니다.
+    hand: m && m.diff !== 'hard' ? null : d.hand === 'back' ? 'back' : d.hand === 'fore' ? 'fore' : null
   };
 }
 function onSwing(d, local) {
@@ -587,7 +600,7 @@ function onSwing(d, local) {
     practiceSwing(m, pl, sw);
     return;
   }
-  const err = G - p.t;
+  let err = G - p.t;
   // 슬로우가 걸리기 훨씬 전의 스윙은 연습 스윙으로 봅니다.
   if (err < -(SLOW_LEAD + 0.12)) {
     practiceSwing(m, pl, sw);
@@ -595,9 +608,15 @@ function onSwing(d, local) {
   }
   // 창보다 이른 스윙(라켓을 뒤로 빼는 테이크백일 때가 많음)은 판정하지 않고 계속 기다립니다.
   // 창이 닫힐 때까지 다른 스윙이 없으면 그때 '빨라요'로 알려 줍니다.
+  // 쉬움·보통은 이른 스윙도 받아 줍니다: 창 맨 앞에서 친 것으로 보고 타점에 맞춰 칩니다(휘두르는 시점을 몰라도 공이 맞음).
+  let earlySnap = false;
   if (err < -p.window) {
-    p.early = true;
-    return;
+    if (m.diff === 'hard') {
+      p.early = true;
+      return;
+    }
+    err = -p.window;
+    earlySnap = true;
   }
   // 창 안에서 먼저 받은 스윙이 있으면, 타점에 더 가깝고 힘이 크게 모자라지 않은 스윙으로만 바꿉니다(테이크백 → 앞스윙).
   // 폰 스윙은 타점이 지나도 도착 시간만큼 확정을 미루므로(updatePlan), 그 사이 도착한 앞스윙으로도 바꿉니다.
@@ -606,7 +625,7 @@ function onSwing(d, local) {
   const type = p.kind === 'serve' ? 'serve' : sw.hand || p.hand;
   sw.hand = type === 'serve' ? 'fore' : type;
   if (Math.abs(err) <= p.window) {
-    p.swing = { ...sw, err, q: 1 - Math.abs(err) / p.window, local: Boolean(local) };
+    p.swing = { ...sw, err, q: Math.max(earlySnap ? 0.3 : 0, 1 - Math.abs(err) / p.window), local: Boolean(local) };
     if (type !== 'serve' && type !== p.hand) p.hand = type; // 폰이 정한 손으로(몸이 반대쪽으로 빠르게 비킵니다)
     const late = gt >= p.t;
     const lead = type === 'serve' ? 0.12 : 0.22;
@@ -647,8 +666,8 @@ function onMiss(m, p, why) {
   const now = nowMs();
   if (!m.demo && pl.kind === 'human') {
     const t = why === 'early' ? '빨라요' : why === 'late' ? '늦어요' : '';
-    if (p.kind === 'serve') hitPop(pl, why === 'none' ? '토스 놓침' : '헛스윙', why === 'none' ? '다시 올려요' : t, 'miss');
-    else hitPop(pl, why === 'none' ? '놓쳤어요' : '헛스윙', t, 'miss');
+    if (p.kind === 'serve') hitPop(pl, T(why === 'none' ? '토스 놓침' : '헛스윙'), T(why === 'none' ? '다시 올려요' : t), 'miss');
+    else hitPop(pl, T(why === 'none' ? '놓쳤어요' : '헛스윙'), T(t), 'miss');
     if (p.human) send('result', { text: why === 'none' ? (p.kind === 'serve' ? '토스를 놓쳤어요' : '놓쳤어요') : `헛스윙 · ${t}`, good: false }, pl.slot);
     sfx.whiff();
   }
@@ -730,20 +749,20 @@ function doHit(m, pl, sw, th, p) {
     else sfx.hit(sw.q, slow, sw.power);
     const kmh = Math.round(shot.speed * 3.6);
     const spinName = SPIN_NAME[shot.kind] || '';
-    showSpeed(serve ? `${pl.name} · ${spinName}` : `${pl.name} · ${HAND_NAME[sw.hand]} ${spinName}`, kmh, pl.color);
+    showSpeed(serve ? `${pl.name} · ${T(spinName)}` : `${pl.name} · ${T(HAND_NAME[sw.hand])} ${T(spinName)}`, kmh, pl.color);
   }
   if (pl.kind === 'human' && !m.demo && p.assisted) {
-    hitPop(pl, '자동 서브', '토스를 여러 번 놓쳐서 넣어 줬어요', 'good');
-    if (!pl.bot) send('result', { text: '자동 서브 · 다음엔 토스가 내려올 때 휘둘러요', good: true, kmh: Math.round(shot.speed * 3.6) }, pl.slot);
+    hitPop(pl, T('자동 서브'), T('넣어 줬어요'), 'good');
+    if (!pl.bot) send('result', { text: '자동 서브', good: true, kmh: Math.round(shot.speed * 3.6) }, pl.slot);
   } else if (pl.kind === 'human' && !m.demo && !isAuto(pl)) {
     const lv = m.lv;
     const e = Math.abs(sw.err);
-    const qLabel = e <= lv.perfect ? 'PERFECT' : e <= lv.good ? 'GOOD' : sw.err < 0 ? '빨라요' : '늦어요';
+    const qLabel = e <= lv.perfect ? 'PERFECT' : e <= lv.good ? 'GOOD' : sw.err < 0 ? '빨라요' : '늦어요'; // 한국어 원문(폰으로 보낼 때 폰이 자기 언어로 바꿉니다)
     if (e <= lv.perfect) pl.stats.perfect += 1;
     const label = serve ? SPIN_NAME[shot.kind] : `${HAND_NAME[sw.hand]} ${shot.kind === 'top' ? '탑스핀!' : shot.kind === 'slice' ? '슬라이스' : '플랫'}`;
     const cls = e <= lv.perfect ? 'perfect' : e <= lv.good ? 'good' : 'meh';
-    if (sw.over) hitPop(pl, '홈런!', '너무 세요', 'miss');
-    else hitPop(pl, qLabel, label, `${cls} ${shot.kind}`);
+    if (sw.over) hitPop(pl, T('홈런!'), T('너무 세요'), 'miss');
+    else hitPop(pl, T(qLabel), T(label), `${cls} ${shot.kind}`);
     // 쉬움·보통은 타이밍이 조금 어긋나도 공이 들어가면 잘 친 것으로 알려 줍니다.
     const good = !sw.over && (e <= lv.good || (m.diff !== 'hard' && shot.outcome === 'in'));
     if (!pl.bot) {
@@ -751,11 +770,6 @@ function doHit(m, pl, sw, th, p) {
       // 맞힌 폰을 진동(폰은 스윙을 잡자마자 가볍게 한 번 울렸고, 이건 공에 맞았다는 확인)
       sendHaptic(socket, pl.slot, e <= lv.perfect ? 'strong' : 'hit', sw.over ? 1 : 0.6 + 0.4 * clamp(sw.q, 0, 1));
     }
-  }
-  // 받는 쪽에 들어오는 스핀 예고
-  const rp = m.plan && m.plan.pl;
-  if (rp && !m.demo && rp.kind === 'human' && (shot.kind === 'top' || shot.kind === 'slice' || shot.kind === 'kick')) {
-    hudNote(`${rp.name} · ${shot.kind === 'slice' ? '낮게 깔리는 슬라이스가 와요' : '높이 튀는 탑스핀이 와요'}`, 1100);
   }
 }
 
@@ -826,7 +840,7 @@ function fault(m, why) {
   if (m.serveNo === 1) {
     if (!m.demo) {
       sfx.call('fault');
-      call('폴트', { net: '네트', long: '길어요', wide: '옆으로 나갔어요', miss: '토스 실패' }[why] || '', 'miss', 1500);
+      call(T('폴트'), T({ net: '네트', long: '길어요', wide: '옆으로 나갔어요', miss: '토스 실패' }[why] || ''), 'miss', 1500);
       if (sv.kind === 'human' && !sv.bot) send('result', { text: '폴트 · 세컨드 서브', good: false }, sv.slot);
     }
     pause(m, 1500, () => {
@@ -841,7 +855,7 @@ function fault(m, why) {
 function letServe(m) {
   if (!m.demo) {
     sfx.call('let');
-    call('렛', '네트에 스쳤어요 · 다시 서브', 'miss', 1400);
+    call(T('렛'), T('네트에 스쳤어요 · 다시 서브'), 'miss', 1400);
   }
   pause(m, 1500, () => prepareServe(m));
 }
@@ -908,10 +922,11 @@ function point(m, team, why) {
   if (why === 'out') sfx.call('out');
   const humanWon = m.teams[team].players.some((p) => p.kind === 'human');
   const labels = pointLabels(m.points[0], m.points[1]);
-  const big = why === 'ace' ? '에이스!' : why === 'double' ? '더블 폴트' : why === 'out' ? '아웃' : why === 'net' ? '네트' : '위너!';
+  const big = T(why === 'ace' ? '에이스!' : why === 'double' ? '더블 폴트' : why === 'out' ? '아웃' : why === 'net' ? '네트' : '위너!');
+  const tn = teamName(m, team);
   const sub = gameOver
-    ? (m.winner != null ? `${teamName(m, team)} 승리` : `${teamName(m, team)} 게임 · ${m.games[0]} : ${m.games[1]}`)
-    : `${teamName(m, team)} 득점 · ${labels[0]} - ${labels[1]}`;
+    ? (m.winner != null ? T('{team} 승리', { team: tn }) : T('{team} 게임 · {a} : {b}', { team: tn, a: m.games[0], b: m.games[1] }))
+    : T('{team} 득점 · {a} - {b}', { team: tn, a: labels[0], b: labels[1] });
   call(gameOver ? (m.winner != null ? 'GAME, SET' : 'GAME') : big, gameOver ? `${big} · ${sub}` : sub,
     gameOver ? 'game' : why === 'ace' || why === 'winner' ? 'win' : 'miss', 2100, m.teams[team].players[0].color);
   for (const t of [0, 1]) {
@@ -962,7 +977,7 @@ function changeEnds(m) {
   m.swapped = false;
   if (!m.demo) {
     sfx.change();
-    call('코트 체인지', '양쪽이 자리를 바꿔요', 'game', 2200);
+    call(T('코트 체인지'), T('양쪽이 자리를 바꿔요'), 'game', 2200);
     $('fade').classList.add('on');
     setTimeout(() => $('fade').classList.remove('on'), 1500);
   }
@@ -988,9 +1003,10 @@ function finishMatch(m) {
     return;
   }
   const w = m.winner;
-  call('GAME, SET, MATCH', `${teamName(m, w)} 승리 · ${m.games[w]} : ${m.games[1 - w]}`, 'game', 3200, m.teams[w].players[0].color);
+  call('GAME, SET, MATCH', T('{team} 승리 · {a} : {b}', { team: teamName(m, w), a: m.games[w], b: m.games[1 - w] }), 'game', 3200, m.teams[w].players[0].color);
   if (m.teams[w].players.some((p) => p.kind === 'human')) sfx.win();
   sfx.cheer(true);
+  bed(false); // 경기가 끝나면 관중 바탕 소리를 멈춥니다
   game.overAt = nowMs() + 3600;
   pushState();
 }
@@ -1083,7 +1099,6 @@ function onCalibrate(d) {
   if (!SLOT_INFO[slot]) return;
   delete game.poses[slot];
   game.racket.add(slot);
-  if (game.phase === 'playing') hudNote(`${slot}P 라켓 자세 맞춤`, 1400);
   renderLobby();
 }
 
@@ -1102,17 +1117,13 @@ function startGame() {
   if (game.phase === 'playing') return;
   const list = lobbyPlayers().filter((p) => p.connected);
   if (!list.length) {
-    lobbyMessage('폰을 먼저 연결해 주세요. QR을 찍고 시작하기를 누르면 자리가 생겨요.');
-    return;
-  }
-  // 슬로우 모드를 아직 안 정했으면 시작하지 않고 질문 카드를 흔듭니다(폰의 준비도 그때까지 막혀 있음).
-  if (!settings.requireAnswered()) {
-    lobbyMessage('슬로우 모드를 먼저 골라 주세요. 폰이나 이 화면에서 켜기·끄기를 누르면 돼요.');
+    lobbyMessage(T('QR을 찍고 폰을 연결해 주세요'));
     return;
   }
   settings.lock(true);
   board.hide(true);
   audio();
+  bed(true);
   crowd(0.035, 1.5);
   const m = newMatch(list, false);
   game.match = m;
@@ -1128,17 +1139,18 @@ function startGame() {
   $('hud').classList.remove('hidden');
   $('join').classList.remove('hidden');
   const bd = $('bugDiff');
-  bd.textContent = `${DIFF_LABEL[m.diff]}${slowOn() ? ' · 슬로우' : ''}`;
+  bd.textContent = `${T(DIFF_LABEL[m.diff])}${slowOn() ? ` · ${T('슬로우')}` : ''}`;
   bd.dataset.lv = m.diff;
   renderBug(true);
-  call('TENNIS', `${teamName(m, 0)} 대 ${teamName(m, 1)} · ${GAMES_TO_WIN}게임 선승 · ${DIFF_LABEL[m.diff]}${slowOn() ? ' · 슬로우' : ''}`, 'game', 2300, m.teams[0].players[0].color);
-  sfx.win();
+  call('TENNIS', `${T('{a} 대 {b}', { a: teamName(m, 0), b: teamName(m, 1) })} · ${T('{n}게임 선승', { n: GAMES_TO_WIN })} · ${T(DIFF_LABEL[m.diff])}${slowOn() ? ` · ${T('슬로우')}` : ''}`, 'game', 2300, m.teams[0].players[0].color);
+  sfx.win(0.5); // 경기 시작은 짧게 작은 팡파르
   prepareServe(m, true);
   pushState();
 }
 
 function endGame() {
   const m = game.match;
+  bed(false);
   // 경기 도중에 불려도(시험용 __tennis.endGame) 남은 타점·토스가 결과 화면 위에 판정 글자를 띄우지 않게 멈춥니다.
   if (m.state !== 'over') {
     m.state = 'over';
@@ -1163,12 +1175,12 @@ function endGame() {
     e.style.animationDelay = `${0.15 + i * 0.12}s`;
     const s = r.pl.stats;
     const serve = s.topServe ? `${Math.round(s.topServe * 3.6)}` : '-';
-    e.innerHTML = `<span class="rank">${i + 1}</span><span class="who">${esc(r.pl.name)}${r.mates.length ? `<small>with ${esc(r.mates.join('·'))}</small>` : ''}</span>` +
-      `<span class="res">${r.win ? '승' : '패'}</span>` +
-      `<span class="num"><b>${r.me} : ${r.op}</b><span>vs ${esc(r.opp)}</span></span>` +
-      `<span class="num"><b>${s.winners}</b><span>위너${s.aces ? ` · 에이스 ${s.aces}` : ''}</span></span>` +
+    e.innerHTML = `<span class="rank">${i + 1}</span><span class="who">${esc(r.pl.name)}${r.mates.length ? `<small>${esc(T('with {names}', { names: r.mates.join('·') }))}</small>` : ''}</span>` +
+      `<span class="res">${T(r.win ? '승' : '패')}</span>` +
+      `<span class="num"><b>${r.me} : ${r.op}</b><span>${esc(T('vs {opp}', { opp: r.opp }))}</span></span>` +
+      `<span class="num"><b>${s.winners}</b><span>${T('위너')}${s.aces ? ` · ${T('에이스 {n}', { n: s.aces })}` : ''}</span></span>` +
       `<span class="num"><b>${s.perfect}</b><span>PERFECT</span></span>` +
-      `<span class="num"><b>${serve}</b><span>최고 서브 km/h</span></span>`;
+      `<span class="num"><b>${serve}</b><span>${T('최고 서브 km/h')}</span></span>`;
     box.appendChild(e);
   });
   $('hud').classList.add('hidden');
@@ -1183,6 +1195,7 @@ function endGame() {
 }
 
 function backToLobby(why) {
+  bed(false);
   game.phase = 'lobby';
   game.match = null;
   game.humans = [];
@@ -1257,30 +1270,28 @@ function renderLobby() {
     e.className = 'slot' + (p ? ' on' : '') + (p && !p.connected ? ' away' : '') + (ready ? ' ready' : '') + (prac ? ' prac' : '');
     if (p) {
       e.style.setProperty('--c', p.color);
-      const sub = p.bot ? 'BOT' : prac ? '연습 중' : ready ? '준비 완료 ✓' : game.racket.has(s) ? '라켓 맞춤 · 준비 전' : '준비 전';
-      e.innerHTML = `<b>${esc(p.name)}</b><small>${sub}</small>`;
+      const sub = (p.bot ? 'BOT' : T(prac ? '연습 중' : ready ? '준비 완료 ✓' : '준비 전')) + (p.connected ? '' : ` · ${T('연결 끊김')}`);
+      e.innerHTML = `<b>${esc(p.name)}</b><small>${esc(sub)}</small>`;
     } else {
-      e.textContent = `${s}P 비어 있음`;
+      e.textContent = T('{s}P 비어 있음', { s });
     }
     box.appendChild(e);
   }
   const conn = list.filter((p) => p.connected);
   const pairs = $('pairs');
-  if (!conn.length) pairs.textContent = '혼자면 CPU 와 단식, 둘이면 1P 대 2P 단식, 셋·넷이면 1P·3P 대 2P·4P 복식이에요.';
+  if (!conn.length) pairs.textContent = '';
   else {
     const teams = buildTeams(conn, false);
     const nm = (t) => teams[t].players.map((p) => (p.kind === 'cpu' ? 'CPU' : p.name)).join('·');
-    pairs.innerHTML = `<b>${teams[0].players.length > 1 ? '복식' : '단식'}</b> ${esc(nm(0))} <span>대</span> ${esc(nm(1))}`;
+    pairs.innerHTML = `<b>${esc(T(teams[0].players.length > 1 ? '복식' : '단식'))}</b> ${esc(T('{a} 대 {b}', { a: nm(0), b: nm(1) }))}`;
   }
   // 시작 안내: 슬로우를 아직 안 정했으면 그것부터
   const go = $('goHint');
   if (go) {
     const phones = serverPlayers.length;
     // 폰이 없을 때 Enter 는 봇 시험(?bots=N)에서만 뜻이 있습니다. 보통은 QR 로 들어오라고 안내합니다.
-    go.innerHTML = !settings.isAnswered()
-      ? '슬로우 모드를 정하면 시작할 수 있어요'
-      : phones ? '폰에서 모두 <b>준비</b>를 누르면 시작해요'
-        : BOTS ? '<kbd>Enter</kbd> 봇과 시작 · 폰 없이 시험할 때' : 'QR을 찍고 들어온 사람이 모두 <b>준비</b>를 누르면 시작해요';
+    go.innerHTML = phones ? richT('폰에서 모두 {b}를 누르면 시작해요', { b: bold(T('준비')) })
+      : BOTS ? richT('{k} 봇과 시작 · 폰 없이 시험할 때', { k: kbd('Enter') }) : richT('QR을 찍고 {b}', { b: bold(T('준비')) });
   }
 }
 let msgTimer = null;
@@ -1387,7 +1398,7 @@ function renderBug(force) {
   for (const t of [0, 1]) {
     const row = $(`row${t}`);
     const names = m.teams[t].players.map((p) =>
-      `<span class="nm${isAuto(p) && p.kind === 'human' ? ' away' : ''}" style="--pc:${p.color}"><i></i>${esc(p.name)}</span>`).join('');
+      `<span class="nm${isAuto(p) && p.kind === 'human' ? ' away' : ''}" data-tag="${esc(T('자동'))}" style="--pc:${p.color}"><i></i>${esc(p.name)}</span>`).join('');
     row.querySelector('.names').innerHTML = names;
     row.querySelector('.srv').classList.toggle('on', m.serveTeam === t && m.state !== 'over');
     row.querySelector('.g').textContent = m.games[t];
@@ -1400,11 +1411,11 @@ function renderBug(force) {
     }
     pEl.classList.toggle('ad', lab[t] === 'AD');
   }
-  $('bugStatus').textContent = st ? st.text : m.serveNo === 2 ? '세컨드 서브' : '';
+  $('bugStatus').textContent = T(st ? st.text : m.serveNo === 2 ? '세컨드 서브' : '');
   $('bugStatus').classList.toggle('on', Boolean(st) || m.serveNo === 2);
   view.setBoard({
     names: [teamName(m, 0), teamName(m, 1)], colors: [m.teams[0].players[0].color, m.teams[1].players[0].color],
-    games: m.games, points: lab, serve: m.serveTeam, status: st ? st.text : ''
+    games: m.games, points: lab, serve: m.serveTeam, status: st ? T(st.text) : ''
   });
 }
 // 슬로우 연출(0~1)
@@ -1659,7 +1670,7 @@ function frame(now, dtR, draw) {
         const H = window.innerHeight;
         ring({
           x: pr.x, y: pr.y, ball: pr.r, R: pr.r + 4 + left * H * 0.13, p: left, after: m.clock.gt > p.t, color: p.pl.color,
-          label: `${p.pl.name} ${p.kind === 'serve' ? '서브' : HAND_NAME[p.hand]}`
+          label: T('{p} {k}', { p: p.pl.name, k: p.kind === 'serve' ? '서브' : HAND_NAME[p.hand] })
         });
       } else ring(null);
     } else ring(null);
@@ -1710,7 +1721,6 @@ requestAnimationFrame(tick);
 if (AUTOSTART && BOTS > 0) {
   setTimeout(() => {
     if (serverPlayers.length) return;
-    if (!settings.isAnswered()) settings.set('slow', true);
     startGame();
   }, 1200);
 }

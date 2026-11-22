@@ -2,21 +2,22 @@
 // 한 사람 몫의 채보를 받아, 누른 시각(곡 시간, 초)을 노트에 맞춰 PERFECT/GREAT/GOOD/MISS 를 냅니다.
 // 길게 누르기(어려움)는 머리를 맞힌 뒤 끝까지 누르고 있으면 OK, 일찍 떼면 NG 입니다.
 // 모션 입력은 폰을 움직이는 데 시간이 걸려 판정 폭이 더 넓고, 쉬움·보통에서는 방향이 틀려도 박자가 맞으면 GOOD 까지 줍니다.
+// 기본 난이도는 쉬움(아주 넉넉), 보통은 예전 쉬움 정도, 어려움은 예전 그대로입니다.
 // 사람마다 손이 늘 조금 빠르거나 늦으면(폰 지연·습관) 최근 판정의 중앙값으로 기준을 천천히 옮깁니다(자동 싱크).
 
-/** 판정 폭(±초): [PERFECT, GREAT, GOOD]. 어려움이 가장 빡빡합니다. */
+/** 판정 폭(±초): [PERFECT, GREAT, GOOD]. 쉬움이 기본이라 가장 넉넉하고, 보통은 예전 쉬움 폭, 어려움은 그대로입니다. */
 export const WINDOWS = {
-  pad: { easy: [0.07, 0.125, 0.19], normal: [0.05, 0.095, 0.15], hard: [0.035, 0.07, 0.11] },
-  motion: { easy: [0.1, 0.175, 0.27], normal: [0.075, 0.135, 0.21], hard: [0.055, 0.1, 0.16] }
+  pad: { easy: [0.09, 0.16, 0.24], normal: [0.07, 0.125, 0.19], hard: [0.035, 0.07, 0.11] },
+  motion: { easy: [0.12, 0.2, 0.3], normal: [0.1, 0.175, 0.27], hard: [0.055, 0.1, 0.16] }
 };
 export const JUDGES = ['perfect', 'great', 'good', 'miss'];
 export const JUDGE_LABEL = { perfect: 'PERFECT', great: 'GREAT', good: 'GOOD', miss: 'MISS', ok: 'OK', ng: 'NG' };
 const VALUE = { perfect: 1, great: 0.7, good: 0.4, miss: 0 };
 // 체력: 맞히면 조금씩 차고 놓치면 깎입니다. 0 이 되어도 끝까지 하지만 '클리어 실패' 로 남습니다.
 const LIFE_GAIN = { perfect: 0.014, great: 0.009, good: 0.002 };
-const LIFE_MISS = { easy: 0.035, normal: 0.06, hard: 0.09 };
+const LIFE_MISS = { easy: 0.02, normal: 0.035, hard: 0.09 };
 const LIFE_NG = 0.04;
-const RELEASE_TOL = { easy: 0.3, normal: 0.2, hard: 0.13 }; // 길게 누르기 끝을 이만큼 일찍 떼도 OK
+const RELEASE_TOL = { easy: 0.3, normal: 0.3, hard: 0.13 }; // 길게 누르기 끝을 이만큼 일찍 떼도 OK
 const AUTO_SYNC_MAX = { pad: 0.07, motion: 0.13 }; // 자동 싱크로 옮기는 최대 폭(초)
 
 /** 정확도(0~1) → 등급 */
@@ -60,8 +61,8 @@ export function createJudge(opts = {}) {
     offset: 0, errs: [], early: 0, late: 0, steps: 0, judged: 0
   };
   const autoSync = opts.autoSync !== false;
-  // 방향을 봐주는 정도: 쉬움 모션은 아무 방향이나, 보통 모션은 같은 축(위↔아래, 왼↔오른)의 반대 방향까지
-  const assist = input === 'motion' ? (difficulty === 'easy' ? 'any' : difficulty === 'normal' ? 'axis' : null) : null;
+  // 방향을 봐주는 정도: 쉬움·보통 모션은 아무 방향이나(박자만 맞으면 GOOD), 어려움은 없음
+  const assist = input === 'motion' ? (difficulty === 'hard' ? null : 'any') : null;
   const axisMate = (lane) => ({ 0: 3, 3: 0, 1: 2, 2: 1 })[lane];
 
   function addLife(d) {

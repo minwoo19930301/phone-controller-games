@@ -3,10 +3,15 @@
 // 좌표는 '준비' 때 정한 기준축으로 보냅니다: r = 내 오른쪽, u = 위, f = 화면이 TV 를 보던 방향.
 // 스윙 판별: 회전 속도(rotationRate) 최고값 = 세기, 세계 좌표 가속의 위아래 성분 = 탑스핀(위)/슬라이스(아래),
 // 맞는 순간 화면이 TV 쪽이면 포핸드, 반대면 백핸드.
-// 공통 모듈: 난이도·슬로우 질문(phone-settings), 처음 하는 사람 연습(tutorial), 진동·번쩍임(haptics).
+// 공통 모듈: 난이도·슬로우(phone-settings), 원할 때만 하는 연습(tutorial), 진동·번쩍임(haptics), 센서 권한(motion).
+// 기준축(자세)은 '준비'를 누를 때와 경기가 시작될 때 알아서 잡습니다. 따로 맞추는 단계는 없고, '다시 맞추기'만 선택입니다.
 import { haptics } from '/common/haptics.js';
 import { createPhoneSettings } from '/common/phone-settings.js';
 import { createTutorial } from '/common/tutorial.js';
+import { requestMotionPermission } from '/common/motion.js';
+import { createSamples } from '/common/samples.js';
+import '/tennis/i18n.js';
+import { t as T, mountSwitcher } from '/common/i18n.js';
 
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -15,19 +20,25 @@ import { createTutorial } from '/common/tutorial.js';
   const params = new URLSearchParams(location.search);
   const ROOM = (params.get('room') || '').toUpperCase();
   const DEBUG = params.has('debug');
-  $('room').textContent = ROOM ? `방 ${ROOM}` : '';
+  $('room').textContent = ROOM ? T('방 {code}', { code: ROOM }) : '';
+  mountSwitcher($('langBox'), { reload: true, compact: true });
 
   // ---------- 조정 값 (실폰 검증 전이라 바뀔 수 있습니다) ----------
   const POSE_MS = 25; // pose 전송 간격, 약 40Hz
-  const TRIGGER_DPS = 320; // 회전 속도(도/초)가 이 값을 넘으면 스윙 시작
-  const COOLDOWN_MS = 550; // 스윙 사이 최소 간격
-  // 테이크백이 먼저 스윙으로 잡혀도 앞스윙이 막히지 않게: 그 사이 회전이 이 아래로 떨어졌으면(라켓이 멈칫)
-  // REARM_MS 만 지나도 다음 스윙을 잡습니다. 큰 화면은 창보다 이른 스윙을 판정하지 않고 더 늦은 스윙으로 바꿉니다.
-  const REARM_DPS = 200;
-  const REARM_MS = 250;
+  // 스윙 감지 값은 난이도별 표입니다(쉬움 = 살살 휘둘러도 잡힘, 어려움 = 예전 그대로).
+  //   trig: 회전 속도(도/초)가 이 값을 넘으면 스윙 시작   cool: 스윙 사이 최소 간격
+  //   rearDps/rearMs: 테이크백이 먼저 스윙으로 잡혀도 앞스윙이 막히지 않게, 회전이 rearDps 아래로 떨어졌으면 rearMs 만 지나도 다음 스윙을 잡습니다.
+  //   full: 이 회전 속도면 회전 쪽 힘이 만점   aim: 조준 반영 비율(쉬움은 화면이 알아서 넣어 줌)
+  const TH = {
+    easy: { trig: 170, cool: 300, rearDps: 110, rearMs: 120, full: 800, aim: 0 },
+    normal: { trig: 230, cool: 400, rearDps: 150, rearMs: 170, full: 1000, aim: 0.5 },
+    hard: { trig: 320, cool: 550, rearDps: 200, rearMs: 250, full: 1300, aim: 1 }
+  };
+  const th = () => TH[ps.difficulty()] || TH.easy;
+  const WEAK_MIN = 0.45; // 최고 회전 속도가 trig 의 이 비율은 넘었는데 trig 에 못 미치면 '더 크게!' 를 보여 줍니다
+  const HINT_GAP_MS = 1500; // 힌트 사이 최소 간격
   const WINDOW_MS = 110; // 시작 뒤 값을 모으는 시간
   const PRE_MS = 70; // 위아래 판별에는 시작 직전 값도 씁니다(가속은 회전보다 먼저 붙습니다)
-  const ROT_FULL_DPS = 1300; // 이 회전 속도면 회전 쪽 힘이 만점
   const ACC_FULL = 28; // 이 가속(m/s²)이면 가속 쪽 힘이 만점
   const VERT_MIN = 0.55; // 위아래 속도 변화(m/s)가 이 이상이어야 탑스핀/슬라이스
   const VERT_RATIO = 0.4; // 그리고 수평 속도 변화의 이 비율 이상이어야 '분명히' 위아래
@@ -35,7 +46,9 @@ import { createTutorial } from '/common/tutorial.js';
   const HAND_MIN = 0.25; // 화면 방향의 앞뒤 성분이 이보다 작으면 스윙 방향으로 손을 가립니다
   const AIM_MAX = 30; // 조준 각도 한계(도)
   const CUE_MS = 1900; // '지금!' 표시 유지 시간
-  const CAL_GUARD_MS = 400; // 자세를 맞춘 직후 흔들림은 스윙으로 보지 않습니다
+  const CAL_GUARD_MS = 250; // 자세를 맞춘 직후 흔들림은 스윙으로 보지 않습니다
+  const STILL_DPS = 40; // 이보다 느리게 이 시간 동안 가만히 있으면 그 자세를 기준으로 삼습니다(준비 전에 기준이 없을 때)
+  const STILL_MS = 500;
   const SENSOR_WAIT_MS = 1500; // 이 시간 안에 동작 센서 값이 없으면 버튼 모드
 
   const SPIN_NAME = { none: '플랫', top: '탑스핀', slice: '슬라이스' };
@@ -65,7 +78,7 @@ import { createTutorial } from '/common/tutorial.js';
   const ps = createPhoneSettings();
   ps.attach(socket);
   ps.mount($('setBox'));
-  ps.bindReady($('btnGo'), { hint: '슬로우 모드를 먼저 골라 주세요 · 누가 골라도 모두에게 적용돼요' });
+  ps.bindReady($('btnGo'));
   let me = null;
   let state = { phase: 'lobby' };
   let roster = [];
@@ -75,15 +88,16 @@ import { createTutorial } from '/common/tutorial.js';
   let fallback = false;
   let permDenied = false;
   let pendingCal = false;
+  let basisAuto = false; // 기준축을 알아서 잡았는지(true 면 경기 시작 때 한 번 더 잡습니다)
   let noRoomTries = 0;
   let cueHand = 'fore'; // 큰 화면이 알려 준 다음 타구 손(버튼 모드에서 씀)
   let forceBack = false;
   let readySt = null; // 서버의 모두 준비 현황 { ready, players, away, need }
-  let tutAfterCal = false; // 자세를 맞춘 다음 바로 연습(튜토리얼)으로
 
   function show(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('on', v.id === id);
-    $('btnRecal').classList.toggle('hidden', !(id === 'vPlay' && gotOri && !fallback));
+    // 경기 중 '다시 맞추기'는 어려움에서만(실수로 누르지 않게). 나머지는 대기실에서
+    $('btnRecal').classList.toggle('hidden', !(id === 'vPlay' && gotOri && !fallback && ps.difficulty() === 'hard'));
   }
   function message(t, b) {
     mode = 'msg';
@@ -97,7 +111,7 @@ import { createTutorial } from '/common/tutorial.js';
   }
   function sensorHelp() {
     message('동작 센서를 쓸 수 없어요',
-      'iPhone: Safari 를 앱 전환기에서 완전히 닫고 QR을 다시 찍은 뒤, 동작 접근을 허용해 주세요.\nAndroid: 주소창 자물쇠 → 사이트 설정 → 동작 센서를 허용해 주세요.');
+      'iPhone: Safari를 닫고 QR을 다시 찍어 허용해 주세요.\nAndroid: 주소창 자물쇠 → 동작 센서 허용');
   }
 
   // ---------- 작은 벡터·사원수 계산 ----------
@@ -220,15 +234,47 @@ import { createTutorial } from '/common/tutorial.js';
     motBuf.push({ t, dt, rot, acc, accOk: aW != null || acc > 0, aW, face: ori ? ori.face : null });
     while (motBuf.length && motBuf[0].t < t - 600) motBuf.shift();
 
-    if (rot < REARM_DPS) armed = true;
+    const T = th();
+    if (rot < T.rearDps) armed = true;
+    // 가만히 있는 순간이 이어지면 그 자세를 기준으로(준비 전이라 아직 기준이 없을 때)
+    if (!basis && ori) {
+      if (rot < STILL_DPS) {
+        if (!stillSince) stillSince = t;
+        else if (t - stillSince > STILL_MS) autoBasis();
+      } else stillSince = 0;
+    }
     if (swingWin) return;
     const gap = t - lastTrig;
-    if (rot > TRIGGER_DPS && (gap > COOLDOWN_MS || (armed && gap > REARM_MS)) && canSwing(t)) {
+    if (rot > T.trig && (gap > T.cool || (armed && gap > T.rearMs)) && canSwing(t)) {
       lastTrig = t;
       armed = false;
+      weakPeak = 0;
       swingWin = { t0: t };
       setTimeout(finishSwing, WINDOW_MS);
+    } else if (mode === 'play' && state.phase === 'playing') {
+      // 아무 반응이 없던 동작을 알려 줍니다: 너무 작게 휘둘렀거나, 직전 스윙 직후라 막혔을 때
+      if (rot > T.trig) hint('한 번씩!', t);
+      else if (rot > weakPeak) weakPeak = rot;
+      else if (rot < T.rearDps * 0.6 && weakPeak > T.trig * WEAK_MIN) {
+        weakPeak = 0;
+        hint('더 크게!', t);
+      } else if (rot < T.rearDps * 0.6) weakPeak = 0;
     }
+  }
+  let stillSince = 0;
+  let weakPeak = 0;
+  let lastHintAt = -1e9;
+  // 스윙이 안 잡혔을 때 짧은 글자 + 진동 한 번(소리 없음)
+  function hint(text, t) {
+    const now = t || performance.now();
+    if (now - lastHintAt < HINT_GAP_MS) return;
+    lastHintAt = now;
+    const e = $('hint');
+    e.textContent = text;
+    e.classList.remove('on');
+    void e.offsetWidth;
+    e.classList.add('on');
+    haptics.tick({ noFlash: true });
   }
 
   // ---------- 스윙 판별 ----------
@@ -258,11 +304,12 @@ import { createTutorial } from '/common/tutorial.js';
     let accPeak = 0;
     for (const m of all) accPeak = Math.max(accPeak, m.acc);
     const hasAcc = all.some((m) => m.accOk);
-    const rotN = clamp01((rotPeak - TRIGGER_DPS) / (ROT_FULL_DPS - TRIGGER_DPS));
+    const T = th();
+    const rotN = clamp01((rotPeak - T.trig) / (T.full - T.trig));
     const accN = clamp01(accPeak / ACC_FULL);
     const power = clamp(0.15 + 0.85 * (hasAcc ? 0.65 * rotN + 0.35 * accN : rotN), 0.1, 1);
     // 만점을 넘는 힘(너무 세게 휘두름): 회전 속도를 자르지 않고 잽니다. 1.25 를 넘으면 큰 화면에서 홈런(아웃)입니다.
-    const raw = Math.max(power, 0.15 + 0.85 * Math.max(0, (rotPeak - TRIGGER_DPS) / (ROT_FULL_DPS - TRIGGER_DPS)));
+    const raw = Math.max(power, 0.15 + 0.85 * Math.max(0, (rotPeak - T.trig) / (T.full - T.trig)));
 
     const b = basis || (ori ? makeBasis(ori.top, ori.face) : null);
 
@@ -295,9 +342,10 @@ import { createTutorial } from '/common/tutorial.js';
       // 화면이 옆이나 위를 보면(애매) 라켓이 움직인 좌우 방향으로: 오른손 포핸드는 오른쪽 → 왼쪽으로 휘두릅니다.
       else hand = vR <= 0 ? 'fore' : 'back';
       const n = hand === 'fore' ? fc : scale(fc, -1);
-      if (Math.hypot(n[0], n[2]) > 0.25) aim = clamp(Math.atan2(n[0], n[2]) / RD, -AIM_MAX, AIM_MAX);
+      if (Math.hypot(n[0], n[2]) > 0.25) aim = clamp(Math.atan2(n[0], n[2]) / RD, -AIM_MAX, AIM_MAX) * T.aim;
     }
-    const vertOk = Math.abs(vUp) >= VERT_MIN && Math.abs(vUp) >= VERT_RATIO * vH;
+    // 주 동작은 '휘두르기' 하나입니다. 스핀은 어려움에서만 폰이 가립니다(쉬움·보통은 큰 화면이 알아서).
+    const vertOk = ps.difficulty() === 'hard' && Math.abs(vUp) >= VERT_MIN && Math.abs(vUp) >= VERT_RATIO * vH;
     let spin = 'none';
     let spinAmt = 0;
     if (vertOk) {
@@ -343,14 +391,17 @@ import { createTutorial } from '/common/tutorial.js';
       orb.classList.add('hit');
       setChips([['감지', label]]);
     } else if (mode === 'wait') {
-      $('practice').textContent = `연습 스윙: ${label}`;
+      $('practice').textContent = T('연습 스윙: {label}', { label });
     }
   }
   function swingLabel(d) {
-    return `${d.hand === 'back' ? '백핸드' : '포핸드'} · ${SPIN_NAME[d.spin] || '플랫'} · 힘 ${Math.round(d.power * 100)}%`;
+    // 손·스핀은 어려움에서만 폰이 가리므로 그때만 보여 줍니다.
+    const pw = T('힘 {p}%', { p: Math.round(d.power * 100) });
+    return ps.difficulty() === 'hard' ? `${T(d.hand === 'back' ? '백핸드' : '포핸드')} · ${T(SPIN_NAME[d.spin] || '플랫')} · ${pw}` : pw;
   }
   function presetSwing(kind) {
-    const p = PRESETS[kind];
+    // 쉬움·보통은 스핀 버튼도 평범한 스윙으로(스핀은 어려움에서만)
+    const p = PRESETS[ps.difficulty() === 'hard' ? kind : 'none'];
     if (!p) return;
     const hand = forceBack ? 'back' : cueHand === 'back' ? 'back' : 'fore';
     deliverSwing({ power: p.power, ago: 0, rtt: Math.round(rtt()), spin: p.spin, spinAmt: p.spinAmt, hand, aim: 0 }, performance.now());
@@ -376,14 +427,30 @@ import { createTutorial } from '/common/tutorial.js';
 
   // ---------- 소리·진동 ----------
   let actx = null;
+  let sfx = null; // 실제 녹음 재생기(작은 세 개만 미리 받음: 타구 클릭·휘두름·똑딱). 못 받았으면 아래 합성음
   function audio() {
     if (!actx) {
       const AC = window.AudioContext || window.webkitAudioContext;
-      if (AC) actx = new AC();
+      if (AC) {
+        actx = new AC();
+        const master = actx.createGain();
+        master.gain.value = 0.9;
+        master.connect(actx.destination);
+        sfx = createSamples(actx, master);
+        sfx.preload(['ball/tennis-hit', 'swing/swoosh-light', 'ui/countdown-tick']);
+        (window.__tennisPhoneSfx ||= { played: {}, fallback: {} }).has = (n) => sfx.has(n); // 시험용
+      }
     }
-    if (actx && actx.state === 'suspended') actx.resume();
+    if (actx && actx.state === 'suspended') actx.resume().catch(() => {});
     return actx;
   }
+  // 녹음이 있으면 틀고 true, 없으면 false(→ 합성음)
+  const playSample = (name, opts) => {
+    const ok = Boolean(sfx && actx && actx.state === 'running' && sfx.play(name, opts));
+    const c = (window.__tennisPhoneSfx ||= { played: {}, fallback: {} })[ok ? 'played' : 'fallback']; // 시험용 카운터
+    c[name] = (c[name] || 0) + 1;
+    return ok;
+  };
   function tone(freq, dur, gain, type, glide) {
     const a = audio();
     if (!a) return;
@@ -416,44 +483,44 @@ import { createTutorial } from '/common/tutorial.js';
     src.connect(f).connect(g).connect(a.destination);
     src.start();
   }
-  const tick = () => tone(1700, 0.06, 0.3);
+  const tick = () => { if (!playSample('ui/countdown-tick', { gain: 0.6, rate: 1.2 })) tone(1700, 0.06, 0.3); };
   function pong() {
-    // 라켓에 맞는 소리: 낮고 단단한 '퐁'
+    // 라켓에 맞는 소리: 큰 화면이 진짜 타구음을 내므로 폰은 작게(녹음) — 없으면 낮고 단단한 '퐁'
+    if (playSample('ball/tennis-hit', { gain: 0.35 })) return;
     tone(430, 0.1, 0.5, 'triangle', 0.7);
     noise(0.05, 1500, 1.0, 0.6);
   }
   const thud = () => tone(170, 0.2, 0.35, 'triangle');
-  const swish = (power) => noise(0.16, 700 + 900 * power, 0.7, 0.15 + 0.3 * power);
+  const swish = (power) => { if (!playSample('swing/swoosh-light', { gain: 0.35 + 0.45 * power, rate: 0.9 + 0.3 * power })) noise(0.16, 700 + 900 * power, 0.7, 0.15 + 0.3 * power); };
   // 진동 무늬(진동이 없는 iPhone·PC 는 공통 모듈이 화면 번쩍임으로 바꿈). 소리는 이 페이지가 따로 냅니다.
   const buzz = (pattern, o = {}) => haptics.buzz(pattern, { silent: true, ...o });
 
   // ---------- 자세 맞추기 ----------
+  // 기준축은 알아서 잡습니다(준비를 누를 때, 경기가 시작될 때, 준비 전에 가만히 있을 때). 손으로 다시 맞추는 화면은 선택입니다.
   let countTimer = null;
   function openCal() {
     clearInterval(countTimer);
     mode = 'cal';
     $('calN').classList.add('hidden');
-    $('calLegend').classList.remove('hidden');
     $('btnReady').classList.remove('hidden');
-    $('btnCalCancel').classList.toggle('hidden', !(basis || state.phase !== 'playing' || !myInfo()));
-    $('calT').textContent = basis ? '다시 맞춥니다' : '라켓처럼 쥡니다';
-    $('calB').textContent = '폰 아래쪽을 라켓 손잡이처럼 쥐고,\n화면이 TV를 보게 한 뒤 아래 버튼을 누릅니다.';
+    $('btnCalCancel').classList.remove('hidden');
+    $('calT').textContent = '자세 맞추기';
+    $('calB').textContent = '화면이 TV를 보게 쥐고 눌러요.';
     show('vCal');
   }
   function startCountdown() {
     if (!gotOri) {
-      $('calB').textContent = '방향 센서 값이 들어오지 않습니다.\n잠시 뒤 다시 눌러 주십시오.';
+      $('calB').textContent = '센서 값이 없어요. 잠시 뒤 다시 눌러요.';
       return;
     }
     mode = 'count';
     let n = 3;
     $('calN').textContent = n;
     $('calN').classList.remove('hidden');
-    $('calLegend').classList.add('hidden');
     $('btnReady').classList.add('hidden');
     $('btnCalCancel').classList.add('hidden');
-    $('calT').textContent = '그대로 멈추십시오';
-    $('calB').textContent = '라켓을 쥔 자세 그대로, 화면이 TV를 보게 둡니다.';
+    $('calT').textContent = '그대로 멈춰요';
+    $('calB').textContent = '';
     tick();
     buzz([15], { noFlash: true });
     clearInterval(countTimer);
@@ -469,32 +536,39 @@ import { createTutorial } from '/common/tutorial.js';
       captureBasis();
     }, 1000);
   }
-  function captureBasis() {
+  // 최근 250ms 의 방향 평균으로 기준축을 잡습니다. 성공하면 true
+  function setBasisNow(auto) {
     const t = performance.now();
     let src = oriBuf.filter((o) => o.t >= t - 250);
-    if (!src.length && ori) src = [ori];
-    if (!src.length) {
-      openCal();
-      $('calB').textContent = '방향 센서 값이 끊겼습니다.\n다시 준비를 눌러 주십시오.';
-      return;
-    }
+    if (!src.length && ori) src = [{ top: ori.top, face: ori.face }];
+    if (!src.length) return false;
     const top = norm(src.reduce((a, o) => add(a, o.top), [0, 0, 0]));
     const face = norm(src.reduce((a, o) => add(a, o.face), [0, 0, 0]));
     basis = makeBasis(top, face);
+    basisAuto = Boolean(auto);
     calAt = t;
     nextPoseAt = 0;
     // 큰 화면은 이 신호로 라켓 자세 기준을 새로 잡습니다. 이 뒤의 pose 는 새 기준축 값입니다.
     if (!send('calibrate', {})) pendingCal = true;
+    debug(`calibrate${auto ? ' (auto)' : ''} f=${basis.f.map((x) => x.toFixed(2))} top=${top.map((x) => x.toFixed(2))} face=${face.map((x) => x.toFixed(2))}`);
+    return true;
+  }
+  // 알아서 잡기(소리·진동 없음). 직접 맞춘 기준축은 준비 때 덮어쓰지 않습니다.
+  function autoBasis(force) {
+    if (!gotOri || fallback || !ori) return;
+    if (basis && !basisAuto && !force) return;
+    setBasisNow(true);
+  }
+  function captureBasis() {
+    if (!setBasisNow(false)) {
+      openCal();
+      $('calB').textContent = '센서 값이 끊겼어요. 다시 눌러요.';
+      return;
+    }
     buzz([30, 40, 30]);
     tone(1320, 0.12, 0.35);
     mode = 'idle';
-    debug(`calibrate f=${basis.f.map((x) => x.toFixed(2))} top=${top.map((x) => x.toFixed(2))} face=${face.map((x) => x.toFixed(2))}`);
     render();
-    // 처음 하는 사람: 자세를 맞췄으니 바로 연습으로
-    if (tutAfterCal) {
-      tutAfterCal = false;
-      runTutorial();
-    }
   }
 
   // ---------- 화면 상태 ----------
@@ -518,8 +592,8 @@ import { createTutorial } from '/common/tutorial.js';
     }
   }
   function teamLabel(info) {
-    const mates = info && info.mates && info.mates.length ? `나·${info.mates.join('·')}` : '나';
-    return mates;
+    const meT = T('나');
+    return info && info.mates && info.mates.length ? `${meT}·${info.mates.join('·')}` : meT;
   }
   function drawScore(info) {
     if (!info) return;
@@ -533,9 +607,9 @@ import { createTutorial } from '/common/tutorial.js';
     $('oppName').textContent = info.opps && info.opps.length ? info.opps.join('·') : '상대';
     $('srvMe').classList.toggle('on', Boolean(info.teamServing));
     $('srvOpp').classList.toggle('on', info.teamServing === false);
-    $('callL').textContent = info.call || (info.serving && info.serveNo === 2 ? '세컨드 서브' : '');
+    $('callL').textContent = T(info.call || (info.serving && info.serveNo === 2 ? '세컨드 서브' : ''));
     const lv = { easy: '쉬움', normal: '보통', hard: '어려움' }[ps.difficulty()] || '';
-    $('ruleL').textContent = `${state.toWin || 2}게임 선승${lv ? ` · ${lv}` : ''}`;
+    $('ruleL').textContent = `${T('{n}게임 선승', { n: state.toWin || 2 })}${lv ? ` · ${T(lv)}` : ''}`;
   }
 
   let cueOn = false;
@@ -547,9 +621,7 @@ import { createTutorial } from '/common/tutorial.js';
     const orb = $('orb');
     orb.classList.remove('cue');
     orb.textContent = info && info.serving ? '내 서브' : '준비';
-    $('status').textContent = info && info.serving
-      ? '토스한 공이 내려오며 링이 닫힐 때 휘두릅니다.'
-      : '공이 느려지면 링이 닫히는 순간 휘두릅니다.';
+    $('status').textContent = '';
   }
   function clearCue() {
     clearTimeout(cueTimer);
@@ -559,8 +631,7 @@ import { createTutorial } from '/common/tutorial.js';
   }
   function showPlay() {
     mode = 'play';
-    $('fallback').classList.toggle('hidden', !fallback);
-    $('fallbackHint').textContent = fallbackReason();
+    paintPads();
     idleOrb();
     show('vPlay');
   }
@@ -572,41 +643,37 @@ import { createTutorial } from '/common/tutorial.js';
     const phase = state.phase;
     const chips = [];
     if (info) {
-      chips.push([info.mates && info.mates.length ? '복식' : '단식', info.mates && info.mates.length ? `나·${info.mates.join('·')}` : '']);
+      chips.push([info.mates && info.mates.length ? '복식' : '단식', info.mates && info.mates.length ? teamLabel(info) : '']);
       chips.push(['상대', info.opps ? info.opps.join('·') : 'CPU']);
     }
     if (fallback) chips.push(['조작', '버튼']);
-    else if (gotOri) chips.push(['라켓 자세', basis ? '맞춤' : '아직', basis ? 'ok' : '']);
     const btn = $('btnGo');
     btn.style.display = '';
     const ready = iAmReady();
     // 준비 버튼: 누르면 '준비 완료 ✓'(다른 사람을 기다림). 서버가 모두 준비되면 큰 화면에 한 번만 시작을 넘깁니다.
     const label = phase === 'over' ? '다시 하기' : '준비';
     btn.classList.toggle('done', ready);
-    if (ready) btn.innerHTML = `<i>${CHECK_SVG}</i>${phase === 'over' ? '다시 하기 · 준비 완료' : '준비 완료'}`;
+    if (ready) btn.innerHTML = `<i>${CHECK_SVG}</i>${T(phase === 'over' ? '다시 하기 · 준비 완료' : '준비 완료')}`;
     else btn.textContent = label;
     if (phase === 'over') {
       const g = info && Array.isArray(info.games) ? info.games : null;
       $('waitT').textContent = info && info.win ? '승리!' : info && info.win === false ? '패배' : '경기 끝';
-      $('waitB').textContent = g ? `게임 ${g[0]} : ${g[1]}\n모두 다시 하기를 누르면 다음 판이에요.` : '모두 다시 하기를 누르면 다음 판이에요.';
+      $('waitB').textContent = g ? T('게임 {a} : {b}', { a: g[0], b: g[1] }) : '';
     } else if (phase === 'playing') {
       $('waitT').textContent = '관전 중';
-      $('waitB').textContent = '빈 자리가 있으면 다음 서브부터 합류해요. 자리가 모두 차면 다음 경기를 기다려요.';
+      $('waitB').textContent = '다음 서브부터 합류해요';
       btn.style.display = 'none';
     } else {
       $('waitT').textContent = '대기실';
-      $('waitB').textContent = basis || fallback || !gotOri
-        ? '모두 준비를 누르면 시작해요.'
-        : '모두 준비를 누르면 시작해요.\n먼저 라켓 자세를 맞춰 두면 바로 칠 수 있어요.';
+      $('waitB').textContent = '모두 준비를 누르면 시작해요';
     }
     paintWho(phase !== 'playing');
     setChips(chips, 'waitChips');
     const canCal = gotOri && !fallback;
     $('btnCalLobby').classList.toggle('hidden', !canCal);
-    $('btnCalLobby').textContent = basis ? '라켓 자세 다시 맞추기' : '라켓 자세 맞추기';
     const p = $('practice');
     const recent = lastSwing && performance.now() - lastSwing.at < 4000;
-    if (!recent) p.textContent = basis && gotMotion && phase !== 'playing' ? '휘둘러 보면 감지한 스윙이 여기 뜹니다.' : '';
+    if (!recent) p.textContent = '';
     show('vWait');
   }
   // 누가 아직 준비 전인지(내 폰에도 보여 줌)
@@ -628,24 +695,28 @@ import { createTutorial } from '/common/tutorial.js';
     drawScore(info);
     if (mode === 'cal' || mode === 'count') return;
     if (state.phase === 'playing' && info) {
-      if (!basis && gotOri && !fallback) {
-        openCal();
-        return;
-      }
       if (mode !== 'play') showPlay();
       else idleOrb();
       return;
     }
     showWait(info);
   }
+  // 큰 '치기' 버튼은 센서가 있어도 늘 쓸 수 있습니다. 스핀 버튼과 손 고르기는 어려움에서만 나옵니다.
+  function paintPads() {
+    const hard = ps.difficulty() === 'hard';
+    $('spinPads').classList.toggle('hidden', !hard);
+    $('hands').classList.toggle('hidden', !hard);
+    $('fallbackHint').textContent = fallbackReason();
+    $('fallbackHint').classList.toggle('hidden', !fallback);
+  }
   function fallbackReason() {
-    let why = '동작 센서가 없어 버튼으로 칩니다.';
-    if (!window.isSecureContext) why = 'https 주소가 아니라 동작 센서가 꺼져 있습니다. 버튼으로 칩니다.';
-    else if (permDenied) why = '동작 권한이 거절돼 버튼으로 칩니다.';
-    return `${why} (키보드: Space · T · S)`;
+    if (!fallback) return '';
+    if (!window.isSecureContext) return '센서가 꺼져 있어요. 버튼으로 쳐요.';
+    if (permDenied) return '동작 허용이 거절됐어요. 버튼으로 쳐요.';
+    return '센서가 없어요. 버튼으로 쳐요.';
   }
   function sensorsChanged() {
-    if (mode === 'play') $('fallback').classList.toggle('hidden', !fallback);
+    if (mode === 'play') paintPads();
     render();
   }
 
@@ -707,6 +778,8 @@ import { createTutorial } from '/common/tutorial.js';
     // 내가 들어간 경기가 시작됐는데 연습 중이면(드묾) 연습을 닫습니다.
     if (state.phase === 'playing' && myInfo() && tut.isRunning()) tut.cancel();
     if (state.phase === 'playing' && prev !== 'playing') {
+      // 경기가 시작되는 지금 쥔 자세를 기준으로(직접 맞춘 기준축은 그대로 둡니다)
+      if (!basis || basisAuto) autoBasis(true);
       $('resT').textContent = '';
       $('resT').className = 't';
       setChips([]);
@@ -726,7 +799,6 @@ import { createTutorial } from '/common/tutorial.js';
       // 서브 차례 예고(아직 '지금'은 아님)
       if (!cueOn) {
         orb.textContent = c.second ? '세컨드 서브' : '내 서브';
-        $('status').textContent = '토스가 올라갑니다. 공이 내려오며 링이 닫힐 때 휘두릅니다.';
       }
       buzz([20, 50, 20], { noFlash: true });
       return;
@@ -740,8 +812,6 @@ import { createTutorial } from '/common/tutorial.js';
       cueTimer = setTimeout(clearCue, CUE_MS + 1500);
       orb.classList.remove('cue');
       orb.textContent = c.kind === 'serve' ? '준비' : '공이 옵니다';
-      $('status').textContent = c.kind === 'serve' ? '공이 내려옵니다. 지금! 이 뜨면 휘두릅니다.'
-        : `${c.hand === 'back' ? '백핸드' : '포핸드'}로 준비합니다. 지금! 이 뜨면 휘두릅니다.`;
       buzz([15], { noFlash: true });
       return;
     }
@@ -750,17 +820,22 @@ import { createTutorial } from '/common/tutorial.js';
     cueTimer = setTimeout(clearCue, CUE_MS);
     orb.textContent = '지금!';
     orb.classList.add('cue');
-    $('status').textContent = c.kind === 'serve' ? '서브! 공이 내려올 때 휘두릅니다.'
-      : `공이 옵니다! ${c.hand === 'back' ? '백핸드' : '포핸드'}로 링이 닫힐 때 휘두릅니다.`;
     buzz(c.kind === 'serve' ? [25, 40, 25] : 45);
     tick();
   });
 
+  // 큰 화면이 보낸 판정 글(한국어)을 내 언어로: ' · ' 로 나눈 조각마다 사전에서 찾고, 끝의 점수(15-0, 2 : 1)는 그대로 둡니다.
+  function trResult(text) {
+    return String(text).split(' · ').map((seg) => {
+      const m = /^(.*\S)\s+((?:\d+|AD)-(?:\d+|AD)|\d+ : \d+)$/.exec(seg);
+      return m ? `${T(m[1])} ${m[2]}` : T(seg);
+    }).join(' · ');
+  }
   socket.on('result', (r) => {
     r = r || {};
     clearCue();
     const t = $('resT');
-    t.textContent = r.text || '';
+    t.textContent = trResult(r.text || '');
     t.className = `t ${r.good ? 'good' : 'bad'}`;
     const chips = [];
     if (r.kmh) chips.push(['속도', `${r.kmh}km/h`]);
@@ -774,34 +849,30 @@ import { createTutorial } from '/common/tutorial.js';
     }
   });
 
-  // ---------- 처음 하는 사람 연습(튜토리얼) ----------
-  // 이 폰에서 처음이면(localStorage 'pcg-tut-tennis') 시작하기 → 라켓 자세 맞추기 → 4단계 연습. 진행은 큰 화면 대기실에 칸으로 뜹니다.
-  // 판정은 경기와 같은 스윙 감지기(finishSwing)의 값으로 합니다. 센서가 없는 폰·PC 는 단계 안의 버튼으로 해 볼 수 있습니다.
-  const TUT_PAD_LABEL = { fore: '포핸드로 치기', back: '백핸드로 치기', top: '탑스핀', slice: '슬라이스', now: '지금 치기' };
-  function tutSwing(kind) {
+  // ---------- 연습(튜토리얼) ----------
+  // 저절로 시작하지 않습니다. 대기실의 '튜토리얼 다시 하기' 링크를 눌렀을 때만 2단계(한 줄씩).
+  // 판정은 경기와 같은 스윙 감지기(finishSwing)의 값으로 합니다. 단계 안의 '치기' 버튼으로도 할 수 있습니다.
+  const TUT_PAD_LABEL = { now: '치기' };
+  function tutSwing() {
     audio();
-    const hand = kind === 'back' ? 'back' : 'fore';
-    const spin = kind === 'top' || kind === 'slice' ? kind : 'none';
-    deliverSwing({ power: 0.75, ago: 0, rtt: Math.round(rtt()), spin, spinAmt: spin === 'none' ? 0 : 0.8, hand, aim: 0 }, performance.now());
+    deliverSwing({ power: 0.75, ago: 0, rtt: Math.round(rtt()), spin: 'none', spinAmt: 0, hand: 'fore', aim: 0 }, performance.now());
   }
-  // 센서가 없을 때(또는 &debug) 단계 안에 버튼을 붙입니다.
-  function tutPads(stage, kinds) {
-    if (!fallback && !DEBUG) return null;
+  // 단계 안에 큰 '치기' 버튼을 붙입니다(센서가 있어도 쓸 수 있음).
+  function tutPads(stage) {
     const wrap = document.createElement('div');
-    wrap.innerHTML = `<div class="tut-pads">${kinds.map((k) => `<button type="button" data-k="${k}">${TUT_PAD_LABEL[k]}</button>`).join('')}</div>` +
-      `<div class="tut-pads-note">${fallback ? '동작 센서가 없어 버튼으로 해 봐요' : '시험용 버튼'}</div>`;
+    wrap.innerHTML = `<div class="tut-pads"><button type="button" data-k="now">${TUT_PAD_LABEL.now}</button></div>`;
     wrap.addEventListener('pointerdown', (e) => {
       const b = e.target.closest('button[data-k]');
       if (!b) return;
       e.preventDefault();
-      tutSwing(b.dataset.k);
+      tutSwing();
     });
     stage.appendChild(wrap);
     return () => wrap.remove();
   }
   // 타이밍 연습: 원이 공으로 닫히는 순간(큰 화면의 링과 같음) 휘두릅니다. 허용 폭은 난이도를 따릅니다.
   const RING = { cycle: 1900, close: 1350, t0: 0 };
-  const tutTol = () => ps.pick({ easy: 300, normal: 220, hard: 150 });
+  const tutTol = () => ps.pick({ easy: 450, normal: 300, hard: 150 });
   function nearestClose(t) {
     const k = Math.round((t - RING.t0 - RING.close) / RING.cycle);
     return RING.t0 + RING.close + k * RING.cycle;
@@ -813,7 +884,7 @@ import { createTutorial } from '/common/tutorial.js';
       `<g><circle r="17" fill="#d9f24a"/><path d="M-12 -11c7 4 9 13 5 22M12 -11c-7 4-9 13-5 22" fill="none" stroke="#f7ffd0" stroke-width="2.4" stroke-linecap="round"/></g>` +
       `</svg><div class="mark"></div><div class="tag">기다려요</div></div>`;
     stage.appendChild(box);
-    const pads = tutPads(stage, ['now']);
+    const pads = tutPads(stage);
     const ring = box.querySelector('.ring');
     const tag = box.querySelector('.tag');
     RING.t0 = performance.now();
@@ -829,7 +900,8 @@ import { createTutorial } from '/common/tutorial.js';
       const now = Math.abs(u - RING.close) < 170;
       ring.classList.toggle('close', now);
       tag.classList.toggle('now', now);
-      tag.textContent = now ? '지금!' : u < RING.close ? '기다려요' : '한 번 더';
+      const tagText = T(now ? '지금!' : u < RING.close ? '기다려요' : '한 번 더');
+      if (tag.textContent !== tagText) tag.textContent = tagText;
       if (now && lastTick !== k) {
         lastTick = k;
         tick();
@@ -858,83 +930,21 @@ import { createTutorial } from '/common/tutorial.js';
       ringMark(Math.abs(off) < tutTol() * 0.4 ? 'PERFECT' : 'GOOD', true);
       return true;
     }
-    ringMark(off < 0 ? '빨라요' : '늦어요', false);
-    return off < 0 ? '조금 빨라요 · 원이 공에 닿을 때 휘둘러요' : '조금 늦어요 · 원이 닫히는 순간이에요';
-  }
-  // 스핀: 쓸어 올리면 탑스핀, 깎아 내리면 슬라이스. 세 번 해도 안 되면 넘어갑니다(플랫으로도 경기는 잘 돼요).
-  let spinTries = 0;
-  function spinCheck(d) {
-    if (d.spin === 'top') return { ok: true, msg: '탑스핀! 높이 튀어 올라요' };
-    if (d.spin === 'slice') return { ok: true, msg: '슬라이스! 낮게 깔려요' };
-    spinTries += 1;
-    if (spinTries >= 3) return { ok: true, msg: '괜찮아요 · 플랫으로도 경기는 잘 돼요' };
-    return '이건 플랫이에요 · 아래에서 위로 크게 쓸어 올려 봐요';
-  }
-  // 스핀 그림: 폰이 아래에서 위로(탑스핀, 주황) 쓸려 올라가고, 위에서 아래로(슬라이스, 파랑) 깎는 길을 점선으로
-  // 스핀 그림: 3.2초 한 바퀴. 앞 절반은 폰이 아래에서 위로(탑스핀, 주황) 쓸려 올라가고, 뒤 절반은 위에서 아래로(슬라이스, 파랑) 깎아 내립니다.
-  // 지금 폰이 지나는 길과 이름이 밝아지고, 두 길이 만나는 곳(타점)의 공이 그 방향으로 돕니다.
-  function spinArt() {
-    const phone = '<rect x="-12" y="-22" width="24" height="44" rx="5" class="pcgt-ph"/><rect x="-9" y="-17" width="18" height="32" rx="2.5" class="pcgt-scr"/>';
-    const TOP = 'M26 130 C 76 130, 118 98, 170 38';
-    const SL = 'M26 38 C 76 38, 118 70, 170 124';
-    const D = '3.2s';
-    // 반쪽마다 켜졌다 꺼지는 투명도(뒤 절반은 begin 을 반 바퀴 당김)
-    const blink = (lo, begin) => `<animate attributeName="opacity" dur="${D}" begin="${begin}" repeatCount="indefinite" calcMode="discrete" keyTimes="0;.5" values="1;${lo}"/>`;
-    const ride = (path, begin) => `<g opacity="0">${phone}` +
-      `<animateMotion dur="${D}" begin="${begin}" repeatCount="indefinite" rotate="auto" calcMode="spline" keyTimes="0;.42;1" keyPoints="0;1;1" keySplines=".5 0 .2 1;0 0 1 1" path="${path}"/>` +
-      `${blink(0, begin)}</g>`;
-    const lane = (path, head, color, label, ly, begin) => `<g opacity=".35">` +
-      `<path d="${path}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-dasharray="3 9"/>` +
-      `<path d="${head}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>` +
-      `<text x="146" y="${ly}" fill="${color}" font-size="14" font-weight="900" text-anchor="middle">${label}</text>${blink(0.35, begin)}</g>`;
-    // 공: 탑스핀 반쪽에는 앞으로(시계 방향), 슬라이스 반쪽에는 거꾸로 돕니다.
-    const ball = '<g transform="translate(127 83)"><g><circle r="10" fill="#d9f24a"/>' +
-      '<path d="M-7 -7c4 3 5 10 2 15M7 -7c-4 3-5 10-2 15" fill="none" stroke="#f7ffd0" stroke-width="1.8" stroke-linecap="round"/>' +
-      `<animateTransform attributeName="transform" type="rotate" dur="${D}" repeatCount="indefinite" calcMode="linear" keyTimes="0;.5;1" values="0;540;0"/></g></g>`;
-    return `<svg class="pcgt-svg" viewBox="0 0 200 160" aria-hidden="true">` +
-      lane(TOP, 'M161 33 l10 4 -3 11', '#ff9a4d', '탑스핀', 20, '0s') +
-      lane(SL, 'M160 128 l11 -2 -2 -11', '#8fd8ff', '슬라이스', 152, '-1.6s') +
-      ball + ride(TOP, '0s') + ride(SL, '-1.6s') + '</svg>';
+    ringMark(T(off < 0 ? '빨라요' : '늦어요'), false);
+    return off < 0 ? '조금 일러요' : '조금 늦어요';
   }
   const tut = createTutorial({
     key: 'tennis',
     socket,
-    title: '처음이라 라켓 연습부터 해요',
+    title: '처음이라 연습해 봐요',
     steps: [
-      {
-        title: '포핸드로 휘둘러 보기', body: '화면이 TV를 보게 쥔 채\n오른쪽 뒤에서 앞으로 크게 휘둘러요.',
-        svg: 'swing', svgOpts: { from: -70, to: 40 }, waitFor: 'swing', count: 2, hint: '두 번 휘둘러요',
-        check: (d) => d.hand === 'fore' || '그건 백핸드예요 · 화면이 TV 쪽을 보게 휘둘러요',
-        render: (stage) => tutPads(stage, ['fore'])
-      },
-      {
-        title: '백핸드로 휘둘러 보기', body: '손등이 TV 쪽을 보게 돌려 쥐고\n왼쪽 뒤에서 앞으로 휘둘러요.',
-        svg: 'swing', svgOpts: { dir: -1, from: -70, to: 40 }, waitFor: 'swing',
-        check: (d) => (d.hand === 'back' ? { ok: true, msg: '깔끔한 백핸드!' } : '그건 포핸드예요 · 손등 쪽으로 휘둘러요'),
-        render: (stage) => tutPads(stage, ['back'])
-      },
-      {
-        title: '링이 닫힐 때 치기', body: '큰 화면에서도 공 둘레 링이 닫히는 순간 휘둘러요.\n서브도 같아요: 토스가 내려오며 링이 닫힐 때.',
-        waitFor: 'swing', count: 2, hint: '링이 닫힐 때 두 번', okText: '타이밍 좋아요!',
-        check: timingCheck, render: timingStage
-      },
-      {
-        title: '스핀 걸어 보기 (선택)', body: '아래에서 위로 쓸어 올리면 탑스핀,\n위에서 아래로 깎으면 슬라이스예요.',
-        svg: spinArt, waitFor: 'swing', hint: '쓸어 올리거나 깎아 보기',
-        check: spinCheck, render: (stage) => { spinTries = 0; return tutPads(stage, ['top', 'slice']); }
-      }
-    ],
-    finish: { title: '연습 끝!', body: '이제 준비를 누르면 돼요.\n큰 화면에서 공이 느려지고 링이 닫힐 때 휘두르면 됩니다.', button: '대기실로' }
+      { title: '아무 쪽으로나 휘둘러요', waitFor: 'swing', hint: '휘둘러요', check: () => true, render: tutPads },
+      { title: '링이 닫힐 때 휘둘러요', waitFor: 'swing', count: 2, hint: '링이 닫힐 때 두 번', okText: '타이밍 좋아요!', check: timingCheck, render: timingStage }
+    ]
   });
-  // 연습 시작: 센서가 있는데 아직 라켓 자세를 안 맞췄으면 자세부터(그래야 포핸드·백핸드를 가릴 수 있음)
   function beginTutorial() {
     if (tut.isRunning() || mode === 'cal' || mode === 'count') return;
     if (state.phase === 'playing' && myInfo()) return;
-    if (!fallback && gotOri && !basis) {
-      tutAfterCal = true;
-      openCal();
-      return;
-    }
     runTutorial();
   }
   async function runTutorial() {
@@ -942,18 +952,6 @@ import { createTutorial } from '/common/tutorial.js';
     render();
     await tut.run();
     render();
-  }
-  // 동작 센서가 들어오는지(또는 버튼 모드로 정해졌는지) 알 때까지 기다립니다.
-  function sensorsKnown() {
-    return new Promise((resolve) => {
-      const t0 = performance.now();
-      const iv = setInterval(() => {
-        if ((gotOri && gotMotion && !DEBUG) || fallback || performance.now() - t0 > SENSOR_WAIT_MS + 400) {
-          clearInterval(iv);
-          resolve();
-        }
-      }, 60);
-    });
   }
   tut.link($('tutLink'), { before: () => { beginTutorial(); return false; } });
 
@@ -965,15 +963,8 @@ import { createTutorial } from '/common/tutorial.js';
     // 화면 꺼짐 방지와 권한 요청은 탭 안에서 await 전에 바로 불러야 iPhone 에서 통합니다.
     if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
     audio();
-    const asks = [];
-    if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-      asks.push(DeviceOrientationEvent.requestPermission().catch(() => 'denied'));
-    }
-    if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') {
-      asks.push(DeviceMotionEvent.requestPermission().catch(() => 'denied'));
-    }
-    const res = await Promise.all(asks);
-    permDenied = res.some((x) => x !== 'granted');
+    // 동작 권한은 한 번에(motion.js). 센서 없는 PC 는 거절이 아니라 '지원 안 함'이라 버튼으로 계속합니다.
+    permDenied = (await requestMotionPermission()) === 'denied';
     window.addEventListener('deviceorientation', onOrientation);
     window.addEventListener('devicemotion', onMotion);
     // 폰에서 거절되면 켜는 법을 안내합니다. 센서 없는 PC 는 버튼으로 계속합니다.
@@ -994,21 +985,14 @@ import { createTutorial } from '/common/tutorial.js';
       if (gotMotion && !DEBUG) return;
       if (isTouch && !DEBUG && !gotMotion) {
         // 폰인데 값이 안 들어오면 켜는 법을 보여 주되, 버튼으로도 칠 수 있게 합니다(Android 는 권한 창 없이 사이트 설정에서 막힘).
-        banner(window.isSecureContext
-          ? '동작 센서 값이 없어 버튼으로 칩니다. Android: 주소창 자물쇠 → 사이트 설정 → 동작 센서 허용 / iPhone: Safari 를 완전히 닫고 다시 찍어 동작 접근 허용'
-          : '동작 센서 값이 들어오지 않습니다. 버튼으로 칩니다.');
+        banner('센서가 없어 버튼으로 쳐요');
       }
       fallback = true;
       debug('동작 센서 값이 들어오지 않아 버튼으로 칩니다');
       sensorsChanged();
     }, SENSOR_WAIT_MS);
-    // 처음이면 라켓 자세 → 연습. 그동안 큰 화면 대기실에 '연습 중' 칸이 뜨고, 끝내면 준비를 누릅니다.
-    if (tut.firstTime()) {
-      await sensorsKnown();
-      if (mode !== 'msg' && !(state.phase === 'playing' && myInfo())) beginTutorial();
-    }
   });
-  // 준비(다시 하기): 한 번 누르면 '준비 완료 ✓'. 슬로우를 아직 안 정했으면 phone-settings 가 막고 질문 카드를 흔듭니다.
+  // 준비(다시 하기): 한 번 누르면 '준비 완료 ✓'.
   $('btnGo').addEventListener('click', () => {
     audio();
     if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
@@ -1016,6 +1000,8 @@ import { createTutorial } from '/common/tutorial.js';
       $('whoWait').animate([{ transform: 'scale(1.06)' }, { transform: 'none' }], { duration: 260 });
       return;
     }
+    // 준비를 누르는 순간의 자세를 기준으로 잡아 둡니다(경기가 시작될 때 한 번 더 잡음)
+    autoBasis();
     if (send('start_game', {})) haptics.tick();
   });
   $('btnCalLobby').addEventListener('click', () => {
@@ -1032,13 +1018,17 @@ import { createTutorial } from '/common/tutorial.js';
     startCountdown();
   });
   $('btnCalCancel').addEventListener('click', () => {
-    tutAfterCal = false;
     clearInterval(countTimer);
     mode = 'idle';
     render();
   });
   // 버튼 스윙은 손을 뗄 때가 아니라 누르는 순간 보냅니다(타이밍).
-  for (const btn of document.querySelectorAll('#fallback .pads button')) {
+  $('btnHit').addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    audio();
+    presetSwing('none');
+  });
+  for (const btn of document.querySelectorAll('#spinPads button')) {
     btn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       audio();
@@ -1052,16 +1042,15 @@ import { createTutorial } from '/common/tutorial.js';
     });
   }
   document.addEventListener('keydown', (e) => {
-    // 연습 중(센서 없음·&debug): F 포핸드, B 백핸드, Space 지금, T 탑스핀, S 슬라이스
-    if (tut.isRunning() && (fallback || DEBUG) && !e.repeat) {
-      const k = { KeyF: 'fore', KeyB: 'back', Space: 'now', KeyT: 'top', KeyS: 'slice' }[e.code];
-      if (k) {
+    // 연습 중: Space 치기
+    if (tut.isRunning() && !e.repeat) {
+      if (e.code === 'Space') {
         e.preventDefault();
-        tutSwing(k);
+        tutSwing();
       }
       return;
     }
-    if (!fallback || mode !== 'play' || e.repeat) return;
+    if (mode !== 'play' || e.repeat) return;
     const k = e.code === 'Space' ? 'none' : e.code === 'KeyT' ? 'top' : e.code === 'KeyS' ? 'slice' : null;
     if (!k) return;
     e.preventDefault();
@@ -1073,6 +1062,7 @@ import { createTutorial } from '/common/tutorial.js';
   });
 
   if (!window.isSecureContext) $('httpNote').classList.remove('hidden');
+  paintPads();
 
   // ---------- 디버그 (&debug) ----------
   function debug(t) {

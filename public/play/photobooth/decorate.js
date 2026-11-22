@@ -1,5 +1,6 @@
 // 네컷 꾸미기(폰): 완성 판 위에 손가락으로 그리기(색·굵기·네온), 이모지·글자 스티커(끌기, 두 손가락으로 크기·회전),
 // 되돌리기, 내 것 지우기, 완성. 그린 것은 판 비율 좌표로 큰 화면에 바로바로 보내고, 다른 사람 것도 받아서 같이 보여 줍니다.
+import { t as T } from '/common/i18n.js';
 import { drawItems, STICKERS, PEN_COLORS, PEN_SIZES, BRUSHES, Q, hitSticker } from '/photobooth/deco.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -88,7 +89,7 @@ export function createDecorator(opts) {
     tabs.hidden = false;
     tabs.innerHTML = sheets.map((s) => {
       const mine = s.owner === slot();
-      return `<button type="button" class="d-tab${s.id === curId ? ' on' : ''}" data-sh="${s.id}" style="--tc:${COLORS[s.owner] || '#fff'}"><b>${s.owner}P</b>${mine ? '내 네컷' : '네컷'}</button>`;
+      return `<button type="button" class="d-tab${s.id === curId ? ' on' : ''}" data-sh="${s.id}" style="--tc:${COLORS[s.owner] || '#fff'}">${T(mine ? '{p}내 네컷' : '{p}네컷', { p: `<b>${s.owner}P</b>` })}</button>`;
     }).join('');
   }
   function paintZoom() {
@@ -281,7 +282,7 @@ export function createDecorator(opts) {
     send('sticker', wire(it));
     setTool('stk');
     select(it.id);
-    hint('끌어서 옮기고, 두 손가락으로 크기·회전');
+    hint('끌어서 옮겨요');
     try { opts.haptics && opts.haptics.tick(); } catch (e) {}
     tick();
   }
@@ -443,7 +444,7 @@ export function createDecorator(opts) {
     q('.d-stk').classList.toggle('hidden', t !== 'stk');
     if (t === 'pen') select(null);
     placeSel();
-    hint(t === 'pen' ? (drew ? '' : '손가락으로 그려요') : '아래에서 스티커를 눌러 붙여요');
+    hint(t === 'pen' ? '' : '스티커를 눌러요');
   }
   function paintPen() {
     for (const b of root.querySelectorAll('.d-color')) b.classList.toggle('on', PEN_COLORS[Number(b.dataset.i)] === (pen.c || myColor()));
@@ -530,7 +531,7 @@ export function createDecorator(opts) {
     const el = q('.d-wait');
     const left = people.filter((s) => !doneList.includes(s));
     el.innerHTML = left.length
-      ? `${left.map((s) => `<b style="--tc:${COLORS[s] || '#fff'}">${s}P</b>`).join('')} 꾸미는 중 · 모두 완성하면 끝나요`
+      ? T('{p} 꾸미는 중 · 모두 완성하면 끝나요', { p: left.map((s) => `<b style="--tc:${COLORS[s] || '#fff'}">${s}P</b>`).join('') })
       : '모두 완성! 큰 화면에서 굽는 중…';
   }
   function hint(t) {

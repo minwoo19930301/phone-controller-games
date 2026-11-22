@@ -1,14 +1,15 @@
-// 배스 낚시 컨트롤러. 폰이 낚싯대입니다. 호수는 늘 열려 있어서 QR 을 찍고 자세만 맞추면 바로 낚시합니다.
-// 뒤로 젖혔다가 앞으로 휙 던지면 캐스팅, 찌가 들어가면 위로 확 들어 올려 챔질, 화면의 릴 핸들을 돌려 감습니다.
-// 기다리는 중에 핸들을 살짝 돌리면 찌를 톡 건드리고(트위치), 계속 돌리면 찌가 끌려옵니다.
-// 좌표는 '준비' 때 정한 기준축으로 보냅니다: r = 내 오른쪽, u = 위, f = 폰 윗부분이 TV 를 보던 방향.
-//
-// 던지는 힘: 살짝 휙 → 선착장 바로 앞(3~5m), 힘껏 → 멀리(30m). 회전 속도에서 '안 던진 것' 구간을 빼고 부드러운 곡선을 씌워,
-// 이 사람의 '힘껏'(연습 때 잰 값, 이 폰에 기억)을 1 로 맞춥니다. '살짝 던지기' 버튼은 늘 가까이 떨어뜨립니다.
-// 처음이면 자세를 맞춘 뒤 같은 호수에서 진짜로 5단계 연습(겨누기·살살·힘껏·챔질·감기)을 합니다.
+// 배스 낚시 컨트롤러. 폰이 낚싯대입니다. 호수는 늘 열려 있어서 QR 을 찍고 시작을 누르면 바로 낚시합니다.
+// 뒤로 젖혔다가 앞으로 휙 던지면 캐스팅(큰 '던지기' 버튼도 같은 역할), 찌가 들어가면 위로 확 들어 올려 챔질('챔질!' 버튼도 됩니다),
+// 화면의 릴 핸들을 돌려 감습니다. 기준 자세는 시작하고 폰이 잠깐 가만히 있을 때 저절로 잡습니다('다시 맞추기'는 선택).
+// 좌표는 기준축으로 보냅니다: r = 내 오른쪽, u = 위, f = 폰 윗부분이 TV 를 보던 방향.
+// 쉬움(기본)·보통은 민감도를 낮추고 던지는 힘 곡선을 평평하게 하며, 큰 화면이 던진 자리를 가까운 물고기 쪽으로 보정합니다.
+// 어려움은 예전 값 그대로입니다(아래 CTRL).
 import { haptics } from '/common/haptics.js';
 import { createPhoneSettings } from '/common/phone-settings.js';
 import { createTutorial } from '/common/tutorial.js';
+import { createSamples } from '/common/samples.js';
+import { SFX } from '/common/sfx/manifest.js';
+import { t as T, mountSwitcher } from '/common/i18n.js'; // 이 파일에는 지역 변수 t 가 많아 T 로 부릅니다
 
 {
   const $ = (id) => document.getElementById(id);
@@ -17,28 +18,32 @@ import { createTutorial } from '/common/tutorial.js';
   const params = new URLSearchParams(location.search);
   const ROOM = (params.get('room') || '').toUpperCase();
   const DEBUG = params.has('debug');
-  $('room').textContent = ROOM ? `방 ${ROOM}` : '';
+  $('room').textContent = ROOM ? T('방 {code}', { code: ROOM }) : '';
 
   // ---------- 조정 값(실폰 검증 전이라 바뀔 수 있습니다) ----------
   const POSE_MS = 25; // pose 전송 간격, 약 40Hz
   const SENSOR_WAIT_MS = 1500; // 이 시간 안에 동작 센서 값이 없으면 버튼 모드
-  const CAL_GUARD_MS = 600; // 자세를 맞춘 직후 흔들림은 무시
-  const ARM_DEG = 40; // 기준 자세보다 이만큼 뒤로 젖히면 캐스팅 준비
-  const RELEASE_DEG = 22; // 다시 이 각도 아래로 내려오면 던짐
-  const CAST_MIN_DPS = 220; // 내려올 때 회전 속도가 이 이상이어야 캐스팅(이 아래는 '안 던짐' 구간)
-  const STRONG_DPS = 1000; // 연습 전 기본 '힘껏' 회전 속도(연습의 힘껏 던지기로 이 사람 값으로 바꿉니다)
-  const POWER_CURVE = 1.8; // 힘 곡선: 살짝 휙은 아주 작게, 힘껏일수록 가파르게
+  const CAL_GUARD_MS = 600; // 기준 자세를 잡은 직후 흔들림은 무시
+  const STRONG_DPS = 1000; // 어려움: 기본 '힘껏' 회전 속도(이 폰에 기억한 값이 있으면 그 값)
+  // 난이도별 조작 민감도(실폰 검증 전이라 바뀔 수 있습니다). 어려움 = 예전 그대로.
+  //  armDeg/armMin   기준보다 이만큼(이상) 뒤로 젖히면 캐스팅 준비 / releaseDeg 다시 이 각도 아래로 내려오면 던짐(젖힌 각도보다 낮아야 함)
+  //  castMin         내려올 때 회전 속도 하한(이 아래는 '안 던짐') / strong 이 속도에서 '힘껏' / curve 힘 곡선 / floor 던졌다면 최소 힘
+  //  hookDps/hookRise/hookNoGyro/biteRot   챔질로 보는 회전 속도·올라가는 속도 / dialLock 처음 몇 라디안으로 방향을 정할지(0 = 양방향)
+  const CTRL = {
+    easy: { armDeg: 30, armMin: 42, releaseDeg: 24, castMin: 120, strong: 600, curve: 1.0, floor: 0.25, hookDps: 110, hookRise: 45, hookNoGyro: 140, biteRot: 180, dialLock: 0, dialDead: 0.08, dialJump: 2.2 },
+    normal: { armDeg: 35, armMin: 46, releaseDeg: 23, castMin: 170, strong: 800, curve: 1.4, floor: 0.1, hookDps: 150, hookRise: 65, hookNoGyro: 190, biteRot: 250, dialLock: 0.6, dialDead: 0.12, dialJump: 1.8 },
+    hard: { armDeg: 40, armMin: 50, releaseDeg: 22, castMin: 220, strong: 1000, curve: 1.8, floor: 0, hookDps: 200, hookRise: 90, hookNoGyro: 250, biteRot: 320, dialLock: 1.05, dialDead: 0.15, dialJump: 1.3 }
+  };
+  let diff = 'easy';
+  let K = CTRL.easy;
   const NEAR_POWER = 0.03; // '살짝 던지기' 버튼(큰 화면 logic.js 와 같은 값, 약 3.4m)
   // 큰 화면의 거리 식(logic.js castDist)과 같습니다: 초릿대에서 2.6m + 27.4m × 힘
   const distOf = (p) => 2.6 + 27.4 * Math.max(0, Math.min(1, p));
-  const GENTLE_MAX_M = 7.5; // 연습: 이만큼 안쪽이면 '살살' 성공
-  const STRONG_MIN_POWER = 0.5; // 연습: 이 힘 이상이면 '힘껏' 성공
-  const HOOK_DPS = 200; // 챔질로 보는 회전 속도
-  const HOOK_RISE = 90; // 그리고 낚싯대 끝이 이 속도(도/초) 이상으로 올라가야 함
-  const HOOK_RISE_NOGYRO = 250; // 자이로가 없는 폰은 낚싯대 끝이 올라가는 속도만으로 챔질을 봅니다
+  const BUTTON_POWER = 0.5; // 큰 '던지기' 버튼(약 16m, 큰 화면이 가까운 물고기 쪽으로 보정)
   const HOOK_WIN_MS = 90;
   const REEL_MS = 66; // 감기 전송 간격(약 15Hz)
   const AIM_MAX = 35;
+  const WAIT_HINT_MS = 12000; // 기다림이 이만큼 길면 '다시 던져요'
   // 큰 화면이 낚싯대와 조준선을 늘 그리므로, 조준·대기·파이팅 내내 방향을 보냅니다.
   const STREAM_STAGES = ['ready', 'cast', 'wait', 'bite', 'fight', 'landed', 'lost'];
 
@@ -51,7 +56,7 @@ import { createTutorial } from '/common/tutorial.js';
 
   // 이 사람의 던지기 세기(폰에 기억): strong = '힘껏'의 회전 속도, gentle = 연습 때 '살살'의 회전 속도
   const THROW_KEY = 'pcg-fishing-throw';
-  let throwCal = { strong: STRONG_DPS, gentle: null };
+  let throwCal = { strong: STRONG_DPS };
   try {
     const t = JSON.parse(localStorage.getItem(THROW_KEY) || 'null');
     if (t && Number(t.strong) > 0) throwCal = { ...throwCal, ...t };
@@ -60,11 +65,12 @@ import { createTutorial } from '/common/tutorial.js';
     try { localStorage.setItem(THROW_KEY, JSON.stringify(throwCal)); } catch (e) {}
   }
   // 회전 속도(도/초) → 힘(0~1). '안 던짐' 구간을 빼고, 이 사람의 '힘껏'을 1 로 맞춘 뒤 곡선을 씌웁니다.
-  //   기본(힘껏 1000): 300 → 약 3m, 400 → 약 4.5m, 600 → 약 10m, 800 → 약 19m, 1000 → 30m
+  //   어려움(힘껏 1000): 300 → 약 3m, 400 → 약 4.5m, 600 → 약 10m, 800 → 약 19m, 1000 → 30m / 쉬움: 120 → 약 9m, 350 → 약 19m, 600 → 30m
   function powerOf(peak) {
-    const strong = clamp(Number(throwCal.strong) || STRONG_DPS, 560, 1700);
-    const x = clamp01((peak - CAST_MIN_DPS) / (strong - CAST_MIN_DPS));
-    return Math.pow(x, POWER_CURVE);
+    // 쉬움·보통은 폰에 기억한 값을 쓰지 않고 난이도 값으로 고정합니다(어려움만 이 사람 값으로 조금씩 맞춤).
+    const strong = diff === 'hard' ? clamp(Number(throwCal.strong) || STRONG_DPS, 560, 1700) : K.strong;
+    const x = clamp01((peak - K.castMin) / (strong - K.castMin));
+    return K.floor + (1 - K.floor) * Math.pow(x, K.curve);
   }
 
   const socket = io({ autoConnect: false, transports: ['websocket', 'polling'], tryAllTransports: true });
@@ -78,12 +84,13 @@ import { createTutorial } from '/common/tutorial.js';
   let me = null;
   let state = { phase: 'lobby' };
   let stateAt = performance.now();
-  let mode = 'start'; // start | connecting | msg | hold | cal | count | play
+  let mode = 'start'; // start | connecting | msg | hold | idle | tut | play
   let gotOri = false;
   let gotMotion = false;
   let hasGyro = false;
   let fallback = false;
   let permDenied = false;
+  let tutChecked = false;
   let sensorHelpOn = false; // 센서 안내 화면은 사용자가 고르거나 센서 값이 들어올 때까지 유지합니다
   let pendingCal = false;
   let noRoomTries = 0;
@@ -91,7 +98,7 @@ import { createTutorial } from '/common/tutorial.js';
   function show(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('on', v.id === id);
     $('btnRecal').classList.toggle('hidden', !(id === 'vPlay' && gotOri && !fallback));
-    $('btnSet').classList.toggle('hidden', !(me && (id === 'vPlay' || id === 'vCal')));
+    $('btnSet').classList.toggle('hidden', !(me && id === 'vPlay'));
   }
   function message(t, b) {
     // 연습 중에 연결 문제가 생기면 연습을 닫고(기록하지 않음) 안내를 보여 줍니다.
@@ -193,6 +200,7 @@ import { createTutorial } from '/common/tutorial.js';
       gotOri = true;
       sensorsChanged();
     }
+    maybeAutoBasis(t);
     if (!basis) return;
     const s = inBasis(basis, ori.top);
     const el = elevOf(s);
@@ -211,7 +219,6 @@ import { createTutorial } from '/common/tutorial.js';
     castCheck(t, el, s);
     motionCrank(t, s);
     if (mode === 'play') drawGauge(el);
-    else if (mode === 'tut' && tutStage === 'aim') aimProbe(yawOf(s));
   }
 
   function onMotion(e) {
@@ -254,18 +261,37 @@ import { createTutorial } from '/common/tutorial.js';
   }
 
   // ---------- 캐스팅: 뒤로 젖혔다가 앞으로 휙 ----------
-  const cast = { state: 'idle', eMax: 0, topAt: 0, peak: 0, armedAt: 0, blockUntil: 0, msg: '' };
+  const cast = { state: 'idle', eMax: 0, topAt: 0, peak: 0, armedAt: 0, blockUntil: 0, msg: '', prevEl: 0, rejectAt: -1e9 };
+  // 막힌 동작에도 반응이 보이게: 짧은 안내 + 진동 한 번
+  function hint(text, ms) {
+    vib(16);
+    note(text, null, ms || 1500);
+  }
   function canCast(t) {
     const st = myStage();
     const on = mode === 'play' || (mode === 'tut' && TUT_CAST.has(tutStage));
     return playing() && (st === 'ready' || st === 'wait') && t - calAt > CAL_GUARD_MS && t > cast.blockUntil && on;
   }
   function castCheck(t, el, s) {
-    if (!basis || !canCast(t)) {
+    const prevEl = cast.prevEl;
+    cast.prevEl = el;
+    if (!basis) {
       cast.state = 'idle';
       return;
     }
-    const armAt = Math.max(basis.e0 + ARM_DEG, 50);
+    if (!canCast(t)) {
+      cast.state = 'idle';
+      // 던질 수 없는 때(찌가 날아가는 중·물고기를 올린 직후)에 젖히면 조용히 무시하지 말고 알려 줍니다.
+      const st = myStage();
+      if (mode === 'play' && playing() && (st === 'cast' || st === 'landed' || st === 'lost') && prevEl <= Math.max(basis.e0 + K.armDeg, K.armMin) && el > Math.max(basis.e0 + K.armDeg, K.armMin) && t - cast.rejectAt > 1500) {
+        cast.rejectAt = t;
+        hint('잠깐만요, 곧 던질 수 있어요');
+      }
+      return;
+    }
+    // 기다리는 중(wait)에는 챔질로 폰을 들어 올리는 동작과 겹치지 않게 예전 값(어려움)으로 둡니다.
+    const KA = myStage() === 'wait' ? CTRL.hard : K;
+    const armAt = Math.min(Math.max(basis.e0 + KA.armDeg, KA.armMin), 85);
     if (cast.state === 'idle') {
       if (el > armAt) {
         cast.state = 'armed';
@@ -283,34 +309,43 @@ import { createTutorial } from '/common/tutorial.js';
       cast.topAt = t;
     }
     if (!hasGyro) cast.peak = Math.max(cast.peak, -eRate(t));
-    if (el < basis.e0 + RELEASE_DEG) {
+    if (el < basis.e0 + KA.releaseDeg) {
       cast.state = 'idle';
       // 가장 높이 젖힌 뒤(내려오는 동안)의 회전만 셉니다. 위로 챈 동작의 회전이 캐스팅 힘으로 잡히지 않게 합니다.
       const peak = hasGyro ? Math.max(cast.peak, rotPeak(Math.max(t - 350, cast.topAt))) : cast.peak;
-      if (peak < CAST_MIN_DPS) {
-        // 챔질 직후 천천히 내린 것이면 캐스팅 안내를 띄우지 않습니다.
-        if (t - lastHook < 1200) return;
-        cast.msg = '조금 더 빠르게 휙!';
+      // 챔질 직후 천천히 내린 것이면 캐스팅으로 보지도, 안내하지도 않습니다.
+      const waiting = myStage() === 'wait';
+      if (t - lastHook < 1200 && peak < KA.castMin) return;
+      if (peak < KA.castMin) {
+        // 너무 느린 동작: 쉬움·보통은 어느 정도 휘둘렀으면 가장 약한 캐스팅으로 받아 주고, 아니면(어려움은 늘) 안내합니다.
+        if (diff !== 'hard' && !waiting && peak >= K.castMin * 0.55) {
+          deliverCast(K.floor, clamp(yawOf(s), -AIM_MAX, AIM_MAX), peak, 'motion');
+          return;
+        }
+        cast.msg = '더 크게 휙!';
+        vib(14);
         drawCastHint();
         return;
       }
-      // 예전에는 젖힌 폭(sweep)도 힘에 25% 더했는데, 사람들은 살살 던질 때도 크게 젖혀서 늘 멀리 날아갔습니다.
-      // 이제 힘은 내려오는 회전 속도만으로 정합니다.
+      // 힘은 내려오는 회전 속도만으로 정합니다(젖힌 폭은 보지 않습니다).
       const power = powerOf(peak);
       const aim = clamp(yawOf(s), -AIM_MAX, AIM_MAX);
       deliverCast(power, aim, peak, 'motion');
     }
   }
-  // src: motion(폰 동작) | near('살짝 던지기' 버튼) | button(버튼 모드의 힘 슬라이더)
+  // src: motion(폰 동작) | near('살짝 던지기' 버튼) | button(큰 '던지기' 버튼·버튼 모드의 힘 슬라이더)
   function deliverCast(power, aim, peak, src = 'motion') {
-    if (!send('cast', { power: round(power, 3), aim: round(aim, 1), rtt: Math.round(rtt()), near: src === 'near' || undefined })) return false;
+    if (!send('cast', { power: round(power, 3), aim: round(aim, 1), rtt: Math.round(rtt()), near: src === 'near' || undefined })) {
+      hint('연결을 확인해 주세요');
+      return false;
+    }
     const dist = distOf(power);
-    cast.msg = src === 'near' ? '살짝 톡! 바로 앞에 떨어져요' : power < 0.2 ? `살살 · 약 ${Math.round(dist)}m` : power > 0.75 ? `힘껏! 약 ${Math.round(dist)}m` : `약 ${Math.round(dist)}m 던졌어요`;
+    cast.msg = src === 'near' ? '살짝 톡!' : '';
     whoosh(power);
     vib(src === 'near' ? 18 : 30);
     debug(`cast ${src} power ${power.toFixed(2)} ≈${dist.toFixed(1)}m aim ${aim.toFixed(1)} peak ${Math.round(peak || 0)} strong ${Math.round(throwCal.strong)}`);
-    // 연습 밖에서 이 사람의 '힘껏'보다 훨씬 세게 던지면 기준을 조금씩 올립니다(늘 끝까지 날아가지 않게).
-    if (src === 'motion' && mode === 'play' && peak > throwCal.strong * 1.12) {
+    // 어려움: 이 사람의 '힘껏'보다 훨씬 세게 던지면 기준을 조금씩 올립니다(늘 끝까지 날아가지 않게).
+    if (diff === 'hard' && src === 'motion' && mode === 'play' && peak > throwCal.strong * 1.12) {
       throwCal.strong = clamp(Math.round(throwCal.strong * 0.75 + peak * 0.25), 560, 1700);
       saveThrow();
     }
@@ -325,14 +360,28 @@ import { createTutorial } from '/common/tutorial.js';
   // '살짝 던지기' 버튼: 지금 겨눈 쪽으로 선착장 바로 앞에 톡
   function nearCast() {
     const st = myStage();
-    if (!playing() || (st !== 'ready' && st !== 'wait')) return;
+    if (!playing() || (st !== 'ready' && st !== 'wait')) {
+      hint('지금은 던질 수 없어요');
+      return;
+    }
     audio();
     deliverCast(NEAR_POWER, currentAim(), 0, 'near');
+  }
+  // 큰 '던지기' 버튼: 휙 던지기와 같은 역할. 지금 겨눈 쪽으로 알맞은 거리(약 16m)로, 큰 화면이 물고기 쪽으로 보정합니다.
+  function buttonCast() {
+    const st = myStage();
+    if (!playing() || (st !== 'ready' && st !== 'wait')) {
+      hint('지금은 던질 수 없어요');
+      return;
+    }
+    audio();
+    deliverCast(BUTTON_POWER, currentAim(), 0, 'button');
   }
 
   // ---------- 챔질: 위로 확 ----------
   let hookWin = null;
   let lastHook = -1e9;
+  let weakAt = -1e9;
   function hookCheck(t) {
     if (hookWin || !basis) return;
     if (mode !== 'play' && !(mode === 'tut' && TUT_HOOK.has(tutStage))) return;
@@ -342,17 +391,30 @@ import { createTutorial } from '/common/tutorial.js';
     let hit;
     let rise;
     if (hasGyro) {
-      if (rotNow < HOOK_DPS) return;
+      if (rotNow < K.hookDps) {
+        // 입질 중에 움직였는데 모자라면 조용히 넘기지 말고 알려 줍니다.
+        if (st === 'bite' && rotNow > K.hookDps * 0.55) weakHook(t);
+        return;
+      }
       rise = eRate(t);
-      hit = rise > HOOK_RISE || (st === 'bite' && rotNow > 320 && rise > -60);
+      hit = rise > K.hookRise || (st === 'bite' && rotNow > K.biteRot && rise > -60);
+      if (!hit && st === 'bite') {
+        weakHook(t);
+        return;
+      }
     } else {
       rise = eRate(t);
-      hit = rise > HOOK_RISE_NOGYRO;
+      hit = rise > K.hookNoGyro;
     }
     if (hit) {
       hookWin = { t0: t, st, speed: hasGyro ? 0 : rise };
       setTimeout(finishHook, HOOK_WIN_MS);
     }
+  }
+  function weakHook(t) {
+    if (t - weakAt < 900) return;
+    weakAt = t;
+    hint('위로 더 크게 확!', 1100);
   }
   function finishHook() {
     const w = hookWin;
@@ -364,9 +426,13 @@ import { createTutorial } from '/common/tutorial.js';
     deliverHook(speed, Math.max(0, Math.round(performance.now() - w.t0)), w.st);
   }
   function deliverHook(speed, ago, st) {
-    if (!send('hookset', { speed: Math.round(speed), ago, rtt: Math.round(rtt()) })) return;
-    // 입질 중 챔질 뒤에 이어지는 동작은 캐스팅으로 보지 않습니다.
-    if (st === 'bite') cast.blockUntil = performance.now() + 1500;
+    if (!send('hookset', { speed: Math.round(speed), ago, rtt: Math.round(rtt()) })) {
+      hint('연결을 확인해 주세요');
+      return;
+    }
+    lastHook = performance.now();
+    // 챔질 뒤에 이어지는 동작은 캐스팅으로 보지 않습니다.
+    cast.blockUntil = performance.now() + 1500;
     whip();
     debug(`hookset speed ${Math.round(speed)} ago ${ago}`);
   }
@@ -406,6 +472,7 @@ import { createTutorial } from '/common/tutorial.js';
     reel.pending = 0;
     $('rateT').textContent = reel.rate.toFixed(1);
     $('spool').style.transform = `rotate(${(reel.total * 360) % 360}deg)`;
+    if (mode === 'play') $('hookRow').classList.toggle('hidden', fallback || myStage() !== 'bite');
   }, REEL_MS);
 
   // 화면 핸들: 손가락으로 원을 그리면 각도를 이어 붙여 바퀴 수를 셉니다. 처음 60° 로 방향을 정하고 그 방향만 셉니다.
@@ -433,10 +500,15 @@ import { createTutorial } from '/common/tutorial.js';
     let d = wrap(a - dial.last);
     dial.last = a;
     setArm(a);
-    if (rr < 0.15 || Math.abs(d) > 1.3) return;
+    if (rr < K.dialDead || Math.abs(d) > K.dialJump) return;
+    // 쉬움: 방향을 가리지 않고 어떻게 휘저어도 감깁니다. 보통·어려움: 처음 움직인 방향만 셉니다(보통은 조금만 돌려도 정함).
+    if (!K.dialLock) {
+      addTurns(Math.abs(d) / TAU);
+      return;
+    }
     if (!dial.lock) {
       dial.acc += d;
-      if (Math.abs(dial.acc) > 1.05) {
+      if (Math.abs(dial.acc) > K.dialLock) {
         dial.lock = Math.sign(dial.acc);
         addTurns(Math.abs(dial.acc) / TAU);
       }
@@ -521,11 +593,29 @@ import { createTutorial } from '/common/tutorial.js';
   // ---------- 소리·진동 ----------
   let actx = null;
   let noiseBuf = null;
+  let smp = null;
+  // 폰은 손에 바로 오는 소리 3개만 녹음으로(파일 3개): 던질 때 휙, 감을 때 딸깍(한 벌만), 입질·점프 풍덩. 나머지는 합성음 그대로.
+  const PHONE_SFX = {
+    'swing/cast': SFX['swing/cast'],
+    'swing/reel-click': { file: SFX['swing/reel-click'].files[0], gain: SFX['swing/reel-click'].gain },
+    'water/splash-small': SFX['water/splash-small']
+  };
+  // 시험용 집계
+  const sfxStat = (window.__fishingPhoneSfx = { played: {}, synth: {} });
+  function P(name, opts) {
+    const a = audio();
+    const ok = !!(a && smp && a.state === 'running' && smp.play(name, opts));
+    const m = ok ? sfxStat.played : sfxStat.synth;
+    m[name] = (m[name] || 0) + 1;
+    return ok;
+  }
   function audio() {
     if (!actx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return null;
       actx = new AC();
+      smp = createSamples(actx, null, { manifest: PHONE_SFX });
+      smp.preload(['swing/', 'water/']);
       noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
       const d = noiseBuf.getChannelData(0);
       for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -574,18 +664,19 @@ import { createTutorial } from '/common/tutorial.js';
   function vib(pattern) {
     try { haptics.buzz(Array.isArray(pattern) ? pattern : [pattern], { noFlash: true, silent: true }); } catch (e) {}
   }
-  const click = () => noise(0.018, 3600, 3, 0.22);
+  const click = () => { if (P('swing/reel-click', { gain: 0.8, rate: 1 })) return; noise(0.018, 3600, 3, 0.22); };
   const whoosh = (p) => {
+    if (P('swing/cast', { gain: 0.55 + 0.45 * p, rate: 0.94 + 0.14 * p })) return;
     noise(0.4 + p * 0.25, 600, 0.8, 0.25 + p * 0.3, { sweep: 2800, attack: 0.06 });
     for (let i = 0; i < 9; i++) noise(0.025, 5000, 4, 0.08, { at: 0.15 + i * (0.05 + p * 0.03) });
   };
   const whip = () => noise(0.12, 1800, 0.9, 0.35, { sweep: 500 });
   const plop = () => { tone(500, 0.12, 0.3, 'sine', 170); noise(0.3, 900, 0.6, 0.18, { attack: 0.01 }); };
   const nibbleSnd = () => tone(620, 0.06, 0.25, 'sine', 480);
-  const biteSnd = () => { tone(90, 0.7, 0.4, 'sawtooth', 55); noise(0.6, 500, 0.7, 0.3, { attack: 0.02 }); };
+  const biteSnd = () => { if (P('water/splash-small', { gain: 1, rate: 0.9 })) return; tone(90, 0.7, 0.4, 'sawtooth', 55); noise(0.6, 500, 0.7, 0.3, { attack: 0.02 }); };
   const hookedSnd = () => { tone(160, 0.25, 0.4, 'triangle', 70); tone(1400, 0.2, 0.15, 'triangle', 2200, 0.05); };
   const snapSnd = () => { noise(0.06, 5000, 0.6, 0.6, { type: 'highpass' }); tone(1700, 0.12, 0.2, 'square', 300); };
-  const splashSnd = () => noise(0.5, 900, 0.5, 0.35, { attack: 0.01 });
+  const splashSnd = () => { if (P('water/splash-small', { gain: 0.8 })) return; noise(0.5, 900, 0.5, 0.35, { attack: 0.01 }); };
   function fanfare(big) {
     const notes = big ? [523, 659, 784, 1047, 1319] : [587, 740, 880, 1175];
     notes.forEach((f, i) => tone(f, 0.3, 0.2, 'triangle', null, i * 0.09));
@@ -619,6 +710,7 @@ import { createTutorial } from '/common/tutorial.js';
   setInterval(() => {
     if (dragNode && actx && performance.now() > dragUntil) dragNode.g.gain.setTargetAtTime(0, actx.currentTime, 0.05);
   }, 100);
+  audio(); // 컨텍스트를 미리 만들어 두어야 녹음 3개를 대기 중에 받아 둘 수 있음(재생은 첫 탭에서 깨움)
   function buzz(pattern, flashKind) {
     vib(pattern);
     // iPhone 은 진동이 없어 화면을 번쩍입니다.
@@ -630,83 +722,66 @@ import { createTutorial } from '/common/tutorial.js';
     }
   }
 
-  // ---------- 자세 맞추기 ----------
-  let countTimer = null;
-  function openCal() {
-    clearInterval(countTimer);
-    mode = 'cal';
-    $('calN').classList.add('hidden');
-    $('btnReady').classList.remove('hidden');
-    $('btnCalCancel').classList.toggle('hidden', !basis);
-    $('calT').textContent = basis ? '다시 맞춰요' : '낚싯대처럼 쥐어요';
-    $('calB').textContent = '폰 아래쪽을 손잡이처럼 쥐고 폰 윗부분이 TV를 향하게,\n화면은 하늘을 보게 든 뒤 준비를 눌러요.';
-    show('vCal');
-  }
-  function startCountdown() {
-    if (!gotOri) {
-      $('calB').textContent = '방향 센서 값이 들어오지 않아요.\n잠시 뒤 다시 눌러 주세요.';
+  // ---------- 기준 자세: 따로 맞추는 화면 없이, 폰이 잠깐 가만히 있을 때 저절로 잡습니다 ----------
+  // 시작하고 처음 가만한 순간(최대 2.5초 기다린 뒤에는 그 자세 그대로)에 잡고, '다시 맞추기'는 0.5초 뒤 가만할 때 다시 잡습니다.
+  const basisAsk = { on: true, at: 0, manual: false };
+  function maybeAutoBasis(t) {
+    if (!basisAsk.on || fallback) return;
+    // 처음 잡을 때는 낚시 화면에서 던질 차례(ready)가 되고 나서부터 셉니다(시작 버튼 누른 자세를 잡지 않게).
+    if (!basisAsk.manual && !(mode === 'play' && playing() && myStage() === 'ready')) {
+      basisAsk.at = 0;
       return;
     }
-    mode = 'count';
-    let n = 3;
-    $('calN').textContent = n;
-    $('calN').classList.remove('hidden');
-    $('btnReady').classList.add('hidden');
-    $('btnCalCancel').classList.add('hidden');
-    $('calT').textContent = '그대로 멈춰요';
-    $('calB').textContent = '낚싯대를 쥔 자세 그대로, 폰 윗부분이 TV를 보게 둬요.';
-    tick();
-    vib(15);
-    clearInterval(countTimer);
-    countTimer = setInterval(() => {
-      n -= 1;
-      if (n > 0) {
-        $('calN').textContent = n;
-        tick();
-        vib(15);
-        return;
-      }
-      clearInterval(countTimer);
-      captureBasis();
-    }, 1000);
+    if (!basisAsk.at) basisAsk.at = t;
+    if (t - basisAsk.at < 400 || oriBuf.length < 3) return;
+    const ref = oriBuf[oriBuf.length - 1].top;
+    // 가만히 있고, 폰을 세워 들여다보는 자세(윗부분이 거의 하늘)가 아닐 때
+    const still = oriBuf.every((o) => dot(o.top, ref) > 0.997) && (!hasGyro || rotNow < 40) && ref[1] < 0.94;
+    if (still || t - basisAsk.at > 2500) captureBasis();
   }
   function captureBasis() {
     const t = performance.now();
     let src = oriBuf.filter((o) => o.t >= t - 250);
     if (!src.length && ori) src = [ori];
-    if (!src.length) {
-      openCal();
-      $('calB').textContent = '방향 센서 값이 끊겼어요.\n다시 준비를 눌러 주세요.';
-      return;
-    }
+    if (!src.length) return;
     const top = norm(src.reduce((a, o) => add(a, o.top), [0, 0, 0]));
     const face = norm(src.reduce((a, o) => add(a, o.face), [0, 0, 0]));
     basis = makeBasis(top, face);
-    basis.e0 = clamp(elevOf(inBasis(basis, top)), -10, 60);
+    basis.e0 = clamp(elevOf(inBasis(basis, top)), -10, 45);
     calAt = t;
     nextPoseAt = 0;
     eHist.length = 0;
     cast.state = 'idle';
+    basisAsk.on = false;
     // 큰 화면은 이 신호로 낚싯대 기준을 다시 잡습니다. 이 뒤의 pose 는 새 기준축 값입니다.
     if (!send('calibrate', { e0: round(basis.e0, 1) })) pendingCal = true;
-    buzz([30, 40, 30]);
-    tone(1320, 0.12, 0.3);
-    mode = 'idle';
+    if (basisAsk.manual) {
+      basisAsk.manual = false;
+      buzz([30, 40, 30]);
+      tone(1320, 0.12, 0.3);
+      note('맞췄어요');
+    }
     debug(`calibrate e0 ${basis.e0.toFixed(1)} f=${basis.f.map((x) => x.toFixed(2))}`);
-    render();
+  }
+  // 선택: 머리의 '다시 맞추기' (TV 쪽을 보고 낚싯대처럼 쥔 뒤 누릅니다)
+  function recalibrate() {
+    Object.assign(basisAsk, { on: true, at: performance.now() + 500, manual: true });
+    note('잠깐 그대로!');
   }
 
   // ---------- 화면 ----------
   const STAGE_TEXT = {
-    ready: ['던지세요', '큰 화면의 조준선으로 물고기를 겨누고, 폰을 뒤로 젖혔다가 앞으로 휙!'],
-    cast: ['휙!', '찌가 떨어지면 기다려요.'],
-    wait: ['기다리는 중', '톡톡은 참고, 쏙 들어가면 위로 확! 핸들을 살짝 돌리면 찌가 톡 움직여요.'],
-    bite: ['지금! 위로 확', '폰을 위로 확 들어 올려요!'],
-    fight: ['감아요!', '핸들을 돌려 감아요. 장력이 빨개지면 멈춰요.'],
-    landed: ['잡았다!', '놓아주고 다시 던져요.'],
-    lost: ['채비 정리 중…', '새 찌를 달고 있어요.']
+    ready: ['휙 던져요!', ''],
+    cast: ['날아가요', ''],
+    wait: ['기다려요', ''],
+    bite: ['지금! 위로 확!', ''],
+    fight: ['핸들을 돌려요', ''],
+    landed: ['잡았다!', ''],
+    lost: ['다시 던져요', '']
   };
   let lastStage = null;
+  let waitSince = 0;
+  let waitHinted = false;
   let fight = { value: 0, dist: 0, drag: false, run: false, side: 0, at: 0 };
   let nibbleAt = -1e9;
   function setStatus(t, b, cls) {
@@ -749,7 +824,7 @@ import { createTutorial } from '/common/tutorial.js';
       $('tension').classList.toggle('hidden', st !== 'fight');
       $('dialWrap').classList.toggle('hidden', !(st === 'wait' || st === 'bite' || st === 'fight'));
       $('dialWrap').classList.toggle('compact', st !== 'fight');
-      $('btnMotion').classList.toggle('hidden', !gotOri || fallback);
+      $('btnMotion').classList.toggle('hidden', !gotOri || fallback || diff !== 'hard');
       $('pads').classList.toggle('hidden', !fallback || st === 'landed' || st === 'lost');
       $('btnCast').disabled = !(st === 'ready' || st === 'wait');
       $('btnHook').disabled = !(st === 'wait' || st === 'bite');
@@ -757,6 +832,9 @@ import { createTutorial } from '/common/tutorial.js';
       $('btnTwitch').disabled = st !== 'wait';
       $('btnNear').disabled = !(st === 'ready' || st === 'wait');
       $('nearRow').classList.toggle('hidden', fallback || !(st === 'ready' || st === 'wait'));
+      $('hookRow').classList.toggle('hidden', fallback || st !== 'bite');
+      if (st === 'wait') waitSince = performance.now();
+      waitHinted = false;
       for (const id of ['btnCast', 'btnNear', 'btnHook', 'btnReel', 'btnTwitch']) $(id).style.opacity = $(id).disabled ? 0.4 : 1;
       if (st === 'ready') cast.msg = '';
       if (prev === 'fight' && st !== 'fight') dragSound(false);
@@ -766,21 +844,18 @@ import { createTutorial } from '/common/tutorial.js';
       if (st === 'fight') drawTension();
     }
   }
+  let castHintKo = false; // 화면 글자는 번역돼 있으므로 글자 비교 대신 이 표시로 '이제 앞으로 휙!' 인지 봅니다
   function drawCastHint() {
-    const st = myStage();
     let t = '';
-    if (cast.state === 'armed' && !fallback) t = '좋아요! 이제 앞으로 휙!';
+    if (cast.state === 'armed' && !fallback) t = '이제 앞으로 휙!';
     else if (cast.msg) t = cast.msg;
-    else if (fallback) t = st === 'ready' || st === 'wait' ? '방향과 힘을 고르고 던지기를 눌러요' : '';
-    else if (st === 'ready') t = '겨누고 뒤로 젖혔다가 휙 · 살살 하면 가까이';
-    else if (st === 'wait') t = '다시 던지면 감아 들인 뒤 던져요';
+    castHintKo = t === '이제 앞으로 휙!';
     $('castHint').textContent = t;
   }
   function drawDialHint() {
-    const st = myStage();
     const h = $('dialHint');
     if (h.classList.contains('warn')) return;
-    h.textContent = mc.on ? '폰 끝으로 작은 원을 그려도 감겨요' : st === 'fight' ? '손가락으로 원을 그리며 감아요' : '감으면 찌가 끌려와요';
+    h.textContent = myStage() === 'fight' ? '원을 그려요' : '';
   }
   function drawGauge(el) {
     if ($('gauge').classList.contains('hidden') || (!basis && !fallback)) return;
@@ -788,11 +863,11 @@ import { createTutorial } from '/common/tutorial.js';
     const e = clamp(el, -10, 190) * RD;
     $('rodLine').setAttribute('x2', (Math.cos(e) * 88).toFixed(1));
     $('rodLine').setAttribute('y2', (-Math.sin(e) * 88).toFixed(1));
-    const a0 = Math.max(e0 + ARM_DEG, 50) * RD;
+    const a0 = Math.min(Math.max(e0 + K.armDeg, K.armMin), 85) * RD;
     const a1 = 170 * RD;
     $('zoneBack').setAttribute('d', `M ${(Math.cos(a0) * 96).toFixed(1)} ${(-Math.sin(a0) * 96).toFixed(1)} A 96 96 0 0 0 ${(Math.cos(a1) * 96).toFixed(1)} ${(-Math.sin(a1) * 96).toFixed(1)}`);
     $('rodLine').setAttribute('stroke', cast.state === 'armed' ? 'var(--c)' : '#fff');
-    if (cast.state === 'armed' && $('castHint').textContent !== '좋아요! 이제 앞으로 휙!') drawCastHint();
+    if (cast.state === 'armed' && !castHintKo) drawCastHint();
   }
   function drawTension() {
     const v = fight.value;
@@ -801,24 +876,20 @@ import { createTutorial } from '/common/tutorial.js';
     $('tDist').textContent = `${(fight.dist || 0).toFixed(1)}m`;
     let label = '장력';
     let cls = '';
-    let sub = STAGE_TEXT.fight[1];
     if (v > 0.92) {
       label = '위험! 멈춰요';
       cls = 'hot';
-      sub = '줄이 끊어지기 직전이에요. 감기를 멈춰요!';
     } else if (fight.drag || fight.run) {
       label = '달린다! 잠깐 멈춰요';
       cls = v > 0.8 ? 'hot' : '';
-      sub = '물고기가 달릴 땐 드랙이 줄을 내줘요. 지치면 다시 감아요.';
     } else if (v < 0.1) {
       label = '느슨해요! 감아요';
-      sub = '줄이 느슨하면 바늘이 빠져요. 계속 감아요.';
     } else label = '좋아요, 감아요';
     $('tLabel').textContent = label;
-    setStatus('파이팅!', sub, cls);
+    setStatus('파이팅!', '', cls);
     const sh = $('sideHint');
-    if (fight.side && !fallback) {
-      sh.innerHTML = fight.side < 0 ? '<i>←</i> 왼쪽으로 가요 · 폰을 오른쪽으로 눕혀요 <i>→</i>' : '<i>←</i> 폰을 왼쪽으로 눕혀요 · 오른쪽으로 가요 <i>→</i>';
+    if (fight.side && !fallback && diff === 'hard') {
+      sh.innerHTML = fight.side < 0 ? '<i>←</i> 폰을 오른쪽으로 눕혀요 <i>→</i>' : '<i>←</i> 폰을 왼쪽으로 눕혀요 <i>→</i>';
     } else sh.textContent = '';
   }
 
@@ -839,7 +910,7 @@ import { createTutorial } from '/common/tutorial.js';
   function showHold() {
     mode = 'hold';
     $('msgT').textContent = '큰 화면을 기다리는 중…';
-    $('msgB').textContent = '큰 화면이 켜져 있으면 곧 바로 낚시할 수 있어요.';
+    $('msgB').textContent = '';
     const fb = $('btnFallback');
     if (fb) fb.remove();
     show('vMsg');
@@ -848,17 +919,11 @@ import { createTutorial } from '/common/tutorial.js';
   function render() {
     if (!me) return;
     if (mode === 'start' || mode === 'connecting' || mode === 'msg') return;
-    if (mode === 'cal' || mode === 'count') return;
     if (mode === 'tut') {
       tutRefresh();
       return;
     }
     if (playing()) {
-      // 센서가 있으면 먼저 낚싯대 자세를 맞추고, 끝나면 바로 낚시합니다(대기실 없음).
-      if (!basis && gotOri && !fallback) {
-        openCal();
-        return;
-      }
       if (fallback) fallbackCalibrate();
       if (mode !== 'play') showPlay();
       else updatePlay();
@@ -894,8 +959,7 @@ import { createTutorial } from '/common/tutorial.js';
     sensorHelpOn = true;
     // 안내를 닫지 않은 채 경기가 시작돼도 버튼 조작은 되게 둡니다.
     fallback = true;
-    message('동작 센서를 쓸 수 없어요',
-      'iPhone: Safari 를 앱 전환기에서 완전히 닫고 QR을 다시 찍은 뒤, 동작 접근을 허용해 주세요.\nAndroid: 주소창 자물쇠 → 사이트 설정 → 동작 센서를 허용해 주세요.\n\n지금은 버튼으로도 할 수 있어요.');
+    message('동작 센서를 쓸 수 없어요', '센서를 허용하거나 버튼으로 해요.');
     const b = document.createElement('button');
     b.id = 'btnFallback';
     b.className = 'ghost';
@@ -911,13 +975,18 @@ import { createTutorial } from '/common/tutorial.js';
   setInterval(() => {
     if (mode !== 'play') return;
     if (myStage() === 'wait' && performance.now() - nibbleAt > 600) $('bob').classList.remove('nib');
+    // 물고기가 안 오는 자리에 던졌을 때: 한참 기다리게 두지 말고 다시 던지라고 알려 줍니다.
+    if (myStage() === 'wait' && !waitHinted && performance.now() - Math.max(waitSince, nibbleAt) > WAIT_HINT_MS) {
+      waitHinted = true;
+      cast.msg = '안 오네요, 다시 던져요';
+      drawCastHint();
+    }
   }, 250);
 
   // ================================================================
   // 난이도(언제든 바꿈) · 설정 시트
   // ================================================================
   const DIFF = { easy: '쉬움', normal: '보통', hard: '어려움' };
-  let hookWinSec = 1.25;
   // 누가 바꿨는지 알려고 큰 화면 설정의 '마지막 변경'을 먼저 받아 둡니다(ps 보다 먼저 듣도록 위에서 등록).
   let lastChange = null;
   const keepLast = (st) => { if (st && st.last && st.last.key) lastChange = st.last; };
@@ -925,7 +994,6 @@ import { createTutorial } from '/common/tutorial.js';
   socket.on('msg', (m) => { if (m && m.type === 'pcg-settings') keepLast(m.settings); });
   const ps = createPhoneSettings({ socket });
   ps.attach(socket);
-  ps.mount($('calSet'), { compact: true });
   ps.mount($('sheetSet'));
   haptics.listen(socket, { slot: () => (me ? me.slot : null) });
   let knownDiff = null;
@@ -934,25 +1002,28 @@ import { createTutorial } from '/common/tutorial.js';
     if (!d) return;
     $('setLbl').textContent = DIFF[d] || d;
     $('btnSet').dataset.diff = d;
+    diff = CTRL[d] ? d : 'easy';
+    K = CTRL[diff];
+    if (mode === 'play') updatePlay(true);
     if (knownDiff && knownDiff !== d) {
       const by = info && info.chose ? 'me' : lastChange && lastChange.key === 'difficulty' ? lastChange.by : null;
       const mine = by === 'me' || (me && Number(by) === me.slot);
       // 내가 고른 것은 시트 안에 바로 보이므로 짧게, 남이 바꾼 것은 누가 바꿨는지와 함께 알립니다.
-      if (mine) note(`난이도 ${DIFF[d]} · 같은 호수 모두에게 적용돼요`, d);
-      else if (Number(by) > 0) note(`${Number(by)}P가 난이도를 ${DIFF[d]}으로 바꿨어요`, d);
-      else note(`큰 화면에서 난이도를 ${DIFF[d]}으로 바꿨어요`, d);
+      if (mine) note(T('난이도 {d}', { d: DIFF[d] }), d);
+      else if (Number(by) > 0) note(T('{n}P가 난이도를 {d}으로 바꿨어요', { n: Number(by), d: DIFF[d] }), d);
+      else note(T('큰 화면에서 난이도를 {d}으로 바꿨어요', { d: DIFF[d] }), d);
     }
     knownDiff = d;
   });
   let noteTimer = null;
-  function note(text, diff) {
+  function note(text, level, ms) {
     const n = $('note');
     n.textContent = text;
-    if (diff) n.dataset.diff = diff;
+    if (level) n.dataset.diff = level;
     else delete n.dataset.diff;
     n.classList.add('on');
     clearTimeout(noteTimer);
-    noteTimer = setTimeout(() => n.classList.remove('on'), 2600);
+    noteTimer = setTimeout(() => n.classList.remove('on'), ms || 2600);
   }
   function openSheet() {
     audio();
@@ -970,18 +1041,14 @@ import { createTutorial } from '/common/tutorial.js';
   $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) closeSheet(); });
 
   // ================================================================
-  // 처음 하는 사람 연습(튜토리얼): 같은 호수에서 진짜로 해 봅니다.
-  // 겨누기 → 살살 던지기 → 힘껏 던지기(이 사람 '힘껏' 기억) → 톡톡 참고 챔질 → 감아 올리기
-  // 큰 화면은 msg {type:'tut', stage} 를 받고, 챔질 단계부터 작은 물고기를 데려와 톡톡 두 번 뒤 꼭 물게 합니다.
+  // 연습(튜토리얼): 저절로 시작하지 않습니다. 설정의 '튜토리얼 다시 하기' 링크(또는 ?tut=1)로만, 2단계 한 줄씩.
+  // 같은 호수에서 진짜로 해 봅니다: 던지고 챔질 → 감아 올리기. 큰 화면은 msg {type:'tut', stage} 를 받고
+  // 작은 물고기를 데려와 톡톡 두 번 뒤 꼭 물게 합니다.
   // ================================================================
-  const TUT_CAST = new Set(['gentle', 'strong', 'hook', 'reel']);
+  const TUT_CAST = new Set(['hook', 'reel']);
   const TUT_HOOK = new Set(['hook', 'reel']);
-  const AIM_TUT_DEG = 13;
   let tutStage = null;
-  let tutChecked = false;
   let tutView = null; // 단계 안 작은 화면 { bob, cue, near }
-  const tutTries = { gentle: 0, strong: 0 };
-  const aimSeen = new Set();
   // 연습용 찌: 물(반투명 사각)을 찌 위에 그려서, 떠 있을 때는 윗반만, 쑥 들어가면 안테나 끝만 보입니다.
   const BOB_SVG = '<svg class="tbob" viewBox="-120 -86 240 146" aria-hidden="true"><defs>' +
     '<linearGradient id="twg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3f7a86" stop-opacity=".93"/><stop offset="1" stop-color="#0f2128"/></linearGradient>' +
@@ -995,13 +1062,6 @@ import { createTutorial } from '/common/tutorial.js';
     '<ellipse class="tring" cx="0" cy="9" rx="34" ry="7" fill="none" stroke="rgba(255,255,255,.7)" stroke-width="2"/>' +
     '<ellipse class="tring t2" cx="0" cy="9" rx="34" ry="7" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="1.6"/>' +
     '<path d="M-110 9 q 18 -5 36 0 t 36 0 t 36 0 t 36 0 t 36 0 t 36 0" stroke="rgba(255,255,255,.35)" stroke-width="2" fill="none"/></svg>';
-  // 겨누기 그림: 낚싯대(폰) 끝이 좌우로 돌며 TV 의 점선이 따라갑니다.
-  const AIM_SVG = '<svg class="pcgt-svg" viewBox="0 0 200 160" aria-hidden="true">' +
-    '<rect x="58" y="10" width="84" height="46" rx="6" class="pcgt-tv"/><path d="M100 56v8M86 66h28" class="pcgt-tvs"/>' +
-    '<g transform="translate(100 150)"><g><animateTransform attributeName="transform" type="rotate" values="-22;22;-22" keyTimes="0;.5;1" calcMode="spline" keySplines=".45 0 .55 1;.45 0 .55 1" dur="2.4s" repeatCount="indefinite"/>' +
-    '<path d="M0 -26 L0 -124" class="pcgt-beam"/><rect x="-11" y="-58" width="22" height="40" rx="5" class="pcgt-ph"/><rect x="-8" y="-54" width="16" height="30" rx="2" class="pcgt-scr"/>' +
-    '<rect x="-10" y="-22" width="20" height="18" rx="7" class="pcgt-hand"/></g></g>' +
-    '<path d="M44 96 A70 70 0 0 1 156 96" class="pcgt-arc"/><path d="M150 88l7 8-10 3" class="pcgt-arrow"/><path d="M50 88l-7 8 10 3" class="pcgt-arrow"/></svg>';
   function sendTutStage() {
     send('msg', { type: 'tut', stage: tut.isRunning() ? tutStage : null });
   }
@@ -1020,16 +1080,16 @@ import { createTutorial } from '/common/tutorial.js';
     if (tutView.reel) {
       const live = st === 'fight';
       $('tension').classList.toggle('dim', !live);
-      if (!live) tutCue(st === 'bite' ? '지금! 위로 확!' : st === 'wait' ? '물면 위로 확 챈 뒤 감아요' : st === 'ready' ? '먼저 찌를 던져요' : '…', st === 'bite' ? 'hot' : '');
-      else tutCue('핸들을 빙글빙글 · 빨개지면 잠깐 멈춤', '');
+      if (!live) tutCue(st === 'bite' ? '지금! 위로 확!' : st === 'wait' ? '물면 위로 확!' : st === 'ready' ? '먼저 던져요' : '…', st === 'bite' ? 'hot' : '');
+      else tutCue('핸들을 돌려요', '');
       return;
     }
     if (tutStage !== 'hook') return;
     const t = performance.now();
-    if (st === 'ready') tutCue(fallback ? '먼저 찌를 던져요 · 아래 버튼' : '먼저 찌를 던져요 · 살살 휙 또는 아래 버튼');
-    else if (st === 'cast') tutCue('찌가 날아가요…');
-    else if (st === 'wait' && t - nibbleAt > 900) tutCue('찌를 지켜봐요 · 물고기가 다가와요');
-    else if (st === 'bite') tutCue('지금! 폰을 위로 확!', 'hot');
+    if (st === 'ready') tutCue('휙 던지거나 아래 버튼');
+    else if (st === 'cast') tutCue('날아가요');
+    else if (st === 'wait' && t - nibbleAt > 900) tutCue('찌를 지켜봐요');
+    else if (st === 'bite') tutCue('지금! 위로 확!', 'hot');
     else if (st === 'fight') tutCue('걸렸다!', 'good');
   }
   function tutBtn(label, cls, onTap) {
@@ -1044,121 +1104,41 @@ import { createTutorial } from '/common/tutorial.js';
     });
     return b;
   }
-  // 버튼 모드(센서 없음)에서 겨누기
-  function fbAim(side) {
-    const a = $('aim');
-    a.value = side === 'left' ? -20 : 20;
-    syncSliders();
-    aimProbe(Number(a.value));
-  }
-  function aimProbe(yaw) {
-    const side = yaw <= -AIM_TUT_DEG ? 'left' : yaw >= AIM_TUT_DEG ? 'right' : null;
-    if (!side || aimSeen.has(side)) return;
-    aimSeen.add(side);
-    tut.signal('aim', { side });
-  }
   function fbCast(power, src) {
     const st = myStage();
     if (!playing() || (st !== 'ready' && st !== 'wait')) {
-      tut.fail(st === 'cast' ? '찌가 아직 날아가는 중이에요' : '조금만 기다려요');
+      tut.fail('조금만 기다려요');
       return;
     }
     deliverCast(power, currentAim(), 0, src);
   }
   const TUT_STEPS = [
     {
-      id: 'aim', title: '겨누기', body: '폰 끝을 왼쪽, 오른쪽으로 돌려 봐요.\n큰 화면에서 내 색 점선이 따라 움직여요.',
-      svg: AIM_SVG, waitFor: 'aim', count: 2, hint: '왼쪽, 오른쪽 한 번씩', okText: '잘 겨눴어요!',
-      render(stage) {
-        if (!fallback) return null;
-        const row = document.createElement('div');
-        row.className = 'tbtns';
-        row.append(tutBtn('← 왼쪽', '', () => fbAim('left')), tutBtn('오른쪽 →', '', () => fbAim('right')));
-        stage.append(row);
-        return null;
-      }
-    },
-    {
-      id: 'gentle', title: '살살 던지기', body: '조금만 젖혔다가 앞으로 톡.\n선착장 바로 앞, 가까운 물에 떨어져요.',
-      svg: 'swing', svgOpts: { from: -46, to: 18 }, waitFor: 'cast', hint: '살살 휙', okText: '가까이 떨어졌어요!',
-      check(d) {
-        if (d.src === 'near' || d.src === 'button') {
-          return { ok: true, msg: `약 ${Math.round(d.dist)}m · '살짝 던지기' 버튼도 늘 있어요` };
-        }
-        if (d.dist <= GENTLE_MAX_M) {
-          throwCal.gentle = Math.round(d.peak);
-          saveThrow();
-          return { ok: true, msg: `약 ${Math.round(d.dist)}m · 큰 화면에서 바로 앞에 떨어졌죠?` };
-        }
-        tutTries.gentle += 1;
-        // 두 번 넘게 멀리 가면 이 폰에 맞게 '힘껏' 기준을 올려(같은 동작이 더 가까이 가게) 다시 해 봅니다.
-        if (tutTries.gentle >= 2 && d.peak > 0) {
-          throwCal.strong = clamp(Math.round(Math.max(throwCal.strong, d.peak * 2.3)), 560, 1700);
-          saveThrow();
-          return `약 ${Math.round(d.dist)}m 날아갔어요. 이 폰에 맞게 바꿨어요. 한 번 더 살살!`;
-        }
-        return `약 ${Math.round(d.dist)}m 날아갔어요. 더 살살, 손목만 톡!`;
-      },
-      render(stage) {
-        if (!fallback) return null;
-        const row = document.createElement('div');
-        row.className = 'tbtns';
-        row.append(tutBtn('살짝 던지기 <small>바로 앞</small>', 'main', () => fbCast(NEAR_POWER, 'near')));
-        stage.append(row);
-        return null;
-      }
-    },
-    {
-      id: 'strong', title: '힘껏 던지기', body: '크게 젖혔다가 힘껏 휙!\n멀리 있는 큰 물고기까지 닿아요.',
-      svg: 'cast', waitFor: 'cast', hint: '크게 젖혔다가 휙', okText: '멀리 날아갔어요!',
-      check(d) {
-        if (d.src === 'button') return d.power >= STRONG_MIN_POWER || '힘을 더 올려서 던져요';
-        if (d.src === 'near') return '이번엔 폰으로 힘껏 던져요';
-        tutTries.strong += 1;
-        const gentle = Number(throwCal.gentle) || 0;
-        // 기본 기준으로 충분히 멀리 갔거나, 두 번째부터는 살살보다 확실히 세면 이 세기를 이 사람의 '힘껏'으로 삼습니다.
-        const ok = d.power >= STRONG_MIN_POWER || (tutTries.strong >= 2 && d.peak > Math.max(gentle * 1.4, CAST_MIN_DPS * 2));
-        if (!ok) return `약 ${Math.round(d.dist)}m. 더 크게 젖혔다가 세게 휙!`;
-        throwCal.strong = clamp(Math.round(Math.max(d.peak * 1.05, gentle * 2)), 560, 1700);
-        saveThrow();
-        return { ok: true, msg: `약 ${Math.round(d.dist)}m! 이 세기를 '힘껏'으로 기억할게요` };
-      },
-      render(stage) {
-        if (!fallback) return null;
-        const row = document.createElement('div');
-        row.className = 'tbtns';
-        row.append(tutBtn('힘껏 던지기', 'main', () => fbCast(0.85, 'button')));
-        stage.append(row);
-        return null;
-      }
-    },
-    {
-      id: 'hook', title: '기다렸다가 챔질', body: '톡톡은 간 보기예요. 참아요.\n찌가 쑥 들어가며 폰이 부르르 떨면 위로 확!',
-      waitFor: 'hooked', hint: '찌를 지켜봐요', okText: '걸렸다!',
+      id: 'hook', title: '던지고 챔질', body: '휙 던지고, 찌가 쑥 들어가면 위로 확!',
+      waitFor: 'hooked', okText: '걸렸다!',
       render(stage) {
         const box = document.createElement('div');
         box.className = 'tview';
         box.innerHTML = `${BOB_SVG}<div class="tcue"></div><div class="tbtns"></div>`;
         stage.append(box);
         const row = box.querySelector('.tbtns');
-        const near = tutBtn('살짝 던지기 <small>바로 앞</small>', '', () => fbCast(NEAR_POWER, 'near'));
+        const near = tutBtn('던지기', 'main', () => fbCast(BUTTON_POWER, 'button'));
         row.append(near);
         let hook = null;
-        if (fallback) {
-          hook = tutBtn('챔질 ↑', 'main hook', () => {
-            const st = myStage();
-            if (st === 'wait' || st === 'bite') deliverHook(650, 0, st);
-          });
-          row.append(hook);
-        }
+        // 챔질 버튼: 센서가 있어도 늘 같이 있습니다(폰을 들어 올리는 것과 같은 역할).
+        hook = tutBtn('챔질 ↑', 'main hook', () => {
+          const st = myStage();
+          if (st === 'wait' || st === 'bite') deliverHook(650, 0, st);
+        });
+        row.append(hook);
         tutView = { bob: box.querySelector('.tbob'), cue: box.querySelector('.tcue'), near, hook };
         tutRefresh();
         return () => { tutView = null; };
       }
     },
     {
-      id: 'reel', title: '감아 올리기', body: '핸들을 손가락으로 빙글빙글 돌려 감아요.\n장력이 빨개지면 잠깐 멈췄다가 다시.',
-      waitFor: 'landed', hint: '끝까지 감아요', okText: '잡았다!',
+      id: 'reel', title: '감아 올리기', body: '핸들을 돌려 감아요',
+      waitFor: 'landed', okText: '잡았다!',
       render(stage) {
         const dw = $('dialWrap');
         const tn = $('tension');
@@ -1185,14 +1165,9 @@ import { createTutorial } from '/common/tutorial.js';
   const tut = createTutorial({
     key: 'fishing',
     socket,
-    title: '배스 낚시 연습 · 진짜 호수에서 해 봐요',
     steps: TUT_STEPS,
-    finish: { title: '연습 끝!', body: '이제 마음껏 낚아요.\n난이도와 다시 연습은 오른쪽 위 설정에 있어요.', button: '낚시하러 가기' },
     onStep: (i, step) => {
       tutStage = step.id;
-      aimSeen.clear();
-      tutTries.gentle = 0;
-      tutTries.strong = 0;
       sendTutStage();
     },
     onDone: () => {
@@ -1209,10 +1184,10 @@ import { createTutorial } from '/common/tutorial.js';
       tut.signal('landed', r);
       return;
     }
-    if (r.kind === 'early') tut.fail('아직이에요! 톡톡은 참고, 쑥 들어갈 때 채요');
-    else if (r.kind === 'miss' && r.why === 'early') tut.fail('너무 일찍 챘어요. 다른 물고기가 곧 와요');
-    else if (r.kind === 'miss') tut.fail('조금 늦었어요. 다른 물고기가 곧 와요. 쑥 들어가면 바로!');
-    else if (r.kind === 'unhook' || r.kind === 'break') tut.fail('놓쳤어요. 다시 물면 챔질하고 감아요');
+    if (r.kind === 'early') tut.fail('아직이에요!');
+    else if (r.kind === 'miss' && r.why === 'early') tut.fail('너무 일찍이에요');
+    else if (r.kind === 'miss') tut.fail('조금 늦었어요');
+    else if (r.kind === 'unhook' || r.kind === 'break') tut.fail('놓쳤어요');
   }
   function startTutorial() {
     if (tut.isRunning()) return;
@@ -1225,8 +1200,8 @@ import { createTutorial } from '/common/tutorial.js';
   tut.link($('sheetLinks'), {
     before: () => {
       closeSheet();
-      if (!me || !playing() || (!basis && !fallback)) {
-        note('자세를 맞추고 낚시 화면에서 다시 눌러요');
+      if (!me || !playing()) {
+        note('낚시 화면에서 다시 눌러요');
         return false;
       }
       mode = 'tut';
@@ -1293,7 +1268,6 @@ import { createTutorial } from '/common/tutorial.js';
     const prevPhase = state.phase;
     state = s && typeof s === 'object' ? s : { phase: 'lobby' };
     stateAt = performance.now();
-    if (Number(state.hookWin) > 0) hookWinSec = Number(state.hookWin);
     const open = (p) => p === 'open' || p === 'playing';
     if (open(state.phase) && !open(prevPhase)) {
       lastStage = null;
@@ -1309,7 +1283,7 @@ import { createTutorial } from '/common/tutorial.js';
     if (kind === 'landed') {
       plop();
       vib(25);
-      cast.msg = c.dist ? `${c.dist}m 날아갔어요` : '';
+      cast.msg = c.dist ? T('약 {d}m', { d: c.dist }) : '';
       drawCastHint();
     } else if (kind === 'nibble') {
       nibbleAt = performance.now();
@@ -1323,27 +1297,27 @@ import { createTutorial } from '/common/tutorial.js';
       // 마지막 톡톡(쉬움·보통)은 조금 길게 세 번 + "곧 쑥 들어가요" 로 다음이 입질임을 미리 알려 줍니다.
       if (c.last) {
         buzz([26, 45, 26, 45, 40], 'nib');
-        setStatus('톡! 곧 쑥 들어가요', '폰을 위로 확 들 준비! 아직 채지는 말아요.', '');
-        tutCue('톡! 곧 쑥 들어가요 · 위로 확 들 준비');
+        setStatus('곧 물어요!', '', '');
+        tutCue('곧 물어요!');
       } else {
         buzz([18, 50, 18], 'nib');
-        setStatus('톡톡… 참아요', '아직이에요! 찌가 쏙 들어갈 때까지 기다려요.', '');
-        tutCue('톡톡… 간 보는 중이에요. 참아요');
+        setStatus('톡톡… 참아요', '', '');
+        tutCue('톡톡… 참아요');
       }
     } else if (kind === 'hooked') {
       hookedSnd();
       buzz([140, 50, 90], 'go');
-      setStatus('걸렸다!', '핸들을 돌려 감아요!', 'good');
+      setStatus('걸렸다! 돌려요', '', 'good');
       if (mode === 'tut') tut.signal('hooked', c);
     } else if (kind === 'jump') {
       splashSnd();
       buzz([40, 30, 40, 30, 60]);
-      setStatus('점프!', '줄이 느슨하지 않게 버텨요!', 'hot');
+      setStatus('점프!', '', 'hot');
     } else if (kind === 'slack') {
       buzz([50, 50, 50]);
-      setStatus('줄이 느슨해요!', '빨리 감아요! 바늘이 빠지려고 해요.', 'hot');
+      setStatus('느슨해요! 감아요', '', 'hot');
     } else if (kind === 'back') {
-      cast.msg = '다 감았어요. 다시 던져요';
+      cast.msg = '다시 던져요';
       drawCastHint();
     }
   });
@@ -1354,10 +1328,11 @@ import { createTutorial } from '/common/tutorial.js';
     // 부르르르: 짧고 센 진동을 연달아
     buzz([on, 35, on, 35, on, 35, on, 35, on + 60], 'bite');
     biteSnd();
-    setStatus('지금! 위로 확', `폰을 위로 확 들어 올려요! (${hookWinSec.toFixed(1)}초 안에)`, 'hot');
+    setStatus('지금! 위로 확!', '', 'hot');
+    if (!fallback) $('hookRow').classList.remove('hidden');
     $('bob').classList.add('under');
     if (tutView && tutView.bob) tutView.bob.classList.add('under');
-    tutCue('지금! 폰을 위로 확!', 'hot');
+    tutCue('지금! 위로 확!', 'hot');
   });
 
   socket.on('tension', (d) => {
@@ -1381,7 +1356,7 @@ import { createTutorial } from '/common/tutorial.js';
       // 쉬운 난이도: 일찍 챘지만 물고기는 그대로(놀라지 않음)
       tone(700, 0.08, 0.15, 'triangle', 520);
       buzz([40]);
-      setStatus('아직이에요!', '물고기는 아직 있어요. 찌가 쑥 들어갈 때 채요.', '');
+      setStatus('아직이에요!', '', '');
       showCard('hold', 'NOT YET', r.text || '아직이에요!', '', r.sub || '', 2200);
       return;
     }
@@ -1389,9 +1364,9 @@ import { createTutorial } from '/common/tutorial.js';
       const big = (r.weight || 0) >= 2.5;
       fanfare(big);
       buzz(big ? [60, 40, 60, 40, 260] : [60, 40, 160], 'go');
-      setStatus(`잡았다! ${Number(r.weight).toFixed(1)}kg ${r.fish}`, r.record ? '오늘의 최대어예요!' : '놓아주고 다시 던져요.', 'good');
+      setStatus(T('잡았다! {w}kg {fish}', { w: Number(r.weight).toFixed(1), fish: r.fish }), r.record ? '오늘의 최대어예요!' : '', 'good');
       showCard('good', r.record ? '오늘의 최대어!' : r.best && r.count > 1 ? '개인 최고!' : '잡았다!', r.fish,
-        `${Number(r.weight).toFixed(1)}<small>kg</small>`, `${r.length ? `${Math.round(r.length * 100)}cm · ` : ''}지금까지 ${r.count || 1}마리, 총 ${(r.total || 0).toFixed(1)}kg`, 3400);
+        `${Number(r.weight).toFixed(1)}<small>kg</small>`, `${r.length ? `${Math.round(r.length * 100)}cm · ` : ''}${T('지금까지 {n}마리, 총 {kg}kg', { n: r.count || 1, kg: (r.total || 0).toFixed(1) })}`, 3400);
     } else {
       if (r.kind === 'break') snapSnd();
       else tone(420, 0.2, 0.2, 'triangle', 300);
@@ -1447,13 +1422,7 @@ import { createTutorial } from '/common/tutorial.js';
       }
     }, SENSOR_WAIT_MS);
   });
-  $('btnRecal').addEventListener('click', () => { audio(); openCal(); });
-  $('btnReady').addEventListener('click', () => { audio(); startCountdown(); });
-  $('btnCalCancel').addEventListener('click', () => {
-    clearInterval(countTimer);
-    mode = 'idle';
-    render();
-  });
+  $('btnRecal').addEventListener('click', () => { audio(); recalibrate(); });
 
   // ---------- 시험용 버튼(센서 없음, 또는 &debug): 폰 동작과 같은 전송 길을 씁니다 ----------
   // 방향 슬라이더가 가짜 낚싯대 방향(pose)이 되어 큰 화면의 조준선이 그대로 움직입니다.
@@ -1521,7 +1490,7 @@ import { createTutorial } from '/common/tutorial.js';
   }
   function syncSliders() {
     const a = Number($('aim').value) || 0;
-    $('aimV').textContent = a === 0 ? '정면' : `${a < 0 ? '왼쪽' : '오른쪽'} ${Math.abs(a)}°`;
+    $('aimV').textContent = a === 0 ? T('정면') : T(a < 0 ? '왼쪽 {n}°' : '오른쪽 {n}°', { n: Math.abs(a) });
     $('powV').textContent = `${$('pow').value}%`;
   }
   $('aim').addEventListener('input', syncSliders);
@@ -1530,6 +1499,13 @@ import { createTutorial } from '/common/tutorial.js';
   $('btnCast').addEventListener('click', padCast);
   $('btnNear').addEventListener('click', padNear);
   $('btnNearM').addEventListener('click', nearCast);
+  $('btnCastM').addEventListener('click', buttonCast);
+  $('btnHookM').addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    audio();
+    const st = myStage();
+    if (st === 'bite' || st === 'wait') deliverHook(650, 0, st);
+  });
   $('btnHook').addEventListener('pointerdown', (e) => { e.preventDefault(); padHook(); });
   $('btnTwitch').addEventListener('pointerdown', (e) => { e.preventDefault(); padTwitch(); });
   $('btnReel').addEventListener('pointerdown', (e) => {
@@ -1565,6 +1541,7 @@ import { createTutorial } from '/common/tutorial.js';
     if (!document.hidden && mode !== 'start' && navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
   });
   if (!window.isSecureContext) $('httpNote').classList.remove('hidden');
+  mountSwitcher($('langBox'), { reload: true, compact: true }); // 시작 화면에만 있는 언어 고르기(경기 중에는 보이지 않음)
 
   // 핸들 눈금
   {

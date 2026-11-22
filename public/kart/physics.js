@@ -18,12 +18,14 @@ export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
  * center: 손을 놓았을 때 도로 방향으로 돌려 주는 힘 배율, lane: 벽 가까이에서 도로 안쪽으로 밀어 주는 힘,
  * wallRest: 벽에서 튕겨 나오는 정도, wallTan: 벽을 따라 미끄러질 때 잃는 속도, wallAlign: 부딪힌 뒤 차체를 진행 방향으로 돌리는 정도,
  * wallRoad: 부딪힌 뒤 차체를 도로 방향으로 돌리는 정도, wallKeep: 정면으로 박아도 남기는 속도 비율, offroad: 모래 위 최고 속도 비율,
- * offDrag: 모래 위 감속 배율
+ * offDrag: 모래 위 감속 배율, yawMul: 도는 힘 배율, floor: 핸들을 꺾는 중에도 남는 도로 방향 보조 비율(0.25 = 예전),
+ * vmaxMul: 최고 속도 배율, autoBrake: 앞 코너 한계 속도의 이 배수를 넘으면 저절로 브레이크(0 = 끔, 사람 카트만 game.js 가 씀)
  */
 export const ASSIST = {
-  hard: { center: 1, lane: 0, wallRest: 0.42, wallTan: 0.07, wallAlign: 0.55, wallRoad: 0, wallKeep: 0, offroad: 0.52, offDrag: 1 },
-  normal: { center: 1.45, lane: 0.65, wallRest: 0.22, wallTan: 0.03, wallAlign: 0.7, wallRoad: 0.35, wallKeep: 0.45, offroad: 0.62, offDrag: 0.75 },
-  easy: { center: 1.9, lane: 1.1, wallRest: 0.1, wallTan: 0, wallAlign: 0.85, wallRoad: 0.6, wallKeep: 0.7, offroad: 0.74, offDrag: 0.5 }
+  hard: { center: 1, lane: 0, wallRest: 0.42, wallTan: 0.07, wallAlign: 0.55, wallRoad: 0, wallKeep: 0, offroad: 0.52, offDrag: 1, yawMul: 1, floor: 0.25, vmaxMul: 1, autoBrake: 0 },
+  // 보통 = 예전 쉬움 수준, 쉬움 = 그보다 훨씬 넉넉하게
+  normal: { center: 1.9, lane: 1.1, wallRest: 0.1, wallTan: 0, wallAlign: 0.85, wallRoad: 0.6, wallKeep: 0.7, offroad: 0.74, offDrag: 0.5, yawMul: 1.15, floor: 0.4, vmaxMul: 0.94, autoBrake: 1.3 },
+  easy: { center: 2.6, lane: 1.6, wallRest: 0.05, wallTan: 0, wallAlign: 0.9, wallRoad: 0.75, wallKeep: 0.82, offroad: 0.82, offDrag: 0.35, yawMul: 1.3, floor: 0.5, vmaxMul: 0.86, autoBrake: 1.12 }
 };
 
 export function newKart(id, x, z, h) {
@@ -66,7 +68,7 @@ export function stepKart(k, inp, dt, track, ev) {
 
   const road = k.offroad && !star ? A.offroad : 1;
   const boost = k.boostT > 0 ? k.boostMul || K.BOOST_MUL : 1;
-  const vmax = K.VMAX * road * boost * (k.speedMul || 1) * (star ? 1.2 : 1) * (k.shrinkT > 0 ? 0.62 : 1);
+  const vmax = K.VMAX * (A.vmaxMul || 1) * road * boost * (k.speedMul || 1) * (star ? 1.2 : 1) * (k.shrinkT > 0 ? 0.62 : 1);
   const acc = K.ACC * (k.accMul || 1) * (star ? 1.5 : 1);
   // 가속 / 브레이크 / 후진 / 자연 감속
   if (spinning) vf *= Math.exp(-2.2 * dt);
@@ -80,7 +82,8 @@ export function stepKart(k, inp, dt, track, ev) {
 
   // 조향: 속도가 빠를수록 도는 각속도를 줄이고, 거의 멈췄을 땐 제자리 회전 못 하게
   const av = Math.abs(vf);
-  const yawMax = Math.min(2.5, 36 / Math.max(av, 1));
+  const ym = A.yawMul || 1;
+  const yawMax = Math.min(2.5 * ym, (36 * ym) / Math.max(av, 1));
   let yaw = k.steer * yawMax * clamp(av / 5, 0, 1) * (vf < 0 ? -1 : 1);
   // 핸들 보조: 손을 놓으면(핸들 ~0) 도로 방향으로 천천히 몸을 돌립니다. 많이 꺾었을수록 약해지고, 역주행처럼 크게 어긋나면 끕니다.
   const tdiff = wrapAngle(k.th - k.h);
@@ -88,7 +91,8 @@ export function stepKart(k, inp, dt, track, ev) {
   if (Math.abs(tdiff) < 1.25 && vf > 4 && !spinning) {
     const free = Math.pow(1 - Math.abs(k.steer), 2);
     const gain = (1.15 + k.assistBoost * 3.2) * A.center * clamp(vf / 14, 0, 1);
-    yaw += tdiff * gain * (0.25 + 0.75 * free);
+    const fl = A.floor == null ? 0.25 : A.floor;
+    yaw += tdiff * gain * (fl + (1 - fl) * free);
     // 차선 보조(쉬움·보통): 벽 가까이 가면 도로 안쪽으로 살짝 틀어 줍니다. 벽 쪽으로 향할수록 세게.
     if (A.lane > 0) {
       const edge = clamp((Math.abs(k.d) - (HALF_W - 2)) / (LIMIT_D - (HALF_W - 2)), 0, 1);
@@ -278,6 +282,23 @@ export function collideKarts(list) {
     }
   }
   return hit;
+}
+
+/**
+ * 사람 카트용 자동 코너 브레이크(쉬움·보통): 앞 코너 한계 속도의 mul 배보다 빠르면 true.
+ * botInput 과 같은 앞쪽 내다보기를 쓰지만 사람은 이 값을 브레이크 보조로만 씁니다.
+ */
+export function cornerBrake(k, track, mul) {
+  if (!mul) return false;
+  const speed = Math.max(k.vf, 0);
+  if (speed < 12) return false;
+  const ahead = 14 + (speed * speed) / (2 * 20);
+  let vt = 99;
+  for (let m = 0; m <= ahead; m += track.ds) {
+    const i = (Math.floor((k.s + m) / track.ds) + track.N) % track.N;
+    if (track.vmax[i] < vt) vt = track.vmax[i];
+  }
+  return speed > vt * mul;
 }
 
 const TGT = {};

@@ -180,13 +180,6 @@ body[data-mode="duel"] .only-derby, body:not([data-mode="duel"]) .only-duel { di
   -webkit-background-clip: text; background-clip: text; color: transparent; }
 .wordmark.sm { font-family: var(--sans); font-weight: 900; font-size: 64px; letter-spacing: -0.03em; }
 .lede { margin: 22px 0 30px; font-size: 21px; color: #d5dde9; line-height: 1.5; }
-.steps { list-style: none; margin: 0 0 30px; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.steps li { display: flex; gap: 14px; align-items: flex-start; padding: 18px; border-radius: 16px; background: var(--glass-2);
-  border: 1px solid var(--line); }
-.steps svg { flex: none; width: 40px; height: 40px; fill: none; stroke: var(--gold); stroke-width: 2.4;
-  stroke-linecap: round; stroke-linejoin: round; }
-.steps b { display: block; font-size: 17px; margin-bottom: 4px; }
-.steps span { font-size: 14px; color: var(--dim); line-height: 1.45; }
 .slots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 26px; }
 .slot { position: relative; height: 72px; border-radius: 14px; border: 2px dashed rgba(255, 255, 255, 0.16);
   display: flex; align-items: center; justify-content: center; gap: 10px; color: rgba(255, 255, 255, 0.3);
@@ -274,7 +267,6 @@ body[data-mode="duel"] .only-derby, body:not([data-mode="duel"]) .only-duel { di
 
 @media (max-width: 1000px) {
   .lobby { flex-direction: column; gap: 28px; }
-  .steps { grid-template-columns: 1fr; }
   .qr-card { width: 280px; }
   .leader { display: none; }
   .modes { grid-template-columns: 1fr; }
@@ -282,3 +274,7 @@ body[data-mode="duel"] .only-derby, body:not([data-mode="duel"]) .only-duel { di
   .call-main { font-size: 72px; }
   .call.hr .call-main { font-size: 110px; }
 }
+
+/* 소리가 막혀 있을 때만 보이는 작은 안내 */
+.sound-chip { align-self: flex-start; margin-top: 10px; padding: 5px 12px; border-radius: 999px; font-size: 13px; color: var(--dim); background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.12); }
+.sound-chip.hidden { display: none; }

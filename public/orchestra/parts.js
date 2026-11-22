@@ -8,14 +8,14 @@
 import { bpmAt, chordAt } from '/common/music/songs.js';
 
 export const INSTRUMENTS = {
-  conductor: { key: 'conductor', label: '지휘자', part: null, synth: null, kind: 'baton', role: '빠르기·셈여림', how: '폰을 지휘봉처럼 쥐고 박자를 저어요', motion: true },
-  violin: { key: 'violin', label: '바이올린', part: 'melody', synth: 'violin', kind: 'bow', role: '선율', how: '옆으로 들고 화면을 활처럼 문질러요' },
-  piano: { key: 'piano', label: '피아노', part: 'melody', synth: 'piano', kind: 'keys', role: '선율', how: '진짜 건반을 눌러요' },
-  voice: { key: 'voice', label: '성악가', part: 'melody', synth: 'choir', kind: 'voice', role: '선율', how: '마이크에 진짜로 노래해요. 음정은 도와줘요', mic: true },
-  trumpet: { key: 'trumpet', label: '트럼펫', part: 'melody', synth: 'trumpet', kind: 'wind', role: '선율', how: '마이크에 후 불면서 밸브를 눌러요', mic: true },
-  horn: { key: 'horn', label: '호른', part: 'harmony', synth: 'horn', kind: 'wind', role: '화음', how: '트럼펫처럼 불어요. 둘째 성부를 맡아요', mic: true },
-  drum: { key: 'drum', label: '드럼', part: 'drums', synth: 'drums', kind: 'strike', role: '리듬', how: '막대기처럼 쥐고 아래로 톡 쳐요', motion: true },
-  castanets: { key: 'castanets', label: '캐스터네츠', part: 'perc', synth: 'castanets', kind: 'tap', role: '장단', how: '화면을 톡톡 두드려요' },
+  conductor: { key: 'conductor', label: '지휘자', part: null, synth: null, kind: 'baton', role: '빠르기·셈여림', how: '박자를 저어요', motion: true },
+  violin: { key: 'violin', label: '바이올린', part: 'melody', synth: 'violin', kind: 'bow', role: '선율', how: '화면을 문질러요' },
+  piano: { key: 'piano', label: '피아노', part: 'melody', synth: 'piano', kind: 'keys', role: '선율', how: '건반을 눌러요' },
+  voice: { key: 'voice', label: '성악가', part: 'melody', synth: 'choir', kind: 'voice', role: '선율', how: '노래해요', mic: true },
+  trumpet: { key: 'trumpet', label: '트럼펫', part: 'melody', synth: 'trumpet', kind: 'wind', role: '선율', how: '불며 밸브', mic: true },
+  horn: { key: 'horn', label: '호른', part: 'harmony', synth: 'horn', kind: 'wind', role: '화음', how: '불며 밸브', mic: true },
+  drum: { key: 'drum', label: '드럼', part: 'drums', synth: 'drums', kind: 'strike', role: '리듬', how: '아래로 톡', motion: true },
+  castanets: { key: 'castanets', label: '캐스터네츠', part: 'perc', synth: 'castanets', kind: 'tap', role: '장단', how: '톡톡' },
 };
 export const INST_ORDER = ['conductor', 'violin', 'piano', 'voice', 'trumpet', 'horn', 'drum', 'castanets'];
 export const SUSTAIN_KINDS = ['wind', 'bow', 'voice'];
@@ -26,11 +26,11 @@ export const DIFF_LABEL = { easy: '쉬움', normal: '보통', hard: '어려움' 
 const pickD = (diff, t) => (diff in t ? t[diff] : t.normal);
 
 // ───────── 판정 창(초): [PERFECT, GOOD] ─────────
-// 지금까지 다른 종목이 '어렵다'는 말을 들어서 보통도 넉넉하게 둡니다. 어려움이 원래 리듬 게임 수준입니다.
+// 쉬움(기본)은 아주 넉넉하게, 보통은 예전 쉬움 정도, 어려움은 예전 그대로(원래 리듬 게임 수준)입니다.
 const WIN = {
-  tap: { easy: [0.1, 0.22], normal: [0.07, 0.15], hard: [0.045, 0.1] },
-  sustain: { easy: [0.16, 0.34], normal: [0.11, 0.24], hard: [0.075, 0.16] },
-  baton: { easy: [0.17, 0.36], normal: [0.12, 0.26], hard: [0.085, 0.18] },
+  tap: { easy: [0.14, 0.3], normal: [0.1, 0.22], hard: [0.045, 0.1] },
+  sustain: { easy: [0.22, 0.45], normal: [0.16, 0.34], hard: [0.075, 0.16] },
+  baton: { easy: [0.22, 0.45], normal: [0.17, 0.36], hard: [0.085, 0.18] },
 };
 export function windowFor(inst, diff) {
   const k = INSTRUMENTS[inst] ? INSTRUMENTS[inst].kind : 'tap';
@@ -38,9 +38,9 @@ export function windowFor(inst, diff) {
   return pickD(diff, t);
 }
 /** 성악가 음정 허용 폭(반음, 옥타브는 따지지 않음) */
-export const PITCH_TOL = { easy: 3, normal: 1.6, hard: 0.85 };
+export const PITCH_TOL = { easy: 4, normal: 3, hard: 0.85 };
 /** 성악가 보정 세기(1 = 목표 음으로 완전히 맞춤) */
-export const VOICE_FIX = { easy: 1, normal: 0.75, hard: 0.45 };
+export const VOICE_FIX = { easy: 1, normal: 1, hard: 0.45 };
 /** 점수: PERFECT 1, GOOD 0.6, MISS 0 */
 export const POINTS = { perfect: 1, good: 0.6, miss: 0 };
 export const JUDGE_LABEL = { perfect: 'PERFECT', good: 'GOOD', miss: 'MISS' };
@@ -96,7 +96,13 @@ export function stringFor(m) { return m < 62 ? 0 : m < 69 ? 1 : m < 76 ? 2 : 3; 
 // ───────── 계이름 ─────────
 const SOLFA = ['도', '도♯', '레', '미♭', '미', '파', '파♯', '솔', '솔♯', '라', '시♭', '시'];
 const NAMES = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'B♭', 'B'];
-export const solfa = (m) => SOLFA[((Math.round(m) % 12) + 12) % 12];
+/** 번역 함수(i18n 모듈이 올라와 있으면 t, 없으면 원문에 값만 채움). Node 시험에서도 불러올 수 있게 전역으로 찾습니다. */
+export const T = (ko, vars) => {
+  const f = globalThis.PCG && globalThis.PCG.t;
+  if (f) return f(ko, vars);
+  return vars ? String(ko).replace(/\{(\w+)\}/g, (all, k) => (k in vars ? String(vars[k]) : all)) : String(ko);
+};
+export const solfa = (m) => T(SOLFA[((Math.round(m) % 12) + 12) % 12]);
 export const noteName = (m) => NAMES[((Math.round(m) % 12) + 12) % 12] + (Math.floor(Math.round(m) / 12) - 1);
 
 // ───────── 지휘 무늬 ─────────
@@ -110,27 +116,24 @@ export const PATTERNS = {
 export const patternOf = (song) => PATTERNS[(song && song.timeSig ? song.timeSig.join('/') : '4/4')] || PATTERNS['4/4'];
 export const DIR_ARROW = { down: '↓', left: '←', right: '→', up: '↑' };
 export const DIR_KO = { down: '아래로', left: '왼쪽으로', right: '오른쪽으로', up: '위로' };
-/** 보통에서는 옆 방향도 봐줍니다(아래로 내리다 왼쪽으로 꺾이는 등) */
-const NEAR_DIR = { down: ['down'], left: ['left', 'down'], right: ['right', 'down'], up: ['up'] };
+/** 쉬움·보통은 방향을 따지지 않습니다. 어려움만 정확한 방향이어야 합니다. */
 export function dirOk(want, got, diff) {
-  if (diff === 'easy' || !want) return true;
-  if (diff === 'hard') return want === got;
-  return NEAR_DIR[want].includes(got);
+  if (diff !== 'hard' || !want) return true;
+  return want === got;
 }
 
 // ───────── 악보 만들기 ─────────
 // 남길 음 사이 최소 간격: 박과 초 둘 다 봅니다(빠른 곡에서도 쉬움이 너무 빽빽하지 않게).
-const GAP_BEATS = { easy: 1, normal: 0.5, hard: 0.24 };
-const GAP_SEC = { easy: 0.85, normal: 0.36, hard: 0.11 };
+const GAP_BEATS = { easy: 1.5, normal: 1, hard: 0.24 };
+const GAP_SEC = { easy: 1.1, normal: 0.85, hard: 0.11 };
 function minGap(song, b, diff) {
   const bpm = bpmAt(song, b);
   return Math.max(pickD(diff, GAP_BEATS), (pickD(diff, GAP_SEC) * bpm) / 60) - 1e-6;
 }
-// 쉬움은 정박, 보통은 반박 위의 음을 먼저 남깁니다(엇박 음은 앞 음에 묶임).
+// 쉬움·보통은 정박 위의 음을 먼저 남깁니다(엇박 음은 앞 음에 묶임).
 function onGrid(b, diff) {
   if (diff === 'hard') return true;
-  const g = diff === 'easy' ? 1 : 0.5;
-  return Math.abs(b / g - Math.round(b / g)) < 1e-3;
+  return Math.abs(b - Math.round(b)) < 1e-3;
 }
 
 function thin(src, song, diff, { grid = true } = {}) {
@@ -246,17 +249,17 @@ function batonNotes(song, diff) {
   const bars = Math.ceil(song.beats / song.barLen);
   for (let k = 0; k < bars; k++) {
     pat.forEach(([off, dir], idx) => {
-      if (diff === 'easy' && idx !== 0) return;
+      if (diff !== 'hard' && idx !== 0) return; // 쉬움·보통은 마디 첫 박만
       const b = k * song.barLen + off;
       if (b >= song.beats - 0.01) return;
-      out.push({ b, d: diff === 'easy' ? song.barLen : pat[idx + 1] ? pat[idx + 1][0] - off : song.barLen - off, m: 0, v: 0.8, dir, n: idx + 1, fill: [] });
+      out.push({ b, d: diff !== 'hard' ? song.barLen : pat[idx + 1] ? pat[idx + 1][0] - off : song.barLen - off, m: 0, v: 0.8, dir, n: idx + 1, fill: [] });
     });
   }
   return out;
 }
 
 /** 곡·악기·난이도 → 그 사람이 따라 할 악보 */
-export function buildPart(song, inst, diff = 'normal') {
+export function buildPart(song, inst, diff = 'easy') {
   const I = INSTRUMENTS[inst];
   if (!song || !I) return { inst, diff, notes: [], lo: 60, hi: 72, sustain: false };
   let notes;

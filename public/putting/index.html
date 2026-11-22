@@ -11,7 +11,7 @@
 <script type="importmap">
 { "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
 </script>
-<style>/* 대기실 설명은 한 줄만 */ .lobby-copy .steps, .lobby-copy .spins, .lobby-copy .rules { display: none !important; }</style>
+<style>.setbox{margin:14px 0;max-width:680px}</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
@@ -80,24 +80,11 @@
     <div class="lobby-copy">
       <div class="eyebrow">PHONE GOLF · 퍼팅 챌린지 · 3 HOLES</div>
       <h1 class="wordmark">PUTTING<br>CHALLENGE</h1>
-      <p class="lede">폰을 퍼터처럼 톡 미세요. <a href="/golf/" style="color:#d4f36b">골프 코스로 돌아가기 →</a></p>
-      <ol class="steps">
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="12" r="5"/><path d="M24 40V18"/><path d="M14 30l10 10 10-10"/><path d="M8 44h32"/></svg>
-          <div><b>터치로 방향</b><span>폰 화면을 좌우로 밀어 겨눠요. 경사 보기로 휘는 쪽을 읽어요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="18" y="4" width="12" height="22" rx="3"/><path d="M24 26v14"/><path d="M18 42h11"/></svg>
-          <div><b>그립처럼 쥐고 어드레스</b><span>폰 윗부분이 땅을, 화면이 홀을 보게 해요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 6v20"/><path d="M24 26l-9 12"/><path d="M24 26l9 12" opacity=".35"/><circle cx="38" cy="40" r="3"/></svg>
-          <div><b>시계추처럼 톡</b><span>뒤로 살짝 뺐다가 밀어요. 빠를수록 멀리 굴러가요.</span></div>
-        </li>
-      </ol>
+      <p class="lede">폰을 퍼터처럼 톡 미세요.</p>
+      <p class="lede"><a href="/golf/" style="color:#d4f36b">골프 코스로 돌아가기 →</a></p>
+      <div class="setbox" id="setBox"></div>
       <div class="slots" id="slots"></div>
-      <div class="hint"><kbd>Enter</kbd> 게임 시작 <span class="dot"></span> 홀마다 최대 5타(못 넣으면 6타) <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
-      <div class="hint sub"><kbd>←</kbd><kbd>→</kbd> 조준 <kbd>↑</kbd><kbd>↓</kbd> 세기 <kbd>Space</kbd> 퍼팅 <kbd>G</kbd> 경사 보기 <kbd>F</kbd> 깃대 <span class="dot"></span> 폰 없이 시험할 때</div>
+      <div class="hint"><kbd>Enter</kbd> 게임 시작</div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">

@@ -104,7 +104,7 @@ function capPuck(p, max = MAX_PUCK) {
 
 // 겨냥 도우미(쉬움·보통): 상대 쪽으로 보낸 퍽의 방향을 상대 골문 쪽으로 조금 꺾어 줍니다.
 // 곧장 노린 골문과 옆 벽에 비친 골문(벽 맞혀 꺾어 넣기) 중 퍽이 가는 방향에 더 가까운 쪽으로 당기므로, 벽을 노린 슛도 살아 있습니다.
-// 골문에서 너무 벗어난(57° 넘게) 패스·걷어내기는 건드리지 않습니다. m.assist = 0..1 (꺾는 비율)
+// 골문에서 너무 벗어난(80° 넘게) 패스·걷어내기는 건드리지 않습니다. m.assist = 0..1 (꺾는 비율)
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 function assistAim(sim, m, p) {
   const sp = Math.hypot(p.vx, p.vz);
@@ -118,7 +118,7 @@ function assistAim(sim, m, p) {
     const d = wrapAngle(Math.atan2(tx - p.x, gz - p.z) - cur);
     if (best === null || Math.abs(d) < Math.abs(best)) best = d;
   }
-  if (best === null || Math.abs(best) > 1.0) return;
+  if (best === null || Math.abs(best) > 1.4) return; // 이전 1.0 → 1.4 rad: 더 넓은 각도까지 도와줍니다
   const a = cur + best * clamp(m.assist, 0, 1);
   p.vx = Math.sin(a) * sp;
   p.vz = Math.cos(a) * sp;

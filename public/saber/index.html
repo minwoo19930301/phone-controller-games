@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#05070d">
+<script src="/common/i18n-wait.js"></script>
 <title>광선검</title>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
@@ -11,7 +12,6 @@
 <script type="importmap">
 { "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
 </script>
-<style>/* 대기실 설명은 한 줄만 */ .lobby-copy .steps, .lobby-copy .spins, .lobby-copy .rules { display: none !important; }</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
@@ -24,35 +24,16 @@
 </div>
 
 <section id="lobby" class="screen">
+  <div class="lang-box" id="langBox"></div>
   <div class="lobby">
     <div class="lobby-copy">
       <div class="eyebrow">PHONE CONTROLLER GAMES · 1~4인 · 화면 분할</div>
       <h1 class="wordmark">BEAM<br>BLADE</h1>
-      <p class="lede" id="lede">폰을 칼자루처럼 쥐고, 로봇 검객이 예고한 쪽을 막은 뒤 비틀거릴 때 베세요.</p>
-      <ol class="steps">
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="18" y="20" width="12" height="24" rx="3"/><path d="M24 20V3"/><path d="M21 26h6"/></svg>
-          <div><b>칼자루처럼 쥐기</b><span>폰을 세워 쥐고 화면이 나를 보게 해요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="17"/><path d="M24 13v11l7 5"/></svg>
-          <div><b>준비 누르고 3초</b><span>그대로 멈춰 있으면 그 자세가 기준이 돼요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M6 40L36 10"/><path d="M30 6l12 12"/><path d="M14 18l-8-6M20 12l-4-8"/></svg>
-          <div><b>막고, 휘둘러 되받기</b><span>광탄 길목에 칼날을 대면 막혀요. 닿을 때 휘두르면 격추!</span></div>
-        </li>
-      </ol>
-      <div class="rules">
-        <div><b id="ruleRound">90</b><span>초 훈련</span></div>
-        <div><b>+10</b><span>막기</span></div>
-        <div><b>+50</b><span>격추</span></div>
-        <div><b>100</b><span>체력 · 0 이면 쓰러짐</span></div>
-      </div>
+      <p class="lede" id="lede">폰을 칼자루처럼 쥐고, 예고된 쪽으로 기울여 막고 비틀거리면 휘두르세요.</p>
       <div class="setbox" id="setBox"></div>
       <div class="slots" id="slots"></div>
       <div class="tutbox" id="tutBoard"></div>
-      <div class="hint"><span>폰에서 모두 <b>준비</b>를 누르면 시작</span> <span class="dot"></span> 칼 소리는 폰에서 나요 <span class="dot"></span> 화면을 한 번 누르면 큰 화면 소리가 켜져요</div>
+      <div class="hint"><span>폰에서 모두 준비를 누르면 시작</span></div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
@@ -70,7 +51,7 @@
     <h1 class="wordmark sm" id="overTitle">검투 결과</h1>
     <div class="podium" id="podium"></div>
     <div class="setbox over-set" id="setBoxOver"></div>
-    <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 한 판 더</span> <span class="dot"></span> 모드·난이도는 여기서 바꿀 수 있어요</div>
+    <div class="hint"><span>폰에서 모두 다시 하기를 누르면 한 판 더</span></div>
   </div>
 </section>
 
@@ -80,6 +61,7 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/saber/i18n.js"></script>
 <script type="module" src="game.js"></script>
 </body>
 </html>

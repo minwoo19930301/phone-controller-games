@@ -37,7 +37,8 @@ export function rightFromUp(up) {
 }
 
 /**
- * opts: { threshold = 7.5 (m/s²), refractoryMs = 230, oppositeMs = 420, oppositeK = 1.7, windowMs = 45, onStep(step) }
+ * opts: { threshold = 7.5 (m/s²), refractoryMs = 230, oppositeMs = 420 (0 이면 끔), oppositeK = 1.7, windowMs = 45, onStep(step), onWeak({ peak }) }
+ * onWeak: 문턱의 절반은 넘었지만 못 넘은 약한 움직임이 끝났을 때(너무 약해 안 센 것을 알려 줄 때 씀, 0.8초에 한 번까지)
  * feed({ t(ms), a:[x,y,z]|null(중력 뺀 가속), ag:[x,y,z]|null(중력 포함), beta?, gamma? }) → step | null
  * step = { dir, lane, t(시작 시각 ms), peak(m/s²), r, u }
  */
@@ -54,6 +55,8 @@ export function createStepDetector(opts = {}) {
   let quietSince = 0;
   const peaks = []; // 최근 스텝 세기(튜토리얼에서 문턱을 맞출 때 씀)
   let rejected = 0; // 돌아오는 동작이라 버린 수(디버그)
+  let weak = 0; // 문턱 아래 움직임의 최대 세기
+  let weakAt = -1e9;
   const live = { r: 0, u: 0, m: 0, upright: 0, quietMs: 0 };
 
   function feed(s) {
@@ -102,6 +105,15 @@ export function createStepDetector(opts = {}) {
     }
     if (m >= o.threshold && t - last.t >= o.refractoryMs) {
       win = { t0: t, r: r * dt, u: u * dt, peak: m };
+      weak = 0;
+    } else if (m < o.threshold) {
+      // 약한 움직임: 절반 이상이었다가 잠잠해지면 한 번 알립니다(조용히 씹히지 않게)
+      if (m >= o.threshold * 0.5 && t - last.t >= o.refractoryMs) weak = Math.max(weak, m);
+      else if (weak && m < o.threshold * 0.3) {
+        const peak = weak;
+        weak = 0;
+        if (t - weakAt > 800 && t - last.t > 450 && typeof o.onWeak === 'function') { weakAt = t; o.onWeak({ peak: Math.round(peak * 10) / 10 }); }
+      }
     }
     return null;
   }
@@ -135,6 +147,7 @@ export function createStepDetector(opts = {}) {
     get threshold() { return o.threshold; },
     setThreshold(v) { o.threshold = Math.max(3, Math.min(16, v)); },
     setOpposite(ms) { o.oppositeMs = ms; },
+    setRefractory(ms) { o.refractoryMs = ms; },
     /** 센서가 없을 때 시험 버튼으로 스텝을 흉내 냅니다 */
     emit(dir, t = 0) {
       const step = { dir, lane: DIR_LANE[dir], t, peak: o.threshold * 1.4, r: 0, u: 0, sim: true };

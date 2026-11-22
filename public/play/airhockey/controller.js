@@ -1,19 +1,22 @@
 // 에어하키 컨트롤러. 폰 화면이 큰 화면 속 내 쪽 반 코트(2:2 면 내 레인)가 됩니다.
 // 누른 자리를 그 영역 안의 0..1 위치로 바꿔 move { x, y, t } 로 40Hz 까지 보냅니다(밀리면 버려도 되는 이벤트).
 // x: 큰 화면 기준 왼쪽 0 → 오른쪽 1, y: 큰 화면 기준 위 0 → 아래 1. 동작 센서는 쓰지 않습니다.
-// 처음 하는 폰은 시작하기 뒤 연습 판(practice.js)에서 말렛 움직이기·치기·슛·막기를 직접 해 봅니다(localStorage pcg-tut-airhockey).
+// 연습 판(practice.js)은 저절로 뜨지 않습니다. 대기실의 '튜토리얼 다시 하기' 링크를 누르면 퍽 치기 한 단계만 해 봅니다.
+// 쉬움·보통에서는 말렛이 엄지 위쪽(상대 쪽)에 떠서 엄지에 가리지 않고, 퍽 위치가 패드에도 작게 보입니다.
 // 대기 화면: 난이도 알약(큰 화면과 같이 바뀜) · 누가 준비했는지 · 큰 준비 버튼 · 튜토리얼 다시 하기.
 import { haptics } from '/common/haptics.js';
 import { createPhoneSettings } from '/common/phone-settings.js';
 import { createTutorial } from '/common/tutorial.js';
 import { createPractice } from './practice.js';
+import { createSamples } from '/common/samples.js';
+import { t, mountSwitcher } from '/common/i18n.js';
 
 (() => {
   const $ = (id) => document.getElementById(id);
   const params = new URLSearchParams(location.search);
   const ROOM = (params.get('room') || '').toUpperCase();
   const DEBUG = params.has('debug');
-  $('room').textContent = ROOM ? `방 ${ROOM}` : '';
+  $('room').textContent = ROOM ? t('방 {code}', { code: ROOM }) : '';
   const isTouch = navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
 
   let token = null;
@@ -22,17 +25,25 @@ import { createPractice } from './practice.js';
     token = Math.random().toString(36).slice(2) + Date.now().toString(36);
     try { localStorage.setItem('pcg-token', token); } catch (e) {}
   }
-  let flip = false; // 반대편(화면 위쪽 끝)에 서서 할 때: 내 골문이 폰 아래로 오게 180° 돌려 봅니다.
+  // 보는 방향: 0 = 큰 화면과 같게, 1 = 180° 돌림, 2 = 위아래만 뒤집음(좌우는 큰 화면과 같게).
+  // 위쪽 팀 기본은 2 입니다. 누구든 내 골문이 아래, 공격은 위쪽으로 같은 동작(위로 밀기)이 되고 좌우는 큰 화면과 같습니다.
+  let flip = 0;
+  const fu = () => flip === 1; // 좌우 뒤집기
+  const fv = () => flip === 1 || flip === 2; // 위아래 뒤집기
+  const defaultFlip = (side) => (side === 'top' ? 2 : 0);
+  const altFlip = (side) => (side === 'top' ? 0 : 1); // 뒤집기 버튼이 바꿔 주는 반대 모드
   // 뒤집기는 쪽(top/bottom)마다 따로 기억합니다. 경기마다 쪽이 바뀔 수 있어서, 위쪽에서 고른 뒤집기가 아래쪽으로 넘어오지 않게 합니다.
-  const flipKey = (side) => `pcg-airhockey-flip-${side}`;
+  const flipKey = (side) => `pcg-airhockey-flip2-${side}`;
   function loadFlip(side) {
-    try { return localStorage.getItem(flipKey(side)) === '1'; } catch (e) { return false; }
+    try {
+      const v = localStorage.getItem(flipKey(side));
+      if (v === '0' || v === '1' || v === '2') return Number(v);
+    } catch (e) {}
+    return defaultFlip(side);
   }
-  function tipText(p) {
-    return p.side === 'top'
-      ? (flip ? '반대편 시점 · 내 골문이 아래예요' : '큰 화면과 같은 방향 · 내 골문이 위예요')
-      : (flip ? '뒤집힌 시점 · 내 골문이 위예요' : '엄지로 끌어서 말렛을 움직여요');
-  }
+  const TIP = '엄지로 끌어요'; // 화면에 넣을 때 t(TIP)
+  // 말렛을 엄지 위(공격 방향)로 띄우는 픽셀. 서버(큰 화면)가 난이도별로 알려 주고, 어려움은 0 입니다.
+  let lift = 0;
 
   const socket = io({ autoConnect: false, transports: ['websocket', 'polling'], tryAllTransports: true });
   // 끊긴 동안 보낸 이벤트는 다시 붙을 때 join 보다 먼저 흘러가 버려지므로, 끊겨 있으면 보내지 않습니다.
@@ -67,10 +78,16 @@ import { createPractice } from './practice.js';
 
   // ---------- 소리 ----------
   let actx = null;
+  let samples = null;
   function audio() {
     if (!actx) {
       const AC = window.AudioContext || window.webkitAudioContext;
-      if (AC) actx = new AC();
+      if (AC) {
+        actx = new AC();
+        // 폰 녹음은 타구 소리 하나(3벌)만 받습니다.
+        samples = createSamples(actx, actx.destination);
+        samples.preload(['ball/puck-hit']);
+      }
     }
     if (actx && actx.state === 'suspended') actx.resume();
     return actx;
@@ -93,6 +110,8 @@ import { createPractice } from './practice.js';
   function click(q) {
     const a = actx;
     if (!a || a.state !== 'running') return;
+    // 큰 화면과 같은 퍽 소리를 조금 작게. 못 받았으면 예전 딸깍 합성음
+    if (samples && samples.play('ball/puck-hit', { gain: 0.45 + q * 0.5, rate: 1 + q * 0.1 })) return;
     const len = Math.floor(a.sampleRate * 0.03);
     const buf = a.createBuffer(1, len, a.sampleRate);
     const d = buf.getChannelData(0);
@@ -156,18 +175,20 @@ import { createPractice } from './practice.js';
   // 세계 좌표 → 패드 화면(뒤집기 반영)
   function toScreen(x, z) {
     const r = region();
-    const u = flip ? (r.x1 - x) : (x - r.x0);
-    const v = flip ? (r.z1 - z) : (z - r.z0);
+    const u = fu() ? (r.x1 - x) : (x - r.x0);
+    const v = fv() ? (r.z1 - z) : (z - r.z0);
     return [fit.rx + u * fit.s, fit.ry + v * fit.s];
   }
   function toWorld(px, py) {
     const r = region();
     const u = (px - fit.rx) / fit.s;
     const v = (py - fit.ry) / fit.s;
-    return [flip ? r.x1 - u : r.x0 + u, flip ? r.z1 - v : r.z0 + v];
+    return [fu() ? r.x1 - u : r.x0 + u, fv() ? r.z1 - v : r.z0 + v];
   }
 
   const finger = { x: null, z: null, down: false };
+  let touchPx = null; // 엄지가 닿은 화면 자리(패드 기준)
+  let puck = null; // 큰 화면이 보낸 퍽 { x, z, at }
   let flashT = 0;
   function draw() {
     if (!W) return;
@@ -290,7 +311,7 @@ import { createPractice } from './practice.js';
       const [s0x, s0y] = S(g0, goalZ);
       const [s1x, s1y] = S(g1, goalZ);
       g.fillStyle = '#06070a';
-      const off = (side === 'bottom') !== flip ? 1 : -1; // 골문 구멍은 판 바깥쪽으로
+      const off = (side === 'bottom') !== fv() ? 1 : -1; // 골문 구멍은 판 바깥쪽으로
       g.fillRect(Math.min(s0x, s1x), off > 0 ? s0y : s0y - 10, Math.abs(s1x - s0x), 10);
     }
     // 2:2 레인 안내
@@ -298,15 +319,32 @@ import { createPractice } from './practice.js';
       const divX = p.lane === 'left' ? r.x1 : r.x0;
       const [dx, dy] = S(divX, (r.z0 + r.z1) / 2);
       g.save();
-      g.fillStyle = 'rgba(40,48,70,.45)';
-      g.font = '800 13px "Pretendard Variable", sans-serif';
+      g.fillStyle = 'rgba(40,48,70,.7)';
+      g.font = '800 16px "Pretendard Variable", sans-serif';
       g.textAlign = 'center';
       g.textBaseline = 'middle';
       // 레인 경계 바로 안쪽에 세로로 팀원 이름
       const right = dx > W / 2;
-      g.translate(dx + (right ? -12 : 12), dy);
+      g.translate(dx + (right ? -14 : 14), dy);
       g.rotate(right ? Math.PI / 2 : -Math.PI / 2);
-      g.fillText(`${(p.mates && p.mates[0]) || '팀원'} 자리`, 0, 0);
+      g.fillText(p.mates && p.mates[0] ? t('{name} 자리', { name: p.mates[0] }) : t('팀원 자리'), 0, 0);
+      g.restore();
+    }
+    // 퍽(큰 화면이 알려 준 위치, 큰 화면이 진짜이고 여기는 길잡이): 내 영역 밖이면 가장자리에 작은 점
+    if (puck && performance.now() - puck.at < 500) {
+      let [qx, qy] = S(puck.x, puck.z);
+      const inside = qx >= L && qx <= Rr && qy >= T && qy <= B;
+      qx = Math.max(L + 6, Math.min(Rr - 6, qx));
+      qy = Math.max(T + 6, Math.min(B - 6, qy));
+      g.save();
+      g.globalAlpha = inside ? 0.7 : 0.45;
+      g.fillStyle = '#1b1830';
+      g.strokeStyle = '#ffffff';
+      g.lineWidth = 2;
+      g.beginPath();
+      g.arc(qx, qy, inside ? Math.max(6, R.pr * fit.s) : 6, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
       g.restore();
     }
     // 말렛(내 손가락 자리, 말렛 반지름만큼 안쪽으로)
@@ -341,6 +379,13 @@ import { createPractice } from './practice.js';
         g.beginPath();
         g.arc(mx, my, mr + 8, 0, Math.PI * 2);
         g.stroke();
+        // 말렛이 엄지보다 위에 떠 있으면 엄지 자리를 작은 고리로 보여 줍니다.
+        if (lift > 0 && touchPx) {
+          g.strokeStyle = 'rgba(255,255,255,.55)';
+          g.beginPath();
+          g.arc(touchPx[0], touchPx[1], 16, 0, Math.PI * 2);
+          g.stroke();
+        }
       }
       if (flashT > 0) {
         g.strokeStyle = color;
@@ -353,6 +398,12 @@ import { createPractice } from './practice.js';
       g.restore();
     }
   }
+  let drawQueued = false;
+  function drawSoon() {
+    if (drawQueued) return;
+    drawQueued = true;
+    requestAnimationFrame(() => { drawQueued = false; draw(); });
+  }
   let anim = 0;
   function animate() {
     if (flashT > 0) {
@@ -362,6 +413,22 @@ import { createPractice } from './practice.js';
     } else {
       anim = 0;
     }
+  }
+
+  // ---------- 짧은 알림(상태 줄) ----------
+  // 조용히 실패하지 않게: 끊김·8초 룰 같은 일은 상태 줄에 잠깐 보이고 진동으로도 알립니다.
+  let hintUntil = 0;
+  function hint(text, ms = 1500) {
+    $('status').textContent = text;
+    hintUntil = performance.now() + ms;
+  }
+  let noConnAt = 0;
+  function noConn() {
+    const now = performance.now();
+    if (now - noConnAt < 1500) return;
+    noConnAt = now;
+    hint(t('연결이 끊겼어요'));
+    haptics.tick();
   }
 
   // ---------- 터치 → move ----------
@@ -386,6 +453,7 @@ import { createPractice } from './practice.js';
     if (!force && now - lastSent < 24) return; // 40Hz 까지
     lastSent = now;
     if (send('move', { x: pending.x, y: pending.y, t: Math.round(pending.t * 10) / 10 }, true)) sentCount += 1;
+    else if (finger.down) noConn();
     pending = null;
   }
   // 손을 움직이지 않을 때 남은 값을 마저 보냅니다.
@@ -395,7 +463,14 @@ import { createPractice } from './practice.js';
   let pid = null;
   function pointerWorld(e) {
     const rc = pad.getBoundingClientRect();
-    return toWorld(e.clientX - rc.left, e.clientY - rc.top);
+    const px = e.clientX - rc.left;
+    const py = e.clientY - rc.top;
+    touchPx = [px, py];
+    const [x, z] = toWorld(px, py);
+    const p = mine();
+    if (!lift || !p) return [x, z];
+    // 말렛을 엄지보다 공격 방향으로 lift 픽셀 띄웁니다(아래쪽 팀은 -z, 위쪽 팀은 +z. 뒤집기와 상관없이 맞습니다).
+    return [x, z + (p.side === 'bottom' ? -1 : 1) * lift / fit.s];
   }
   let lastPointerAt = 0;
   pad.addEventListener('pointerdown', (e) => {
@@ -410,6 +485,7 @@ import { createPractice } from './practice.js';
     stopAuto();
     finger.down = true;
     const [x, z] = pointerWorld(e);
+    if (!socket.connected) noConn();
     setFinger(x, z);
   });
   pad.addEventListener('pointermove', (e) => {
@@ -424,6 +500,7 @@ import { createPractice } from './practice.js';
     if (e.pointerId !== pid) return;
     pid = null;
     finger.down = false;
+    touchPx = null;
     flush(true);
     draw();
   };
@@ -439,7 +516,7 @@ import { createPractice } from './practice.js';
     clearInterval(autoTimer);
     autoTimer = null;
     $('btnAuto').classList.remove('on');
-    $('btnAuto').textContent = '자동 움직이기(시험)';
+    $('btnAuto').textContent = t('자동 움직이기(시험)');
   }
   $('btnAuto').addEventListener('click', () => {
     audio();
@@ -449,7 +526,7 @@ import { createPractice } from './practice.js';
     }
     const t0 = performance.now();
     $('btnAuto').classList.add('on');
-    $('btnAuto').textContent = '자동 움직임 끄기';
+    $('btnAuto').textContent = t('자동 움직임 끄기');
     autoTimer = setInterval(() => {
       // 8자 모양으로 좌우·앞뒤를 오가며 같은 setFinger 경로로 보냅니다.
       const r = region();
@@ -477,7 +554,7 @@ import { createPractice } from './practice.js';
     const sc = state.score || [0, 0];
     document.documentElement.style.setProperty('--t', tn.mine.color);
     document.documentElement.style.setProperty('--o', tn.opp.color);
-    $('scMeN').textContent = `우리 ${tn.mine.name}`;
+    $('scMeN').textContent = t('우리 {name}', { name: tn.mine.name });
     $('scOpN').textContent = tn.opp.name;
     const a = $('scMe');
     const b = $('scOp');
@@ -491,19 +568,19 @@ import { createPractice } from './practice.js';
     }
     const mp = sc.some((s) => s === (state.target || 7) - 1);
     const LV = { easy: '쉬움', normal: '보통', hard: '어려움' };
-    $('scGoal').textContent = mp ? '매치 포인트' : `${state.target || 7}점 선승${LV[state.difficulty] ? ` · ${LV[state.difficulty]}` : ''}`;
+    $('scGoal').textContent = mp ? t('매치 포인트') : t('{n}점 선승', { n: state.target || 7 }) + (LV[state.difficulty] ? ` · ${t(LV[state.difficulty])}` : '');
   }
   function sideText(p) {
     if (!p) return '';
-    const where = p.side === 'bottom' ? '아래쪽' : '위쪽';
-    const lane = p.lane === 'left' ? ' · 왼쪽 레인' : p.lane === 'right' ? ' · 오른쪽 레인' : '';
-    const mates = p.mates && p.mates.length ? ` · 팀원 ${p.mates.join(', ')}` : '';
-    return `${where}${lane}${mates} · 상대 ${p.opp}`;
+    const where = t(p.side === 'bottom' ? '아래쪽' : '위쪽');
+    const lane = p.lane === 'left' ? ` · ${t('왼쪽 레인')}` : p.lane === 'right' ? ` · ${t('오른쪽 레인')}` : '';
+    const mates = p.mates && p.mates.length ? ` · ${t('팀원 {names}', { names: p.mates.join(', ') })}` : '';
+    return `${where}${lane}${mates} · ${t('상대 {name}', { name: p.opp })}`;
   }
   function renderStats() {
     const st = state.stats && me ? state.stats[me.slot] : null;
     $('myStats').innerHTML = st
-      ? `<span class="chip">골<b>${st.goals}</b></span><span class="chip">타격<b>${st.hits}</b></span><span class="chip">최고<b>${st.top || 0}km/h</b></span>`
+      ? `<span class="chip">${t('골')}<b>${st.goals}</b></span><span class="chip">${t('타격')}<b>${st.hits}</b></span><span class="chip">${t('최고')}<b>${st.top || 0}km/h</b></span>`
       : '';
   }
   // ---------- 준비(모두 준비) ----------
@@ -526,11 +603,11 @@ import { createPractice } from './practice.js';
     const n = st ? st.ready.length : 0;
     const need = st ? st.need : 0;
     if (readyPressed) {
-      $('goT').textContent = '준비 완료 ✓';
-      $('goS').textContent = need > 1 ? `다른 사람 기다리는 중 · ${n}/${need}` : '곧 시작해요';
+      $('goT').textContent = t('준비 완료 ✓');
+      $('goS').textContent = need > 1 ? t('다른 사람 기다리는 중 · {n}/{need}', { n, need }) : t('곧 시작해요');
     } else {
-      $('goT').textContent = over ? '다시 하기' : '준비';
-      $('goS').textContent = need > 1 ? `모두 준비하면 시작 · 지금 ${n}/${need}` : '누르면 바로 시작해요';
+      $('goT').textContent = t(over ? '다시 하기' : '준비');
+      $('goS').textContent = need > 1 ? t('모두 준비하면 시작 · 지금 {n}/{need}', { n, need }) : t('누르면 바로 시작해요');
     }
     // 누가 준비했는지(폰에도 보여 줍니다). 이 줄이 보이면 ready.js 의 아래 띠는 겹치니 숨깁니다.
     const ro = $('roster');
@@ -541,10 +618,10 @@ import { createPractice } from './practice.js';
     if (!show) return;
     const away = (st && st.away) || [];
     const COL = { 1: '#ff5a5f', 2: '#3ab4ff', 3: '#ffc93c', 4: '#5ee07a' };
-    ro.innerHTML = `<span>준비 ${n}/${need || list.length}</span>` + list.map((s) => {
+    ro.innerHTML = `<span>${t('준비 {n}/{need}', { n, need: need || list.length })}</span>` + list.map((s) => {
       const on = st && st.ready.includes(s);
       const cls = 'rp' + (on ? ' on' : '') + (me && s === me.slot ? ' you' : '') + (away.includes(s) ? ' away' : '');
-      return `<span class="${cls}" style="--pc:${COL[s] || '#fff'}"><b>${s}P</b>${on ? '✓' : away.includes(s) ? '끊김' : '대기'}</span>`;
+      return `<span class="${cls}" style="--pc:${COL[s] || '#fff'}"><b>${s}P</b>${on ? '✓' : t(away.includes(s) ? '끊김' : '대기')}</span>`;
     }).join('');
   }
 
@@ -563,12 +640,15 @@ import { createPractice } from './practice.js';
         show('vPlay');
         layout();
         $('tools').classList.toggle('hidden', isTouch && !DEBUG);
-        $('tip').textContent = tipText(p);
+        $('tip').textContent = t(TIP);
+        lastHitFx = 0;
+        puck = null;
         document.body.classList.remove('roster-on');
       }
       renderScore();
-      const st = state.sub === 'countdown' ? '준비… 곧 시작해요' : state.sub === 'final' ? '경기 끝!' : '';
-      $('status').textContent = st;
+      const st = state.sub === 'countdown' ? t('준비… 곧 시작해요') : state.sub === 'final' ? t('경기 끝!') : '';
+      if (performance.now() > hintUntil) $('status').textContent = st;
+      lift = Number(state.lift) || 0;
       layout();
       draw();
       return;
@@ -583,23 +663,23 @@ import { createPractice } from './practice.js';
     if (phase === 'over') {
       const tn = teamNames();
       const won = tn && state.winner === tn.ti;
-      $('waitT').textContent = !tn ? '경기 끝' : won ? '승리!' : '패배';
+      $('waitT').textContent = t(!tn ? '경기 끝' : won ? '승리!' : '패배');
       $('waitT').className = 'big' + (won ? ' win' : '');
       const sc = state.score || [0, 0];
-      $('waitB').textContent = tn ? `${sc[tn.ti]} : ${sc[1 - tn.ti]} · 큰 화면에서 결과를 확인하세요.` : '큰 화면에서 결과를 확인하세요.';
+      $('waitB').textContent = tn ? `${sc[tn.ti]} : ${sc[1 - tn.ti]}` : '';
       ws.classList.add('hidden');
       renderStats();
     } else if (phase === 'playing') {
-      $('waitT').textContent = '경기 중';
+      $('waitT').textContent = t('경기 중');
       $('waitT').className = 'big';
-      $('waitB').textContent = '지금 경기가 끝나면 다음 판부터 함께해요.';
+      $('waitB').textContent = t('다음 판부터 함께해요.');
       $('btnGo').style.display = 'none';
       ws.classList.add('hidden');
       $('myStats').innerHTML = '';
     } else {
-      $('waitT').textContent = '대기실';
+      $('waitT').textContent = t('대기실');
       $('waitT').className = 'big';
-      $('waitB').textContent = '모두 준비를 누르면 시작해요.\n혼자면 CPU, 둘이면 1:1, 셋·넷이면 2:2 예요.';
+      $('waitB').textContent = t('모두 준비를 누르면 시작해요.');
       if (p) {
         ws.classList.remove('hidden');
         document.documentElement.style.setProperty('--t', p.teamColor || me.color);
@@ -621,7 +701,7 @@ import { createPractice } from './practice.js';
   // 진동: 큰 화면이 보내는 공통 haptic 도 받습니다(내 자리 것만).
   haptics.listen(socket, { slot: () => (me ? me.slot : null) });
 
-  // ---------- 튜토리얼: 연습 판에서 직접 해 보기 ----------
+  // ---------- 튜토리얼: 저절로 뜨지 않습니다. 대기실 링크로만, 퍽 치기 한 단계 ----------
   let practice = null; // 지금 단계의 연습 판(시험용 자동 손가락에 씀)
   const goalW = () => (state.rink && state.rink.goal) || 0.38;
   const stage = (kind) => (el, api) => {
@@ -643,17 +723,16 @@ import { createPractice } from './practice.js';
     };
   };
   let autoTut = false;
+  // 언어 고르기는 시작 화면에서만 보입니다(시작하기를 누르면 이 화면이 사라짐). 바꾸면 캔버스 글자까지 새로 그리려고 새로 고칩니다.
+  mountSwitcher($('langBox'), { reload: true, compact: true });
+  document.title = t('에어하키 컨트롤러');
   const tut = createTutorial({
     key: 'airhockey',
     socket,
-    title: '에어하키 · 처음이라 연습해 봐요',
+    title: '에어하키',
     steps: [
-      { title: '엄지로 말렛 움직이기', body: '화면을 누른 채 끌어서 빛나는 원 3개를 지나가요.', waitFor: 'drag', hint: '원 3개 지나가기', okText: '잘 따라와요!', render: stage('drag') },
-      { title: '퍽 치기', body: '말렛으로 퍽을 툭 쳐요. 칠 때마다 폰이 떨려요.', waitFor: 'hit', count: 2, hint: '퍽 두 번 치기', okText: '딱 좋아요!', render: stage('hit') },
-      { title: '세게 밀어 슛', body: '퍽 아래에서 위쪽(상대 쪽)으로 휙 밀어 쳐요.', waitFor: 'goal', hint: '위로 세게 밀기', okText: '멋진 슛!', render: stage('shoot') },
-      { title: '내 골문 막기', body: '내려오는 퍽 앞에 말렛을 두고 막아요.', waitFor: 'block', hint: '퍽 막기', okText: '철벽 수비!', render: stage('block') }
+      { title: '퍽 치기', body: '엄지로 끌어서 퍽을 쳐요.', waitFor: 'hit', count: 1, hint: '퍽 치기', okText: '딱 좋아요!', render: stage('hit') }
     ],
-    finish: { title: '연습 끝!', body: '경기 중에는 큰 화면을 보면서\n폰 화면을 똑같이 밀면 돼요.\n이제 준비를 눌러요.', button: '좋아요' },
     onDone: () => render()
   });
   tut.link($('tutLink'));
@@ -686,22 +765,22 @@ import { createPractice } from './practice.js';
   socket.on('no_room', () => {
     // 서버가 막 다시 떴으면 큰 화면이 같은 코드로 방을 다시 만들 때까지 잠깐 기다립니다.
     if (noRoomTries++ < 15) {
-      message('방에 다시 연결하는 중', '잠시만 기다려 주세요.');
+      message(t('방에 다시 연결하는 중'), t('잠시만 기다려 주세요.'));
       setTimeout(() => socket.connected && socket.emit('join', { role: 'controller', room: ROOM, token }), 2000);
       return;
     }
-    message('방을 찾을 수 없어요', '큰 화면의 QR을 다시 찍어 주세요.');
+    message(t('방을 찾을 수 없어요'), t('큰 화면의 QR을 다시 찍어 주세요.'));
   });
-  socket.on('room_full', () => message('4명이 꽉 찼어요', '빈자리가 생기면 다시 찍어 주세요.'));
-  socket.on('replaced', () => message('다른 탭에서 열었어요', '마지막으로 연 화면에서 조작해요.'));
-  socket.on('room_closed', () => message('방이 닫혔어요', '큰 화면의 새 QR을 찍어 주세요.'));
+  socket.on('room_full', () => message(t('4명이 꽉 찼어요'), t('빈자리가 생기면 다시 찍어 주세요.')));
+  socket.on('replaced', () => message(t('다른 탭에서 열었어요'), t('마지막으로 연 화면에서 조작해요.')));
+  socket.on('room_closed', () => message(t('방이 닫혔어요'), t('큰 화면의 새 QR을 찍어 주세요.')));
   socket.on('display_status', (d) => {
     const b = $('banner');
-    b.textContent = '큰 화면 연결이 끊겼어요. 다시 열리면 이어서 해요.';
+    b.textContent = t('큰 화면 연결이 끊겼어요');
     b.classList.toggle('hidden', Boolean(d && d.connected));
   });
   socket.on('disconnect', () => {
-    if (mode === 'play') $('status').textContent = '연결이 잠깐 끊겼어요…';
+    if (mode === 'play') $('status').textContent = t('연결이 잠깐 끊겼어요…');
   });
   socket.on('game_state', (s) => {
     const prevScore = (state.score || [0, 0]).slice();
@@ -720,11 +799,40 @@ import { createPractice } from './practice.js';
   // 내 말렛이 퍽을 쳤어요(큰 화면 판정): 진동(아이폰은 번쩍+틱) + 딸깍 소리 + 패드 고리
   socket.on('hit', (d) => {
     const q = Math.max(0, Math.min(1, Number(d && d.strength) || 0.3));
-    if (d && d.strong) haptics.play('strong', q, { silent: true });
-    else haptics.hit(q, { silent: true });
-    click(q);
+    // 퍽이 닿는 걸 미리 알아채 이미 진동을 줬으면(160ms 안) 같은 타격의 진동·소리를 또 내지 않습니다. 센 샷은 항상 냅니다.
+    const early = performance.now() - lastHitFx < 160 && !(d && d.strong);
+    if (!early) {
+      if (d && d.strong) haptics.play('strong', q, { silent: true });
+      else haptics.hit(q, { silent: true });
+      click(q);
+    }
     flashT = 1;
     if (!anim) anim = requestAnimationFrame(animate);
+  });
+  // 큰 화면이 알려 주는 퍽 위치(초당 20번)
+  let lastHitFx = 0;
+  let wasNear = false;
+  socket.on('puck', (d) => {
+    if (!d || mode !== 'play') return;
+    puck = { x: Number(d.x) || 0, z: Number(d.z) || 0, at: performance.now() };
+    // 내 말렛이 퍽에 닿는 순간을 미리 알아채 바로 진동(큰 화면의 'hit' 가 진짜 판정이고, 여기는 체감만 앞당깁니다).
+    if (finger.down && finger.x != null && d.live) {
+      const R = rink();
+      const near = Math.hypot(finger.x - puck.x, finger.z - puck.z) < R.mr + R.pr;
+      if (near && !wasNear && performance.now() - lastHitFx > 250) {
+        lastHitFx = performance.now();
+        haptics.hit(0.4, { silent: true });
+      }
+      wasNear = near;
+    } else wasNear = false;
+    drawSoon();
+  });
+  // 8초 룰 경고: 퍽이 한쪽에 오래 머물면 폰에도 초를 보여 주고 진동합니다.
+  socket.on('rule', (d) => {
+    const sec = Number(d && d.sec);
+    if (!(sec >= 0)) { if (hintUntil && performance.now() < hintUntil) hintUntil = 0; return; }
+    hint(t('{n}초 안에 쳐요', { n: sec }), 1200);
+    haptics.tick();
   });
   let overTimer = null;
   socket.on('goal', (d) => {
@@ -733,7 +841,7 @@ import { createPractice } from './practice.js';
     const ours = d.team === p.team;
     const el = $('over');
     el.classList.toggle('bad', !ours);
-    $('overT').textContent = ours ? (d.scorer === me.slot ? '내 골!' : '골!') : d.final ? '패배' : '실점';
+    $('overT').textContent = t(ours ? (d.scorer === me.slot ? '내 골!' : '골!') : d.final ? '패배' : '실점');
     el.classList.add('on');
     clearTimeout(overTimer);
     overTimer = setTimeout(() => el.classList.remove('on'), 1500);
@@ -756,24 +864,22 @@ import { createPractice } from './practice.js';
     audio();
     haptics.unlock();
     if (!ROOM) {
-      message('방 코드가 없어요', '큰 화면의 QR을 찍어 주세요.');
+      message(t('방 코드가 없어요'), t('큰 화면의 QR을 찍어 주세요.'));
       return;
     }
-    message('들어가는 중…', '큰 화면과 연결하고 있어요.');
+    message(t('들어가는 중…'), t('큰 화면과 연결하고 있어요.'));
     socket.connect();
-    // 처음 하는 폰이면 바로 연습 판을 띄웁니다(그동안 자리 잡기는 뒤에서 이어지고, 큰 화면엔 '연습 중'이 뜹니다).
-    if (tut.firstTime()) tut.run();
   });
   $('btnGo').addEventListener('click', () => {
     keepAwake();
     audio();
     haptics.unlock();
     if (readyPressed) {
-      goNote('모두 준비하면 바로 시작해요');
+      goNote(t('모두 준비하면 바로 시작해요'));
       return;
     }
     if (!send('start_game', {})) {
-      goNote('연결 중이에요. 잠시 뒤 다시 눌러 주세요');
+      goNote(t('연결 중이에요. 잠시 뒤 다시 눌러 주세요'));
       return;
     }
     // 서버 ready_state 가 오기 전에도 바로 눌린 모양으로(다음 ready_state 가 맞춰 줌)
@@ -782,18 +888,19 @@ import { createPractice } from './practice.js';
     paintReady();
   });
   function paintFlip() {
-    $('btnFlip').classList.toggle('on', flip);
-    $('btnFlip').textContent = flip ? '↕ 뒤집힘' : '↕ 뒤집기';
+    const p = mine();
+    const on = Boolean(p) && flip !== defaultFlip(p.side);
+    $('btnFlip').classList.toggle('on', on);
+    $('btnFlip').textContent = t(on ? '↕ 뒤집힘' : '↕ 뒤집기');
   }
   paintFlip();
   $('btnFlip').addEventListener('click', () => {
-    flip = !flip;
-    paintFlip();
     const p = mine();
     if (p) {
-      try { localStorage.setItem(flipKey(p.side), flip ? '1' : '0'); } catch (e) {}
-      $('tip').textContent = tipText(p);
+      flip = flip === defaultFlip(p.side) ? altFlip(p.side) : defaultFlip(p.side);
+      try { localStorage.setItem(flipKey(p.side), String(flip)); } catch (e) {}
     }
+    paintFlip();
     draw();
   });
   document.addEventListener('visibilitychange', () => {
@@ -801,7 +908,7 @@ import { createPractice } from './practice.js';
   });
   if (!window.isSecureContext) {
     const b = $('banner');
-    b.textContent = 'http 주소라 화면 꺼짐 방지가 안 될 수 있어요. 경기 중 화면이 꺼지지 않게 해 주세요.';
+    b.textContent = t('http 주소라 화면이 꺼질 수 있어요');
     b.classList.remove('hidden');
     setTimeout(() => b.classList.add('hidden'), 6000);
   }
@@ -811,7 +918,7 @@ import { createPractice } from './practice.js';
     let lastCount = 0;
     setInterval(() => {
       const p = mine();
-      $('debug').textContent = `move ${(sentCount - lastCount) * 2}/s · ${socket.connected ? 'on' : 'off'} · ${p ? `${p.side}/${p.lane}` : '-'} · flip ${flip ? 'Y' : 'N'} · ${state.phase}/${state.sub || ''}`;
+      $('debug').textContent = `move ${(sentCount - lastCount) * 2}/s · ${socket.connected ? 'on' : 'off'} · ${p ? `${p.side}/${p.lane}` : '-'} · flip ${flip} · ${state.phase}/${state.sub || ''}`;
       lastCount = sentCount;
     }, 500);
   }

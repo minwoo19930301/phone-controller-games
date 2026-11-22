@@ -2,6 +2,8 @@
 // 슬로우 연출(비네트·채도), 화면 밖에서 충전 중인 드론 방향 화살표, 쓰러짐/끝 배너. 글자 크기는 칸 크기에 맞춰 줄어듭니다.
 // 로봇 검투에서는 로봇 체력 띠, 공격 예고(방향 화살표 + 남은 시간), 빈틈 시간, 칼 부딪힘 번쩍임, 피해 숫자를 더 그립니다.
 
+import { t as tr } from '/common/i18n.js';
+
 function el(tag, cls, html) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -37,6 +39,7 @@ export function createHud(root) {
     const badge = el('div', 'badge');
     let segs = '';
     for (let k = 0; k < HP_SEG; k++) segs += '<i></i>';
+    badge.style.setProperty('--away', JSON.stringify(tr('연결 끊김'))); // CSS ::after 가 쓰는 번역 글자
     badge.innerHTML =
       `<div class="who">${esc(v.name)}</div>` +
       '<div class="sc"><b class="score">0</b><span>점</span></div>' +
@@ -53,7 +56,7 @@ export function createHud(root) {
     const rhp = el('div', 'rhp', '<div class="rhp-top"><span class="rhp-n"></span><span class="rhp-lv"></span><b class="rhp-v"></b></div>' +
       '<div class="rhp-bar"><i class="g"></i><i class="f"></i><s></s><s></s><s></s></div>');
     const warn = el('div', 'warn', '<div class="w-ic"></div><div class="w-tx"><b></b><span></span></div><div class="w-bar"><i></i></div><em class="w-cb"></em>');
-    const open = el('div', 'openx', '<b>지금 베기!</b><span>휘두르세요</span><div class="o-bar"><i></i></div><div class="o-pips"></div>');
+    const open = el('div', 'openx', '<b>지금 베기!</b><span></span><div class="o-bar"><i></i></div><div class="o-pips"></div>');
     const clash = el('div', 'clashfx');
     const dmg = el('div', 'dmgs');
     c.append(fx, hurt, clash, arrows, badge, wave, rhp, warn, open, dmg, slow, call, toast, banner, note, hint);
@@ -283,7 +286,7 @@ export function createHud(root) {
         }
         w.classList.toggle('now', Boolean(st.hitNow));
         w.querySelector('.w-bar i').style.transform = `scaleX(${Math.max(0, Math.min(1, st.prog)).toFixed(3)})`;
-        const cb = st.combo > 1 ? `연속 ${st.comboN + 1}/${st.combo}` : '';
+        const cb = st.combo > 1 ? tr('연속 {n}/{c}', { n: st.comboN + 1, c: st.combo }) : '';
         if (L.cb !== cb) {
           L.cb = cb;
           w.querySelector('.w-cb').textContent = cb;

@@ -2,7 +2,9 @@ import { CLUBS as BAG } from '/golf/clubs.js';
 import { createSwingCapture, synthSwing, feedSwing } from './swing-capture.js';
 import { resolveSwingSpeed } from './swing-speed.mjs';
 import { phoneMaySendFollow } from '/golf/follow-through.mjs';
-import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
+import { requestMotionPermission } from '/common/motion.js';
+import { createSamples } from '/common/samples.js';
+import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS } from '/golf/assist.mjs';
 // 골프 컨트롤러. 폰의 방향을 계속 큰 화면으로 흘려보내고, 임팩트는 폰에서 직접 잡습니다.
 // 좌표는 어드레스 때 정한 기준축으로 보냅니다: r = 목표 오른쪽(공 쪽), u = 위, f = 목표 쪽.
 (() => {
@@ -28,7 +30,9 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
     (volatile ? socket.volatile : socket).emit('c2d', { event, data });
     return true;
   }
-  let lastSwing=null, analysisPanel=null;
+  // 스윙 분석(1800줄)은 '분석 보기'를 눌렀을 때만 불러옵니다.
+  let lastSwing=null, analysisPanel=null, analysisData=null, analysisMod=null;
+  const loadAnalysis = () => analysisMod || (analysisMod = import('/golf/analysis.js'));
   const capture=createSwingCapture({send:(event,data)=>send(event,data),club:()=>club,onDone:packet=>{lastSwing=packet}});
   const isTouch = navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
   let impactAt = 0;
@@ -40,6 +44,15 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
   let aim = 0;
   let mode = 'start'; // start | wait | aim | hold | swing | result
   let sensorOk = false;
+  let tapOnly = false; // 동작 센서가 없거나 거절돼서 버튼으로만 치는 폰
+  let recClub = '7i'; // 이번 차례에 큰 화면이 골라 둔 클럽
+  let showPad = false; // 방향 패드를 펼쳤는지(쉬움·보통은 접혀 있음)
+  let clubMode = 0; // 0 숨김 · 1 추천 주변 3개 · 2 전부
+  let hintTimer = null;
+  let swingStartAt = 0;
+  let burst = null;
+  const level = () => levelOf(state.difficulty);
+  const detect = () => swingDetect(level(), club === 'pt');
 
   function show(id) {
     for (const v of document.querySelectorAll('.view')) v.classList.toggle('on', v.id === id);
@@ -84,9 +97,10 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
   let hasGyro = false; // rotationRate 에 숫자가 들어오는 기기인지
   const toBasis = (v) => [dot(v, basis.r), dot(v, basis.u), dot(v, basis.f)];
 
-  const swing = { stage: 'ready', phi: 0, prev: null, prevT: 0, prevD: 0, top: 0, gyroPeak: 0, orientationPeak: 0, samples: [] };
+  const swing = { stage: 'ready', phi: 0, prev: null, prevT: 0, prevD: 0, top: 0, backAt: 0, gyroPeak: 0, orientationPeak: 0, samples: [] };
   function resetSwing() {
-    Object.assign(swing, { stage: 'ready', phi: 0, prev: null, prevT: 0, prevD: 0, top: 0, gyroPeak: 0, orientationPeak: 0, samples: [] });
+    Object.assign(swing, { stage: 'ready', phi: 0, prev: null, prevT: 0, prevD: 0, top: 0, backAt: 0, gyroPeak: 0, orientationPeak: 0, samples: [] });
+    burst = null;
   }
 
   function calibrate(v) {
@@ -139,12 +153,15 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
       const old = k[Math.max(0, k.length - 4)];
       const rate = (swing.phi - old.phi) / Math.max(0.012, (t - old.t) / 1000);
 
-      if (swing.stage === 'ready' && swing.phi < (club === 'pt' ? -8 : -60)) swing.stage = 'back';
+      const D = detect(); // 난이도별 문턱값: 쉬울수록 작은 스윙도 잡습니다
+      if (swing.stage === 'ready' && swing.phi < D.back) { swing.stage = 'back'; swing.backAt = t; }
       if (swing.stage === 'back') {
         swing.top = Math.min(swing.top, swing.phi);
-        if (rate > (club === 'pt' ? 30 : 250) && swing.phi > swing.top + (club === 'pt' ? 3 : 25)) swing.stage = 'down';
+        if (rate > D.rate && swing.phi > swing.top + D.over) swing.stage = 'down';
         // 천천히 다시 내려놓으면 처음부터
-        if (d < (club === 'pt' ? 3 : 20) && rate < (club === 'pt' ? 30 : 250)) resetSwing();
+        if (d < D.resetD && rate < D.resetRate) resetSwing();
+        // 들어 올린 채 오래 머물면 손떨림으로 보고 처음부터(알려 줍니다)
+        else if (D.fidgetMs && t - swing.backAt > D.fidgetMs) { resetSwing(); hint('더 크게 휘둘러요!'); }
       }
       if (swing.stage === 'down') {
         swing.orientationPeak = Math.max(swing.orientationPeak, rate);
@@ -181,7 +198,11 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
     swing.stage = 'done';
     capture.impact(performance.now());
     setTimeout(()=>capture.finish(),1800);
-    const data = { speed: Math.round(speed), face: +face.toFixed(1), path: +path.toFixed(1), miss: +miss.toFixed(1), club, aim };
+    sendImpact({ speed: Math.round(speed), face: +face.toFixed(1), path: +path.toFixed(1), miss: +miss.toFixed(1), club, aim });
+  }
+  // 임팩트를 큰 화면에 보내고 결과 화면으로 넘어갑니다(스윙·돌발 회전·탭으로 치기 모두 같은 길).
+  function sendImpact(data) {
+    clearTimeout(hintTimer);
     if (!send('impact', data)) {
       lostConnection();
       return;
@@ -193,8 +214,38 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
     $('resT').textContent = '굿 샷!';
     $('resChips').innerHTML = '';
     $('resB').textContent = '큰 화면을 보세요';
+    analysisData = null;
+    $('btnAnalysis').classList.add('hidden');
     show('vResult');
     debug(`impact ${JSON.stringify(data)}`);
+  }
+  // 방향 읽기가 안 맞아도 회전이 크게 튀었으면 한 번 친 것으로 칩니다(쉬움·보통). 방향은 똑바로, 세기는 튄 값.
+  function burstShot(peak) {
+    if (mode !== 'swing' || swing.stage !== 'ready') { burst = null; return; }
+    swing.stage = 'done';
+    burst = null;
+    capture.cancel();
+    sendImpact({ speed: Math.round(peak), face: 0, path: 0, miss: 0, club, aim });
+  }
+  // 탭으로 치기: 보통 세기로 똑바로. 큰 화면이 클럽에 맞는 세기를 정합니다.
+  function tapShot() {
+    if (mode !== 'swing') return;
+    swing.stage = 'done';
+    capture.cancel();
+    sendImpact({ speed: 0, auto: true, face: 0, path: 0, miss: 0, club, aim });
+  }
+  // 스윙이 안 잡히는 동안 짧은 힌트와 진동 한 번
+  function hint(text) {
+    $('swingB').textContent = text;
+    if (navigator.vibrate) navigator.vibrate(25);
+  }
+  function armHint() {
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(function again() {
+      if (mode !== 'swing') return;
+      if (swing.stage === 'ready' || swing.stage === 'back') hint('더 크게 휘둘러요!');
+      hintTimer = setTimeout(again, HINT_AFTER_MS);
+    }, HINT_AFTER_MS);
   }
 
   function drawMeter(s) {
@@ -214,7 +265,6 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
     } else {
       $('arc').setAttribute('d', '');
     }
-    if (swing.stage === 'back') $('swingT').textContent = '좋아요, 이제 휘둘러요';
   }
 
   // ---------- 센서 ----------
@@ -224,6 +274,7 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
     sensorOk = true;
     lastOri = deviceVectors(e.alpha || 0, e.beta || 0, e.gamma || 0);
     last = lastOri;
+    if (mode === 'hold') holdStep(lastOri, performance.now());
     onSample(lastOri, performance.now());
   }
   function onMotion(e) {
@@ -233,22 +284,37 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
       hasGyro = true;
       rotNow = Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0);
       if (swing.stage === 'down') swing.gyroPeak = Math.max(swing.gyroPeak, rotNow);
+      // 돌발 회전: 방향 읽기와 상관없이 큰 회전이 튀면 한 번 친 것으로 봅니다
+      const B = detect().burst;
+      if (mode === 'swing' && B && swing.stage === 'ready' && rotNow > B && performance.now() - swingStartAt > 700) {
+        if (!burst) {
+          burst = { peak: rotNow };
+          setTimeout(() => burst && burstShot(burst.peak), 150);
+        } else burst.peak = Math.max(burst.peak, rotNow);
+      }
     }
   }
 
   // ---------- 소리 ----------
   let actx = null;
+  let sam = null;
   function audio() {
     if (!actx) {
       const AC = window.AudioContext || window.webkitAudioContext;
-      if (AC) actx = new AC();
+      if (AC) {
+        actx = new AC();
+        sam = createSamples(actx);
+        sam.preload(['ui/click']); // 폰은 파일 1개만 미리 받습니다
+      }
     }
-    if (actx && actx.state === 'suspended') actx.resume();
+    if (actx && actx.state === 'suspended') actx.resume().catch(() => {});
     return actx;
   }
+  // 어드레스·임팩트 알림: 실제 마우스 클릭 녹음(못 받았으면 아래 사인파 '팅')
   function ting() {
     const a = audio();
     if (!a) return;
+    if (a.state === 'running' && sam && sam.play('ui/click', { gain: 1 })) return;
     const o = a.createOscillator();
     const g = a.createGain();
     o.frequency.value = 2400;
@@ -290,77 +356,134 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
   $('pad').addEventListener('pointerup', endDrag);
   $('pad').addEventListener('pointercancel', endDrag);
 
+  // 큰 화면이 정해 둔 클럽(recClub)이 기본입니다. 쉬움·보통은 숨겨 두고, 눌렀을 때 추천 주변 3개만, 더 보기로 전부.
+  function clubPool() {
+    return CLUBS.filter((c) => (state.mode === 'near' ? ['5i', '7i', '9i', 'pw'].includes(c.id) : c.id !== 'pt'));
+  }
+  function visibleClubs() {
+    if (level() === 'hard') return state.mode === 'near' ? clubPool() : CLUBS; // 어려움은 예전처럼 전부 직접 고릅니다
+    if (club === 'pt' || clubMode === 0) return []; // 퍼팅은 퍼터로 정해져 있습니다
+    const pool = clubPool();
+    if (clubMode === 2) return pool;
+    const at = Math.max(0, pool.findIndex((c) => c.id === recClub));
+    const from = Math.max(0, Math.min(pool.length - 3, at - 1));
+    return pool.slice(from, from + 3);
+  }
   function drawClubs() {
     const box = $('clubs');
     box.innerHTML = '';
-    for (const c of CLUBS.filter(c=>state.mode!=='near'||['5i','7i','9i','pw'].includes(c.id))) {
+    const list = visibleClubs();
+    box.classList.toggle('hidden', !list.length);
+    for (const c of list) {
       const b = document.createElement('button');
       b.className = c.id === club ? 'on' : '';
       b.innerHTML = `<b>${c.name}</b><span>${c.sub}</span>`;
       b.addEventListener('click', () => {
         club = c.id;
         drawClubs();
+        drawAimTools();
         keepAwake();
         send('club', { club });
       });
       box.appendChild(b);
     }
+    if (clubMode === 1 && level() !== 'hard' && list.length) {
+      const more = document.createElement('button');
+      more.textContent = '더 보기';
+      more.addEventListener('click', () => { clubMode = 2; drawClubs(); });
+      box.appendChild(more);
+    }
   }
+  // 방향 패드·클럽 줄을 펼치고 접는 링크, 가운데 큰 안내(쉬움·보통)
+  function drawAimTools() {
+    const easy = level() !== 'hard';
+    $('pad').classList.toggle('hidden', !showPad);
+    $('aimEasy').classList.toggle('hidden', showPad);
+    const c = CLUBS.find((x) => x.id === club);
+    $('aimClub').textContent = club === 'pt' ? '퍼터' : c ? c.sub : '';
+    $('aimDist').textContent = state.pin ? `${state.pin}m` : '';
+    $('btnPadToggle').classList.toggle('hidden', !easy || showPad);
+    $('btnClubToggle').classList.toggle('hidden', !easy || clubMode !== 0 || club === 'pt');
+  }
+  $('btnPadToggle').addEventListener('click', () => { showPad = true; drawAimTools(); });
+  $('btnClubToggle').addEventListener('click', () => { clubMode = 1; drawClubs(); drawAimTools(); });
 
   // ---------- 어드레스 ----------
+  // 어드레스: 누르고 폰이 잠깐 가만히 있으면(300ms) 그 자세가 기준이 됩니다. 1.5초 안에 안 멈춰도 그 자세로 잡습니다.
+  let hold = { ref: null, since: 0 };
+  function startHold() {
+    keepAwake();
+    clearTimeout(holdTimer);
+    resetSwing();
+    mode = 'hold';
+    hold = { ref: null, since: 0 };
+    show('vHold');
+    holdTimer = setTimeout(finishHold, FALLBACK_MS);
+  }
+  function holdStep(v, t) {
+    if (!hold.ref || angle(hold.ref.top, v.top) / RD > STILL_DEG) {
+      hold.ref = v;
+      hold.since = t;
+    } else if (t - hold.since >= STILL_MS) finishHold();
+  }
+  function finishHold() {
+    clearTimeout(holdTimer);
+    if (mode !== 'hold' || !last) return;
+    calibrate(last);
+    lastSwing=null;$('analysisSummary').replaceChildren();
+    capture.begin({shaft0:basis.shaft0,club});
+    if (!send('address', { shaft0: basis.shaft0, club, aim })) {
+      lostConnection();
+      return;
+    }
+    enterSwing();
+  }
+  function enterSwing() {
+    mode = 'swing';
+    swingStartAt = performance.now();
+    $('swingT').textContent = '스윙!';
+    $('swingB').textContent = '';
+    $('btnRedo').classList.toggle('hidden', tapOnly);
+    show('vSwing');
+    armHint();
+    if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
+    ting();
+  }
   $('btnAddress').addEventListener('click', () => {
     keepAwake();
     if (!sensorOk) {
-      if (!isTouch || params.has('debug')) fakeSwing();
-      else sensorHelp();
+      if (!isTouch || params.has('debug')) { fakeSwing(); return; }
+      // 센서가 없는 폰: 버튼으로 칩니다
+      tapOnly = true;
+      const shaft0 = norm([0.55, -0.83, 0.02]);
+      if (!send('address', { shaft0, club, aim })) { lostConnection(); return; }
+      enterSwing();
       return;
     }
-    mode = 'hold';
-    show('vHold');
-    let n = 3;
-    $('holdN').textContent = n;
-    clearInterval(holdTimer);
-    const tick = setInterval(() => {
-      n -= 1;
-      if (n > 0) {
-        $('holdN').textContent = n;
-        if (navigator.vibrate) navigator.vibrate(15);
-        return;
-      }
-      clearInterval(tick);
-      if (mode !== 'hold') return;
-      calibrate(last);
-      lastSwing=null;$('analysisSummary').replaceChildren();
-      capture.begin({shaft0:basis.shaft0,club});
-      if (!send('address', { shaft0: basis.shaft0, club, aim })) {
-        lostConnection();
-        return;
-      }
-      mode = 'swing';
-      $('swingT').textContent = '스윙하세요';
-      $('swingB').textContent = '천천히 들어 올렸다가 끝까지 휘둘러요.';
-      show('vSwing');
-      if (navigator.vibrate) navigator.vibrate([30, 40, 30]);
-      ting();
-    }, 1000);
-    holdTimer = tick;
+    startHold();
   });
-  // 스윙이 안 잡히거나 자세가 틀어졌으면 다시 조준부터
-  $('btnRedo').addEventListener('click', () => {
-    clearInterval(holdTimer);
-    resetSwing();capture.cancel();lastSwing=null;$('analysisSummary').replaceChildren();
+  $('btnTap').addEventListener('click', tapShot);
+  // 조준 화면으로 돌아갑니다(큰 화면도 조준 단계로)
+  $('btnBack').addEventListener('click', () => {
+    clearTimeout(holdTimer); clearTimeout(hintTimer);
+    resetSwing(); capture.cancel(); lastSwing = null; $('analysisSummary').replaceChildren();
     send('cancel', {});
     mode = 'wait';
     render();
+  });
+  // 기준 자세를 다시 잡습니다(큰 화면은 그대로 스윙 단계)
+  $('btnRedo').addEventListener('click', () => {
+    capture.cancel();lastSwing=null;$('analysisSummary').replaceChildren();
+    startHold();
   });
 
   function lostConnection() {
     mode = 'wait';
     message('연결이 잠깐 끊겼어요', '다시 연결되면 조준 화면으로 돌아가요.');
   }
-  function sensorHelp() {
-    message('동작 센서를 쓸 수 없어요',
-      'iPhone: Safari 를 앱 전환기에서 완전히 닫고 QR을 다시 찍은 뒤, 동작 접근을 허용해 주세요.\nAndroid: 주소창 자물쇠 → 사이트 설정 → 동작 센서를 허용해 주세요.');
+  // 센서가 꺼져 있어도 멈추지 않습니다: 버튼으로 칠 수 있고, 켜는 법은 짧게 한 줄만 보여 줍니다.
+  function sensorNote() {
+    $('aimNote').textContent = '동작 접근을 허용해 주세요 (iPhone: Safari 다시 열기 · Android: 사이트 설정)';
   }
   function keepAwake() {
     if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
@@ -421,7 +544,7 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
       clearInterval(holdTimer);
       mode = 'wait';
       $('waitT').textContent = state.phase === 'over' ? '경기 끝' : '대기실';
-      $('waitB').textContent = state.phase === 'over' ? '큰 화면에서 순위를 확인하세요.' : '모두 들어오면 게임 시작을 눌러요.';
+      $('waitB').textContent = state.phase === 'over' ? '큰 화면에서 순위를 확인하세요.' : '';
       $('btnGo').classList.remove('hidden');
       $('btnGo').style.display = '';
       $('btnGo').textContent = state.phase === 'over' ? '다시 하기' : '게임 시작';
@@ -445,22 +568,34 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
       // 새 차례: 큰 화면과 같은 값(핀 방향, 7번)에서 시작합니다.
       aim = 0;
       club = state.club || '7i';
+      recClub = club;
+      showPad = level() === 'hard';
+      clubMode = 0;
       resetSwing();
     }
     mode = 'aim';
     $('aimInfo').textContent = state.pin ? `핀까지 ${state.pin}m` : '';
     drawAim();
     drawClubs();
+    drawAimTools();
     show('vAim');
     if (navigator.vibrate) navigator.vibrate([20, 60, 20]);
   }
 
-  socket.on('analysis', ({summary})=>{
-    renderSummary($('analysisSummary'),summary,{onDetails:()=>{
-      if(!lastSwing)return;
-      if(analysisPanel)analysisPanel.dispose();
-      mode='analysis';show('vAnalysis');analysisPanel=renderPanel($('analysisDetail'),analyzeSwing(lastSwing,{club:lastSwing.club}),[],{compact:true});
-    }});
+  // 스윙 분석은 보고 싶을 때만: 버튼을 누르면 그때 분석 모듈을 불러와 보여 줍니다.
+  socket.on('analysis', (a) => {
+    analysisData = a;
+    if (mode === 'result') $('btnAnalysis').classList.remove('hidden');
+  });
+  $('btnAnalysis').addEventListener('click', async () => {
+    if (!analysisData || !lastSwing) return;
+    const { renderSummary, renderPanel, analyzeSwing } = await loadAnalysis();
+    renderSummary($('analysisSummary'), analysisData.summary, { onDetails: () => {
+      if (analysisPanel) analysisPanel.dispose();
+      mode = 'analysis'; show('vAnalysis');
+      analysisPanel = renderPanel($('analysisDetail'), analyzeSwing(lastSwing, { club: lastSwing.club }), [], { compact: true });
+    } });
+    $('btnAnalysis').classList.add('hidden');
   });
   $('closeAnalysis').addEventListener('click',()=>{if(analysisPanel)analysisPanel.dispose();analysisPanel=null;mode='wait';render()});
 
@@ -497,6 +632,7 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
   });
   socket.on('result', (r) => {
     mode = 'result';
+    if (analysisData) $('btnAnalysis').classList.remove('hidden');
     $('resT').textContent = r.title;
     $('resChips').innerHTML = (r.chips || []).map(([k, v]) => `<span class="chip">${k}<b>${v}</b></span>`).join('');
     $('resB').textContent = r.note || '';
@@ -508,35 +644,31 @@ import { analyzeSwing, renderPanel, renderSummary } from '/golf/analysis.js';
     // 화면 꺼짐 방지와 권한 요청은 탭 안에서 await 전에 바로 불러야 iPhone 에서 통합니다.
     keepAwake();
     audio();
-    const asks = [];
-    if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-      asks.push(DeviceOrientationEvent.requestPermission().catch(() => 'denied'));
-    }
-    if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') {
-      asks.push(DeviceMotionEvent.requestPermission().catch(() => 'denied'));
-    }
-    const answers = await Promise.all(asks);
+    const perm = await requestMotionPermission();
     window.addEventListener('deviceorientation', onOrientation);
     window.addEventListener('devicemotion', onMotion);
-    // 폰에서 거절되면 켜는 법을 안내합니다. 센서 없는 PC 는 시험 스윙으로 계속합니다.
-    if (answers.some((a) => a !== 'granted') && isTouch && !params.has('debug')) {
-      sensorHelp();
-      return;
-    }
+    // 거절돼도 멈추지 않고 버튼으로 칠 수 있게 합니다. 센서 없는 PC 는 시험 스윙으로 계속합니다.
+    if (perm === 'denied' && isTouch && !params.has('debug')) tapOnly = true;
     if (!ROOM) {
       message('방 코드가 없어요', '큰 화면의 QR을 찍어 주세요.');
       return;
     }
+    message('연결하는 중', '');
     socket.connect();
+    setTimeout(() => {
+      if (!socket.connected && !me) message('연결이 안 돼요', '같은 와이파이인지 확인해 주세요');
+    }, 8000);
     setTimeout(() => {
       if (!sensorOk) {
         if (isTouch && !params.has('debug')) {
-          $('btnAddress').textContent = '동작 센서 켜는 법 보기';
+          tapOnly = true;
+          $('btnAddress').textContent = '탭으로 치기';
         } else {
           $('btnAddress').textContent = '센서 없음 · 시험 스윙';
           debug('동작 센서 값이 들어오지 않아 시험 스윙으로 동작합니다');
         }
       }
+      if (tapOnly) sensorNote();
     }, 1500);
   });
   $('btnGo').addEventListener('click', () => {

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#07090f">
 <link rel="icon" href="data:,">
+<script src="/common/i18n-wait.js"></script>
 <title>볼링</title>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
@@ -24,7 +25,7 @@
     <i class="tag" id="turnTag">1P</i>
     <div class="turn-body">
       <b id="turnName">1P</b>
-      <span id="turnSub">프레임 1 / 5 · 첫째 공</span>
+      <span id="turnSub">프레임 1 / 5 · 1번째 공</span>
     </div>
     <div class="pinmap" id="pinmap"></div>
     <i class="diff" id="diffTag" data-d="normal">보통</i>
@@ -45,12 +46,14 @@
     <div class="lobby-copy">
       <div class="eyebrow">1~4인 · 차례로 한 프레임씩</div>
       <h1 class="wordmark">BOWL<br>NIGHT</h1>
-      <p class="lede">폰을 볼링공처럼 쥐고 뒤로 뺐다가 앞으로 휙 휘둘러 굴려요. 손목을 비틀면 공이 휘어요.</p>
+      <p class="lede">폰을 휙 휘둘러 굴려요</p>
       <div class="slots" id="slots"></div>
       <div class="setbox" id="setBox"></div>
       <div class="tutbox" id="tutBox"></div>
-      <div class="hint"><span>폰에서 모두 <b>준비</b>를 누르면 시작해요</span><span class="dot"></span><kbd>D</kbd><span>난이도</span><span class="dot"></span><kbd>F</kbd><span>5 / 10프레임</span></div>
+      <div class="hint"><kbd>D</kbd><span>난이도</span><span class="dot"></span><kbd>F</kbd><span>5 / 10프레임</span></div>
     </div>
+    <div class="lang-box" id="langBox"></div>
+    <div class="sound-chip hidden" id="soundChip">화면을 한 번 눌러 소리 켜기</div>
     <div class="range"></div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
@@ -68,7 +71,7 @@
     <div class="podium" id="podium"></div>
     <div class="over-foot">
       <div class="setbox" id="setBoxOver"></div>
-      <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 새 판</span><span class="dot"></span><kbd>D</kbd><span>난이도</span></div>
+      <div class="hint"><kbd>D</kbd><span>난이도</span></div>
     </div>
     <div class="tutbox" id="tutBoxOver"></div>
   </div>
@@ -80,6 +83,7 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/bowling/i18n.js"></script>
 <script type="module" src="game.js"></script>
 </body>
 </html>

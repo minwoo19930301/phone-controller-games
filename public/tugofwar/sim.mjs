@@ -27,10 +27,27 @@ export const CFG = {
   BRACE_CUT: 0.5, // 성공하면 상대의 그 박 힘을 이만큼 곱함
   TIE_RANGE: 0.02
 };
+// 난이도별 표. 쉬움(기본)은 아주 넉넉하고, 보통은 예전 쉬움 정도, 어려움은 예전 그대로입니다.
+//  win: 박 판정 창(초) / cost: 체력 소모 / recover: 초당 체력 회복 / forceBase: 체력 0 일 때 남는 힘 비율
+//  spamBreaksCombo: 연타가 콤보를 끊는지 / spamGap: 이 간격 안의 두 번째 당김은 연타 / syncWin: 한 몸 창
+//  braceDanger·braceNeed: 버티기가 뜨는 위험선 · 필요한 인원 비율 / bpm1·bpmSprint: 막판 직전·스퍼트 템포
+const COST_HARD = { pull: CFG.COST_PULL, off: CFG.COST_OFF, miss: CFG.COST_MISS, spam: CFG.COST_SPAM };
 export const DIFF = {
-  easy: { win: { perfect: 0.1, good: 0.19, off: 0.3 }, cpu: 0.35 },
-  normal: { win: { perfect: 0.075, good: 0.15, off: 0.26 }, cpu: 0.58 },
-  hard: { win: { perfect: 0.055, good: 0.12, off: 0.22 }, cpu: 0.84 }
+  easy: {
+    win: { perfect: 0.14, good: 0.26, off: 0.4 }, cpu: 0.35,
+    cost: { pull: 0.04, off: 0.02, miss: 0.03, spam: 0.05 }, recover: 0.09, forceBase: 0.7, spamBreaksCombo: false,
+    spamGap: 0.15, syncWin: 0.12, braceDanger: 0.75, braceNeed: 0.34, bpm1: 92, bpmSprint: 96
+  },
+  normal: {
+    win: { perfect: 0.1, good: 0.19, off: 0.3 }, cpu: 0.58,
+    cost: COST_HARD, recover: CFG.RECOVER_PER_SEC, forceBase: 0.45, spamBreaksCombo: true,
+    spamGap: CFG.SPAM_GAP, syncWin: CFG.SYNC_WIN, braceDanger: CFG.BRACE_DANGER, braceNeed: CFG.BRACE_NEED, bpm1: CFG.BPM1, bpmSprint: CFG.BPM_SPRINT
+  },
+  hard: {
+    win: { perfect: 0.055, good: 0.12, off: 0.22 }, cpu: 0.84,
+    cost: COST_HARD, recover: CFG.RECOVER_PER_SEC, forceBase: 0.45, spamBreaksCombo: true,
+    spamGap: CFG.SPAM_GAP, syncWin: CFG.SYNC_WIN, braceDanger: CFG.BRACE_DANGER, braceNeed: CFG.BRACE_NEED, bpm1: CFG.BPM1, bpmSprint: CFG.BPM_SPRINT
+  }
 };
 export const QUALITY = { perfect: 1, good: 0.75, off: 0.35, miss: 0 };
 export const MAX_TEAM = 5;
@@ -78,10 +95,10 @@ function gauss(rng) {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
-export function bpmAt(t, duration = CFG.ROUND_SEC) {
+export function bpmAt(t, duration = CFG.ROUND_SEC, D = null) {
   const sprintAt = duration - CFG.SPRINT_SEC;
-  if (t >= sprintAt) return CFG.BPM_SPRINT;
-  return lerp(CFG.BPM0, CFG.BPM1, clamp(t / sprintAt, 0, 1));
+  if (t >= sprintAt) return D ? D.bpmSprint : CFG.BPM_SPRINT;
+  return lerp(CFG.BPM0, D ? D.bpm1 : CFG.BPM1, clamp(t / sprintAt, 0, 1));
 }
 
 export class Round {
@@ -89,7 +106,7 @@ export class Round {
   constructor(opts = {}) {
     this.seed = opts.seed ?? 1;
     this.rng = mulberry32(this.seed);
-    this.difficulty = DIFF[opts.difficulty] ? opts.difficulty : 'normal';
+    this.difficulty = DIFF[opts.difficulty] ? opts.difficulty : 'easy';
     this.D = DIFF[this.difficulty];
     this.duration = opts.duration || CFG.ROUND_SEC;
     this.t = 0;
@@ -137,7 +154,7 @@ export class Round {
   // 다음 구령 한 묶음. 보통 4박(하나·둘·영차·쉼), 스퍼트에는 2박(하나·영차).
   #spawnCycle(start) {
     const sprint = start >= this.duration - CFG.SPRINT_SEC;
-    const ivl = 60 / bpmAt(start, this.duration);
+    const ivl = 60 / bpmAt(start, this.duration, this.D);
     const beats = sprint
       ? [{ t: start, kind: 'one' }, { t: start + ivl, kind: 'pull' }]
       : [{ t: start, kind: 'one' }, { t: start + ivl, kind: 'two' }, { t: start + 2 * ivl, kind: 'pull' }, { t: start + 3 * ivl, kind: 'rest' }];
@@ -149,7 +166,7 @@ export class Round {
     for (const tm of ['blue', 'white']) if (this.braceCool[tm] > 0) this.braceCool[tm]--;
     // 버티기: 밧줄이 거의 졌을 만큼 자기 선에 몰린 팀이 있으면 이번 구령은 그 팀이 버티는 구령
     const danger = { blue: -this.rope, white: this.rope };
-    const cand = ['blue', 'white'].filter((tm) => danger[tm] >= CFG.BRACE_DANGER && this.braceCool[tm] === 0 && !sprintLock(sprint, this.t, this.duration)).sort((a, b) => danger[b] - danger[a]);
+    const cand = ['blue', 'white'].filter((tm) => danger[tm] >= this.D.braceDanger && this.braceCool[tm] === 0 && !sprintLock(sprint, this.t, this.duration)).sort((a, b) => danger[b] - danger[a]);
     if (cand.length) {
       cyc.brace = cand[0];
       this.braceCool[cand[0]] = CFG.BRACE_COOL + 1;
@@ -198,28 +215,28 @@ export class Round {
     const gap = tPull - p.lastPull;
     p.lastPull = Math.max(p.lastPull, tPull);
     const dup = cyc && cyc.pulls.some((x) => x.id === id);
-    if (gap < CFG.SPAM_GAP || dup) {
+    if (gap < this.D.spamGap || dup) {
       out.spam = true;
-      p.stamina = Math.max(0, p.stamina - CFG.COST_SPAM);
+      p.stamina = Math.max(0, p.stamina - this.D.cost.spam);
       p.spam++;
-      p.combo = 0;
+      if (this.D.spamBreaksCombo) p.combo = 0;
     } else if (!cyc || cyc.resolved || cyc.brace === p.team) {
       // 이미 정산된 박이거나 우리 팀이 버티는 박: 힘 없이 헛손질
       out.brace = !!(cyc && cyc.brace === p.team);
-      p.stamina = Math.max(0, p.stamina - CFG.COST_MISS * 0.6);
+      p.stamina = Math.max(0, p.stamina - this.D.cost.miss * 0.6);
       p.miss++;
       p.combo = 0;
     } else {
       const j = this.judgeOffset(off);
       out.j = j;
       if (j === 'miss') {
-        p.stamina = Math.max(0, p.stamina - CFG.COST_MISS);
+        p.stamina = Math.max(0, p.stamina - this.D.cost.miss);
         p.miss++;
         p.combo = 0;
       } else {
         out.counted = true;
-        out.f = power * QUALITY[j] * (0.45 + 0.55 * p.stamina);
-        p.stamina = Math.max(0, p.stamina - CFG.COST_PULL - (j === 'off' ? CFG.COST_OFF : 0));
+        out.f = power * QUALITY[j] * (this.D.forceBase + (1 - this.D.forceBase) * p.stamina);
+        p.stamina = Math.max(0, p.stamina - this.D.cost.pull - (j === 'off' ? this.D.cost.off : 0));
         p[j]++;
         p.powerSum += power;
         p.combo = j === 'off' ? 0 : p.combo + 1;
@@ -250,7 +267,7 @@ export class Round {
     let k = 1;
     for (let i = 0; i < offs.length; i++) {
       let j = i;
-      while (j + 1 < offs.length && offs[j + 1] - offs[i] <= CFG.SYNC_WIN) j++;
+      while (j + 1 < offs.length && offs[j + 1] - offs[i] <= this.D.syncWin) j++;
       k = Math.max(k, j - i + 1);
     }
     const frac = k / size;
@@ -281,7 +298,7 @@ export class Round {
         if (p.cpu ? this.rng() < 0.45 + p.skill * 0.5 : cyc.bracers.has(p.id)) ok++;
         p.stamina = Math.min(1, p.stamina + 0.12); // 버티는 동안 숨 고르기
       }
-      const success = ok >= Math.ceil(this.size * CFG.BRACE_NEED);
+      const success = ok >= Math.ceil(this.size * this.D.braceNeed);
       brace = { team: tm, ok, success };
       if (success) F[otherTeam(tm)] *= CFG.BRACE_CUT;
     }
@@ -315,7 +332,7 @@ export class Round {
       this.pull(q.id, q.t, q.power);
     }
     // 체력 회복(당기는 순간에는 소모가 크므로 계속 조금씩)
-    for (const p of this.parts.values()) p.stamina = Math.min(1, p.stamina + CFG.RECOVER_PER_SEC * dt);
+    for (const p of this.parts.values()) p.stamina = Math.min(1, p.stamina + this.D.recover * dt);
     // 정산
     for (const c of this.cycles) if (!c.resolved && this.t >= c.pullAt + CFG.RESOLVE_AFTER) this.#resolve(c);
     if (this.phase !== 'run') return;

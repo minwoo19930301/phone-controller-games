@@ -125,11 +125,6 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
   color: transparent; filter: drop-shadow(0 0 30px rgba(255, 79, 216, 0.25)); }
 .wordmark.sm { font-family: var(--sans); font-weight: 900; font-size: 60px; letter-spacing: -0.03em; filter: none; }
 .lede { margin: 20px 0 26px; font-size: 19px; color: #ddd8f2; line-height: 1.55; max-width: 60ch; }
-.steps { list-style: none; margin: 0 0 24px; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.steps li { display: flex; gap: 12px; align-items: flex-start; padding: 16px; border-radius: 16px; background: var(--glass-2); border: 1px solid var(--line); }
-.steps svg { flex: none; width: 40px; height: 40px; fill: none; stroke: var(--accent-2); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.steps b { display: block; font-size: 16px; margin-bottom: 4px; }
-.steps span { font-size: 13.5px; color: var(--dim); line-height: 1.45; }
 .slots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
 .slot { position: relative; height: 72px; border-radius: 14px; border: 2px dashed rgba(255, 255, 255, 0.2); display: flex; flex-direction: column;
   align-items: center; justify-content: center; color: rgba(255, 255, 255, 0.4); font-weight: 700; font-size: 15px; transition: all 0.3s; }
@@ -193,8 +188,7 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
 
 @media (max-width: 1000px) {
   .lobby { flex-direction: column; gap: 26px; }
-  .steps { grid-template-columns: 1fr; }
-  .qr-card { width: 280px; }
+    .qr-card { width: 280px; }
   .sb .team { min-width: 140px; padding: 0 12px; }
   .sb .names { font-size: 18px; }
   .sb .team b { font-size: 42px; }
@@ -202,3 +196,6 @@ kbd { font-family: var(--sans); font-size: 0.86em; font-weight: 700; padding: 3p
   .call-main { font-size: 100px; }
   .call.win .call-main, .call.count .call-main { font-size: 130px; }
 }
+
+/* 언어 고르기: 대기실 오른쪽 위(QR 카드와 겹치지 않게 맨 구석). 경기 중에는 대기실이 숨어 같이 사라집니다. */
+.lang-box { position: absolute; top: 16px; right: 20px; z-index: 5; }

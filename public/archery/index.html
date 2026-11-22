@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0c1a12">
 <title>양궁</title>
+<script src="/common/i18n-wait.js"></script>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
 <link rel="stylesheet" href="style.css">
@@ -29,7 +30,7 @@
       </svg>
       <div class="wind-txt"><small>바람</small><b id="windSpd">0.0</b><span>m/s</span><em id="windWord">잔잔</em></div>
     </div>
-    <div class="dist" id="distBox"><span id="distNum">50</span><small>m</small><i class="diff" id="diffTag" data-d="normal">보통</i></div>
+    <div class="dist" id="distBox"><span id="distNum">20</span><small>m</small><i class="diff" id="diffTag" data-d="easy">쉬움</i></div>
     <div class="join" id="join"><img id="qrMini" alt=""><div><span class="join-k">중간 참가</span><b id="codeMini">----</b></div></div>
   </div>
   <div class="center-top" id="whoBox"><span class="who-dot" id="whoDot"></span><b id="whoName">1P</b><span id="whoSub">차례</span></div>
@@ -50,11 +51,11 @@
     <div class="lobby-copy">
       <div class="eyebrow">1~4인 · 차례로 한 발씩</div>
       <h1 class="wordmark">ARCHERY</h1>
-      <p class="lede">폰을 활처럼 세워 겨누고, 화면의 시위를 당겼다 놓으면 쏩니다. 바람을 읽고 숨을 고르세요.</p>
+      <p class="lede">폰으로 겨누고, 시위를 당겼다 놓으면 쏩니다.</p>
       <div class="slots" id="slots"></div>
       <div class="setbox" id="setBox"></div>
       <div class="tutbox" id="tutBox"></div>
-      <div class="hint"><span>폰에서 모두 <b>준비</b>를 누르면 시작해요</span><span class="dot"></span><kbd>D</kbd><span>난이도</span><kbd>E</kbd><span>엔드 수</span></div>
+      <div class="hint"><span>폰에서 모두 준비를 누르면 시작해요</span><span class="dot"></span><kbd>D</kbd><span>난이도</span><kbd>E</kbd><span>엔드 수</span></div>
     </div>
     <div class="range" aria-hidden="true"></div>
     <div class="qr-card">
@@ -64,17 +65,18 @@
       <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 동작 센서가 꺼져 있어요. https 주소에서 열어 주세요.</div>
     </div>
   </div>
+  <div class="langbox" id="langBox"></div>
   <div class="msg" id="msg"></div>
 </section>
 
 <section id="over" class="screen over-screen hidden">
   <div class="over">
-    <div class="eyebrow"><span>FINAL RESULT</span><i class="diff" id="diffOver" data-d="normal">보통</i><span id="overInfo" class="over-info"></span></div>
+    <div class="eyebrow"><span>FINAL RESULT</span><i class="diff" id="diffOver" data-d="easy">쉬움</i><span id="overInfo" class="over-info"></span></div>
     <h1 class="wordmark sm" id="overTitle">경기 결과</h1>
     <div class="podium" id="podium"></div>
     <div class="over-foot">
       <div class="setbox" id="setBoxOver"></div>
-      <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 새 경기</span><span class="dot"></span><kbd>D</kbd><span>난이도</span></div>
+      <div class="hint"><span>폰에서 모두 다시 하기를 누르면 새 경기</span><span class="dot"></span><kbd>D</kbd><span>난이도</span></div>
     </div>
     <div class="tutbox" id="tutBoxOver"></div>
   </div>
@@ -86,6 +88,8 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/archery/i18n.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
 <script type="module" src="game.js"></script>
 </body>
 </html>

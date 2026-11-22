@@ -5,13 +5,14 @@ import * as THREE from 'three';
 import { createScene, EYE, TARGET_Y } from './scene.js';
 import { scoreArrow, tally, rankPlayers } from './scoring.mjs';
 import {
-  shoot, pathAt, initialWind, nextWind, tremble, beatIndex, diffOf, FULL_PULL, metersPerDeg, driftAt, V_FULL, launchSpeed,
+  shoot, pathAt, initialWind, nextWind, tremble, beatIndex, diffOf, FULL_PULL, metersPerDeg, driftAt, V_FULL, launchSpeed, assistAim,
   DIFFICULTY, BREATH_WINDOW, mulberry32
 } from './ballistics.mjs';
 import { sfx, audio } from './sfx.js';
 import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
 import { createTutorialBoard } from '/common/tutorial-board.js';
 import { sendHaptic } from '/common/haptics.js';
+import { t, mountSwitcher } from '/common/i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -19,6 +20,8 @@ const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const lerp = (a, b, t) => a + (b - a) * t;
 const num = (v, d) => (v !== null && v !== '' && v !== undefined && Number.isFinite(Number(v)) ? Number(v) : d);
 const rnd = (a, b) => a + Math.random() * (b - a);
+// 언어 고르기: 대기실에서만 보임(바꾸면 새로 고침)
+mountSwitcher($('langBox'), { reload: true, compact: true });
 const BOTS = clamp(parseInt(params.get('bots'), 10) || 0, 0, 4);
 const AUTOSTART = params.has('autostart');
 let TS = clamp(num(params.get('speed'), 1), 0.1, 20); // 시뮬레이션 배속(시험용)
@@ -32,7 +35,8 @@ const ENDBREAK_S = 3.4;
 const SHOT_CLOCK_S = 40; // 이 시간 안에 당기지 않으면 한 발 포기
 const AWAY_FORFEIT_S = 7; // 폰이 끊긴 채 이만큼 지나면 한 발 포기
 const DRAW_IDLE_S = 5; // 당기는 중 폰 소식이 이만큼 없으면 취소
-const MIN_PULL = 0.25; // 이보다 약하게 당기고 놓으면 쏜 것으로 치지 않음
+const MIN_PULL = 0.15; // 이보다 약하게 당기고 놓으면 쏜 것으로 치지 않음(폰 컨트롤러에도 같은 값이 있음)
+const SHOT_WARN_S = 10; // 한 발 제한 시간이 이만큼 남으면 폰에 짧게 알림
 const OVERHOLD_S = 8; // 만궁에서 지친 뒤 이만큼 더 버티면 자동으로 놓임
 const T_FLIGHT = [0.75, 1.5]; // 비행(빠른 구간) 시간 범위(초)
 const T_SLOW = 1.9; // 마지막 몇 미터 슬로모션(초)
@@ -99,7 +103,7 @@ socket.on('calibrate', (d) => { const P = roster.get(Number(d && d.slot)); if (P
 const settings = createSettings({
   game: 'archery',
   fields: [
-    fields.difficulty({ hints: { easy: '30m · 약한 바람 · 예상 낙점 표시', normal: '50m · 보통 바람 · 조준핀만', hard: '70m · 센 돌풍 · 빨리 지쳐요' } }),
+    fields.difficulty(),
     fields.choice('ends', '엔드 수', [{ value: '3', label: '3엔드', hint: '엔드마다 3발 · 총 9발' }, { value: '5', label: '5엔드', hint: '엔드마다 3발 · 총 15발' }], { default: '3', hotkey: 'E' })
   ],
   keys: true,
@@ -124,7 +128,7 @@ socket.on('players', (p) => {
 let readyNow = new Set();
 socket.on('ready_state', (st) => { readyNow = new Set(st && Array.isArray(st.ready) ? st.ready : []); renderLobby(); });
 
-let level = 'normal';
+let level = 'easy';
 function applyDifficulty() {
   if (game.phase === 'playing') return;
   level = settings.difficulty();
@@ -135,7 +139,7 @@ function applyDifficulty() {
 // 상태
 // ================================================================
 const game = {
-  phase: 'lobby', stage: 'idle', t: 0, stageT: 0, seed: 1, level: 'normal', D: 50, ends: 3, endIdx: 0,
+  phase: 'lobby', stage: 'idle', t: 0, stageT: 0, seed: 1, level: 'easy', D: 20, ends: 3, endIdx: 0,
   seq: [], seqIdx: 0, cur: null, wind: { speed: 0, dir: 0 }, windShown: { speed: 0, dir: 0 }, flight: null, results: []
 };
 const roster = new Map();
@@ -225,11 +229,13 @@ function startGame() {
   const list = lobbyList().filter((p) => p.connected);
   if (!list.length) { lobbyMessage('폰을 먼저 연결해 주세요. QR을 찍고 준비를 누르면 자리가 생겨요.'); return; }
   audio();
+  sfx.bed(true);
   level = settings.difficulty();
   settings.lock(true);
   for (const b of boards) b.hide(true);
   game.level = level;
   game.D = DIFFICULTY[level].distance;
+  view.state.gain = DIFFICULTY[level].gain;
   game.ends = parseInt(settings.get('ends'), 10) === 5 ? 5 : 3;
   game.seed = (Math.random() * 1e9) >>> 0;
   view.setDistance(game.D);
@@ -272,8 +278,8 @@ function beginEnd(e) {
   game.cur = null;
   game.stage = 'intro';
   game.stageT = 0;
-  banner(`${e + 1}엔드`, `${game.D}m · 바람 ${game.wind.speed.toFixed(1)} m/s · 엔드마다 3발씩 차례로`, INTRO_S - 0.2);
-  sfx.fanfare();
+  banner(t('{n}엔드', { n: e + 1 }), '', INTRO_S - 0.2);
+  sfx.fanfare('end');
   renderBoard();
   pushState(true);
 }
@@ -304,7 +310,7 @@ function startTurn() {
   const ws = game.wind;
   document.documentElement.style.setProperty('--c', P.color);
   $('whoName').textContent = P.name;
-  $('whoSub').textContent = P.bot ? '(BOT) 차례' : `차례 · ${s.arrowIdx + 1}/${ARROWS_PER_END}발`;
+  $('whoSub').textContent = P.bot ? t('(BOT) 차례') : t('차례 · {a}/{b}발', { a: s.arrowIdx + 1, b: ARROWS_PER_END });
   sfx.turn();
   send('turn', { slot: P.slot, name: P.name, color: P.color, end: game.endIdx + 1, ends: game.ends, arrow: s.arrowIdx + 1, arrows: ARROWS_PER_END, wind: ws });
   sendHaptic(socket, P.slot, 'strong', 0.6);
@@ -324,7 +330,7 @@ function endOfEnd() {
   const rows = rankPlayers(players().map((P) => ({ slot: P.slot, ...totals(P) })));
   const lead = rows[0];
   const last = game.endIdx + 1 >= game.ends;
-  banner(last ? '경기 종료' : `${game.endIdx + 1}엔드 종료`, lead ? `${roster.get(lead.slot).name} 선두 · ${lead.total}점` : '', ENDBREAK_S - 0.3);
+  banner(last ? t('경기 종료') : t('{n}엔드 종료', { n: game.endIdx + 1 }), lead ? t('{p} 선두 · {n}점', { p: roster.get(lead.slot).name, n: lead.total }) : '', ENDBREAK_S - 0.3);
   renderBoard();
   pushState(true);
 }
@@ -334,7 +340,7 @@ function finishMatch() {
   game.stage = 'over';
   const rows = rankPlayers(players().map((P) => ({ slot: P.slot, ...totals(P) })));
   game.results = rows;
-  $('overInfo').textContent = `${game.D}m · ${game.ends}엔드 · 총 ${game.ends * ARROWS_PER_END}발`;
+  $('overInfo').textContent = t('{d}m · {e}엔드 · 총 {n}발', { d: game.D, e: game.ends, n: game.ends * ARROWS_PER_END });
   $('diffOver').textContent = DIFF_LABEL[game.level] || '보통';
   $('diffOver').dataset.d = game.level;
   const box = $('podium');
@@ -345,16 +351,17 @@ function finishMatch() {
     e.className = 'r';
     e.style.setProperty('--c', P.color);
     e.style.animationDelay = `${0.1 + k * 0.08}s`;
-    const endCells = P.ends.map((a, i) => `<span><small>${i + 1}엔드</small>${a.length ? a.reduce((s, x) => s + x.score, 0) : '–'}</span>`).join('');
+    const endCells = P.ends.map((a, i) => `<span><small>${t('{n}엔드', { n: i + 1 })}</small>${a.length ? a.reduce((s, x) => s + x.score, 0) : '–'}</span>`).join('');
     e.innerHTML = `<span class="rank">${r.rank}</span><span class="who">${P.name}${P.bot ? '<small>BOT</small>' : ''}</span><span class="ends">${endCells}</span>` +
-      `<span class="num"><b>${r.xs}</b><span>X</span></span><span class="num"><b>${r.tens}</b><span>10점</span></span>` +
-      `<span class="num big"><b>${r.total}</b><span>총점</span></span>`;
+      `<span class="num"><b>${r.xs}</b><span>X</span></span><span class="num"><b>${r.tens}</b><span>${t('10점')}</span></span>` +
+      `<span class="num big"><b>${r.total}</b><span>${t('총점')}</span></span>`;
     box.appendChild(e);
     if (!P.bot) {
       send('result', { text: `${r.rank}위 · ${r.total}점`, rank: r.rank, of: rows.length, total: r.total, xs: r.xs, tens: r.tens, ends: P.ends.map((a) => a.reduce((s, x) => s + x.score, 0)) }, P.slot);
       sendHaptic(socket, P.slot, r.rank === 1 ? 'perfect' : 'good', 0.9);
     }
   });
+  sfx.bed(false);
   sfx.fanfare();
   settings.lock(false);
   for (const b of boards) b.hide(false);
@@ -367,6 +374,7 @@ function finishMatch() {
 }
 
 function backToLobby(why) {
+  sfx.bed(false);
   for (const P of roster.values()) P.play = false;
   game.phase = 'lobby';
   game.stage = 'idle';
@@ -394,15 +402,18 @@ function fire(P, ax, ay, pull, steady) {
   if (!P || !c) return;
   const holdSec = c.fullAt != null ? game.t - c.fullAt : 0;
   const tr = tremble(holdSec, game.t, game.level, P.slot);
-  const aimX = clamp(ax, -AIM_LIMIT, AIM_LIMIT) + tr.x;
-  const aimY = clamp(ay, -AIM_LIMIT, AIM_LIMIT) + tr.y;
+  const dif = diffOf(game.level);
+  const mpd0 = metersPerDeg(game.D, dif.gain);
+  const offX = -driftAt(game.D, V_FULL, game.wind) / mpd0; // 바람 반대쪽으로 겨눈 위치(조준 도움의 기준)
+  const aimX = assistAim(clamp(ax, -AIM_LIMIT, AIM_LIMIT), offX, dif.assist) + tr.x;
+  const aimY = assistAim(clamp(ay, -AIM_LIMIT, AIM_LIMIT), 0, dif.assist) + tr.y;
   const seedShot = ((game.seed * 131 + game.endIdx * 17 + game.seqIdx * 7 + 1) >>> 0);
   const stead = clamp(steady * (1 - 0.35 * tr.f), 0, 1);
   const D = game.D;
-  const shot = shoot({ distance: D, aimX, aimY, pull, steady: stead, wind: game.wind, seed: seedShot });
+  const shot = shoot({ distance: D, aimX, aimY, pull, steady: stead, wind: game.wind, seed: seedShot, gain: dif.gain, spread: dif.spread });
   const res = scoreArrow(shot.x, shot.y);
   const start = new THREE.Vector3(0, EYE.y - 0.06, -0.7);
-  const pathArgs = { distance: D, aimX, aimY, pull, wind: game.wind, impact: { x: shot.x, y: shot.y } };
+  const pathArgs = { distance: D, aimX, aimY, pull, wind: game.wind, impact: { x: shot.x, y: shot.y }, gain: dif.gain };
   // 땅에 먼저 닿는지(덜 당겼을 때)
   let fGround = null;
   for (let i = 1; i <= 100; i++) {
@@ -513,8 +524,7 @@ function showScore(res, fl) {
   void el.offsetWidth;
   const cls = res.miss ? 's0' : res.score >= 9 ? 's10' : res.score >= 7 ? 's8' : res.score >= 5 ? 's6' : res.score >= 3 ? 's4' : 's2';
   const txt = res.miss ? (fl.short ? '짧아요' : 'M') : res.label;
-  const sub = fl.short ? '끝까지 당기세요' : res.isX ? '정중앙!' : res.score === 10 ? '텐!' : res.score >= 9 ? '나이스' : res.score >= 7 ? '좋아요' : res.score >= 5 ? '아쉬워요' : res.miss ? '빗나갔어요' : '다음 기회에';
-  el.innerHTML = `${txt}<small>${fl.P.name} · ${sub}</small>`;
+  el.innerHTML = `${txt}<small>${fl.P.name}</small>`;
   el.className = `callout go ${cls}`;
   const pop = $('insetPop');
   pop.textContent = res.miss ? 'M' : res.label;
@@ -567,13 +577,16 @@ function updateTurn(dt) {
   // 장면
   sc.pull = c.pull;
   sc.lens = c.state === 'wait' ? Math.max(0, sc.lens - dt * 2.5) : Math.min(1, sc.lens + dt * 3.2);
-  sc.aimDeg.x = c.shown.x + tr.x;
-  sc.aimDeg.y = c.shown.y + tr.y;
+  const dif = diffOf(game.level);
+  const mpdT = metersPerDeg(game.D, dif.gain);
+  const offT = -driftAt(game.D, V_FULL, game.wind) / mpdT;
+  sc.aimDeg.x = assistAim(c.shown.x, offT, dif.assist) + tr.x;
+  sc.aimDeg.y = assistAim(c.shown.y, 0, dif.assist) + tr.y;
   sc.arrowOnBow = true;
   // 예상 낙점(쉬움)
-  if (DIFFICULTY[game.level].marker && c.pull > 0.5) {
+  if (dif.marker && c.pull > 0.5) {
     const v0 = launchSpeed(c.pull);
-    const mpd = metersPerDeg(game.D);
+    const mpd = mpdT;
     const t0 = (Math.exp(0.0025 * game.D) - 1) / (0.0025 * v0);
     const tF = (Math.exp(0.0025 * game.D) - 1) / (0.0025 * V_FULL);
     const px = sc.aimDeg.x * mpd + driftAt(game.D, v0, game.wind);
@@ -581,9 +594,10 @@ function updateTurn(dt) {
     view.setMarker({ x: px, y: py });
   } else view.setMarker(null);
   // 타임아웃
+  if (c.state === 'wait' && !P.bot && !c.warned && game.t - c.turnAt > SHOT_CLOCK_S - SHOT_WARN_S) { c.warned = true; cue(c.slot, '곧 시간이 끝나요'); sendHaptic(socket, c.slot, 'strong', 0.6); }
   if (c.state === 'wait' && game.t - c.turnAt > SHOT_CLOCK_S && !P.bot) { forfeit('시간이 지났어요'); return; }
   if (c.state !== 'wait' && !P.bot && game.t - c.lastMsgAt > DRAW_IDLE_S) { c.state = 'wait'; c.pullIn = 0; c.fullAt = null; sfx.creakStop(); }
-  if (c.fullAt != null && holdSec > DIFFICULTY[game.level].steadySec + OVERHOLD_S) { fire(P, c.aim.x, c.aim.y, 1, 0.25); return; }
+  if (c.fullAt != null && holdSec > dif.steadySec + OVERHOLD_S) { fire(P, c.aim.x, c.aim.y, 1, 0.25); return; }
   // 게이지
   paintGauge(c, holdSec, tr);
   if (P.bot) botAct(dt, c, P);
@@ -597,7 +611,7 @@ function forfeit(why) {
     P.ends[game.endIdx].push({ score: 0, label: 'M', isX: false, miss: true, x: 9, y: 9 });
   }
   sfx.creakStop();
-  banner('포기', `${P ? P.name : ''} · ${why}`, 1.4);
+  banner(t('포기'), `${P ? P.name : ''} · ${t(why)}`, 1.4);
   renderBoard();
   game.cur = null;
   view.setMarker(null);
@@ -610,7 +624,7 @@ function botAct(dt, c, P) {
   const b = c.bot || (c.bot = { phase: 'think', t: 0, wait: rnd(0.7, 1.4), hold: rnd(0.8, 1.7), noise: mulberry32(game.seed + c.slot * 31 + game.seqIdx) });
   b.t += dt;
   const D = game.D;
-  const mpd = metersPerDeg(D);
+  const mpd = metersPerDeg(D, diffOf(game.level).gain);
   const comp = 0.55 + 0.45 * P.skill;
   const off = -driftAt(D, V_FULL, game.wind) / mpd * comp; // 바람 반대쪽으로 겨눔
   const sigmaDeg = ((1.5 - P.skill) * 0.26) / mpd;
@@ -639,8 +653,8 @@ function renderBoard() {
   const list = players();
   const E = game.ends;
   let h = '<table><thead><tr><th></th>';
-  for (let e = 0; e < E; e++) h += `<th>${e + 1}엔드</th>`;
-  h += '<th>합계</th></tr></thead><tbody>';
+  for (let e = 0; e < E; e++) h += `<th>${t('{n}엔드', { n: e + 1 })}</th>`;
+  h += `<th>${t('합계')}</th></tr></thead><tbody>`;
   for (const P of list) {
     const t = totals(P);
     const cur = game.cur && game.cur.slot === P.slot;
@@ -675,11 +689,11 @@ function paintGauge(c, holdSec, tr) {
   g.classList.toggle('tired', tr.f > 0 && !tr.breath);
   g.classList.toggle('breath', tr.f > 0 && tr.breath);
   let st = '활을 들어요', hint = '';
-  if (c.state === 'wait') { st = `${P.name} 준비`; hint = '폰으로 겨누고 시위를 당겨요'; }
-  else if (c.fullAt == null) { st = '당기는 중'; hint = '끝까지 당겨요'; }
-  else if (tr.f > 0 && tr.breath) { st = '숨 고르기!'; hint = '지금이 가장 안정'; }
-  else if (tr.f > 0) { st = '팔이 떨려요'; hint = '심박 뒤 숨을 고를 때 놓아요'; }
-  else { st = '만궁 · 안정'; hint = `바람 ${WIND_WORD(game.wind)}`; }
+  if (c.state === 'wait') st = t('{p} 차례', { p: P.name });
+  else if (c.fullAt == null) st = '당기는 중';
+  else if (tr.f > 0 && tr.breath) st = '숨 고르기!';
+  else if (tr.f > 0) st = '팔이 떨려요';
+  else st = '만궁';
   $('gState').textContent = st;
   $('gHint').textContent = hint;
   const left = ARROWS_PER_END - c.arrowIdx;
@@ -712,7 +726,7 @@ function renderLobby() {
     for (let s = 1; s <= MAX_PLAYERS; s++) {
       const d = document.createElement('div');
       d.className = 'slot';
-      d.innerHTML = `<b>${SLOT_INFO[s].name}</b><small>비어 있음</small>`;
+      d.innerHTML = `<b>${SLOT_INFO[s].name}</b><small>${t('비어 있음')}</small>`;
       d.style.setProperty('--c', SLOT_INFO[s].color);
       box.appendChild(d);
       slotEls.push({ d, sm: d.querySelector('small') });
@@ -722,13 +736,13 @@ function renderLobby() {
   for (let s = 1; s <= MAX_PLAYERS; s++) {
     const { d, sm } = slotEls[s - 1];
     const P = list.find((p) => p.slot === s);
-    let txt = '비어 있음';
+    let txt = t('비어 있음');
     if (P) {
       if (P.bot) txt = 'BOT';
-      else if (practicing.has(s)) txt = '연습 중';
-      else if (readyNow.has(s)) txt = '준비 완료';
-      else if (P.calibrated) txt = '조준 완료';
-      else txt = '연결됨';
+      else if (practicing.has(s)) txt = t('연습 중');
+      else if (readyNow.has(s)) txt = t('준비 완료');
+      else txt = t('연결됨');
+      if (!P.connected) txt += ` · ${t('끊김')}`; // 예전에는 CSS 글자였음(번역 안 됨)
     }
     d.classList.toggle('on', Boolean(P));
     d.classList.toggle('away', Boolean(P && !P.connected));

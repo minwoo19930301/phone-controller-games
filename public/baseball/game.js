@@ -4,11 +4,15 @@ import { modal, grit, organ, bell } from '/common/voice.js';
 import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
 import { createTutorialBoard } from '/common/tutorial-board.js';
 import { sendHaptic } from '/common/haptics.js';
+import { createSamples } from '/common/samples.js';
 import { createScene, fenceDist, FIELD_SPOTS } from './scene.js';
 import { RULES, PAD, PITCHES, clamp, aimToPlate, plateToAim, zoneMiss, controlSigma, pitchPoint,
   randomThrow, newDuel, half, nextHalf, applyPitch, battedOutcome, catchPoint, ranking } from './duel.js';
 
 const PITCHES_PER_TURN = 10;
+// 폰 조준판에서 스트라이크 존이 차지하는 비율(play/baseball.js 의 ZX·ZY 와 같음)
+const SNAP_ZX = 0.25 / 0.6;
+const SNAP_ZY = 0.3 / 0.6;
 const RD = Math.PI / 180;
 const RELEASE = [0.25, 1.95, 17.9];
 const PITCH_TYPES = [
@@ -23,13 +27,15 @@ const PITCH_TYPES = [
 // evK: 타구 속도 배수 / speed·brk: 구속·꺾임 배수
 // mix: 직구·체인지업·커브 비율 / windup: [최소, 흔들림] ms / reach·control·contact: 투타 대결의 방망이 닿는 거리(m)·제구 오차 배수·구질별 맞히기 어려움 배수
 // ring: 타이밍 링(더비·대결)
+// zoneSnap: 투타 대결에서 투수가 노린 곳이 존 밖이면 존 쪽으로 이만큼(0~1) 당겨 줍니다(쉬울수록 볼넷이 덜 나옴).
+// 쉬움이 가장 넉넉하고, 보통은 예전 쉬움 값(구속·꺾임 포함), 어려움은 처음 값 그대로입니다.
 const ASSIST = {
-  easy: { window: 0.36, sweet: 0.09, magnet: 0.5, qFloor: 0.55, sprayK: 0.55, sprayMax: 34, laPull: 0.55, powLo: 0.7, evK: 1,
-    speed: 0.7, brk: 0.35, mix: [8, 1, 1], windup: [1750, 150], reach: 0.48, control: 0.6, contact: 0.3, ring: [true, true] },
-  normal: { window: 0.27, sweet: 0.06, magnet: 0.75, qFloor: 0.3, sprayK: 0.8, sprayMax: 44, laPull: 0.3, powLo: 0.5, evK: 1.02,
-    speed: 0.85, brk: 0.7, mix: [6, 2, 1], windup: [1550, 400], reach: 0.38, control: 0.8, contact: 0.65, ring: [true, false] },
+  easy: { window: 0.5, sweet: 0.14, magnet: 0.4, qFloor: 0.65, sprayK: 0.45, sprayMax: 30, laPull: 0.65, powLo: 0.85, evK: 1,
+    speed: 0.6, brk: 0.25, mix: [9, 1, 0], windup: [1900, 150], reach: 0.7, control: 0.35, contact: 0.15, zoneSnap: 0.5, ring: [true, true] },
+  normal: { window: 0.36, sweet: 0.09, magnet: 0.5, qFloor: 0.55, sprayK: 0.55, sprayMax: 34, laPull: 0.55, powLo: 0.7, evK: 1,
+    speed: 0.7, brk: 0.35, mix: [8, 1, 1], windup: [1750, 150], reach: 0.48, control: 0.6, contact: 0.3, zoneSnap: 0.25, ring: [true, true] },
   hard: { window: 0.2, sweet: 0.035, magnet: 1, qFloor: 0, sprayK: 1, sprayMax: 90, laPull: 0, powLo: 0, evK: 1,
-    speed: 1, brk: 1, mix: [5, 2, 2], windup: [1500, 700], reach: 0.3, control: 1, contact: 1, ring: [false, false] }
+    speed: 1, brk: 1, mix: [5, 2, 2], windup: [1500, 700], reach: 0.3, control: 1, contact: 1, zoneSnap: 0, ring: [false, false] }
 };
 // 구속 배수는 폰(투수 화면에 보이는 숫자)과 같은 식을 씁니다.
 const pitchKmh = (kmh, A) => clamp(kmh * A.speed, 70, 165);
@@ -65,7 +71,7 @@ const settings = createSettings({
   fields: [
     fields.difficulty({ hints: {
       easy: '느린 공 · 타이밍 아주 넉넉 · 살살 쳐도 멀리',
-      normal: '조금 느린 공 · 타이밍 넉넉',
+      normal: '느린 공 · 타이밍 넉넉',
       hard: '빠른 공 · 꺾이는 변화구 · 봐주기 없음'
     } }),
     fields.choice('mode', '모드', [
@@ -75,23 +81,76 @@ const settings = createSettings({
   ],
   onChange: (vals, change) => onSettings(vals, change)
 });
-const assist = () => ASSIST[settings.difficulty()] || ASSIST.normal;
+const assist = () => ASSIST[settings.difficulty()] || ASSIST.easy;
 // 연습(튜토리얼) 현황 판: 경기 끝 화면에서 '튜토리얼 다시 하기' 를 누른 사람이 있으면 "2P 연습 중 2/4 · 휘둘러 보기" 가 뜹니다.
 // 대기실에서는 같은 내용을 자리 칸 안에 그립니다(renderSlots).
 const board = createTutorialBoard({ mount: $('overTut') });
 
 // ---------- 소리 ----------
+// 소리 크기(전부 한곳에): 타격음이 가장 크고 관중 바탕은 아주 작게.
+const MASTER_GAIN = 0.9;
+const CROWD_BED_GAIN = 0.16; // 경기 중 관중 바탕
+const PRELOAD = ['ball/bat-', 'ball/mitt-', 'swing/swoosh-', 'crowd/', 'ui/fanfare-win', 'ui/pop', 'ui/click', 'ui/whoosh-ui'];
 let actx = null;
+let master = null; // 모든 소리가 지나가는 마스터 볼륨
+let samples = null; // 실제 녹음 재생기(/common/samples.js)
+// 시험용 집계: 이름별로 몇 번 실제 녹음을 틀었는지, 몇 번 합성음으로 대신했는지
+window.__baseballSfx = { played: {}, fallback: {} };
 function audio() {
   if (!actx) {
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (AC) actx = new AC();
+    if (AC) {
+      actx = new AC();
+      master = actx.createGain();
+      master.gain.value = MASTER_GAIN;
+      master.connect(actx.destination);
+      samples = createSamples(actx, master);
+      actx.addEventListener('statechange', syncSoundChip);
+      // 대기실에서 이 종목의 녹음을 미리 받아 둡니다(멈춘 컨텍스트에서도 디코딩은 됩니다).
+      samples.preload(PRELOAD);
+    }
   }
-  if (actx && actx.state === 'suspended') actx.resume();
+  if (actx && actx.state === 'suspended') actx.resume().then(syncSoundChip, () => {});
+  syncSoundChip();
   return actx;
 }
-window.addEventListener('pointerdown', audio);
-window.addEventListener('keydown', audio);
+// 큰 화면은 폰에서 시작하느라 클릭을 못 받는 일이 많습니다. 어떤 키·포인터·터치든 소리를 켭니다.
+for (const ev of ['pointerdown', 'pointerup', 'mousedown', 'touchstart', 'click', 'keydown']) window.addEventListener(ev, audio, { passive: true });
+// 소리가 막혀 있는 동안만 대기실에 작은 안내 칩을 보여 줍니다.
+function syncSoundChip() {
+  const chip = document.getElementById('soundChip');
+  const on = !!actx && actx.state === 'running';
+  if (chip) chip.classList.toggle('hidden', on);
+  if (on && typeof game !== 'undefined' && game.phase === 'playing') startCrowd(); // 늦게 켜져도 경기 중이면 관중 바탕을 깝니다
+}
+// 녹음을 틀고 집계합니다. 못 틀었으면 false(호출한 쪽이 합성음으로 대신합니다).
+function play(name, opts) {
+  const ok = !!(samples && actx && actx.state === 'running' && samples.play(name, opts));
+  const bucket = ok ? window.__baseballSfx.played : window.__baseballSfx.fallback;
+  bucket[name] = (bucket[name] || 0) + 1;
+  return ok;
+}
+// 경기 중 깔리는 관중 소리(이어 도는 소리). 경기가 끝나거나 탭이 가려지면 멈춥니다.
+let crowdBed = null;
+function startCrowd() {
+  if (crowdBed || !samples || !actx || actx.state !== 'running') return;
+  crowdBed = samples.loop('crowd/murmur-loop', { gain: 0 });
+  if (crowdBed) crowdBed.set({ gain: CROWD_BED_GAIN, glide: 0.6 });
+}
+function stopCrowd(fade = 0.6) {
+  if (crowdBed) { crowdBed.stop(fade); crowdBed = null; }
+}
+// 환호 뒤에 잠깐 관중 바탕을 키웠다 원래대로 돌립니다.
+function swellCrowd(amount) {
+  if (!crowdBed) return;
+  crowdBed.set({ gain: CROWD_BED_GAIN + amount, glide: 0.15 });
+  setTimeout(() => { if (crowdBed) crowdBed.set({ gain: CROWD_BED_GAIN, glide: 1.2 }); }, 2200);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopCrowd(0.2);
+  else if (game.phase === 'playing') startCrowd();
+});
+window.addEventListener('pagehide', () => stopCrowd(0.1));
 function noise(sec, freq, q, gain, attack, type) {
   const a = actx;
   if (!a || a.state !== 'running') return;
@@ -111,7 +170,7 @@ function noise(sec, freq, q, gain, attack, type) {
   f.Q.value = q;
   const g = a.createGain();
   g.gain.value = gain;
-  src.connect(f).connect(g).connect(a.destination);
+  src.connect(f).connect(g).connect(master || a.destination);
   src.start();
 }
 function tone(freq, sec, gain) {
@@ -122,19 +181,48 @@ function tone(freq, sec, gain) {
   o.frequency.value = freq;
   g.gain.setValueAtTime(gain, a.currentTime);
   g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + sec);
-  o.connect(g).connect(a.destination);
+  o.connect(g).connect(master || a.destination);
   o.start();
   o.stop(a.currentTime + sec);
 }
 const sfx = {
-  // 나무 배트 '딱!': 날카로운 갈라짐 + 나무 몸통의 짧은 울림
-  crack: (q) => { if (!actx || actx.state !== 'running') return; grit(actx, actx.destination, { sec: 0.05, freq: 3600, q: 0.5, type: 'highpass', gain: 0.6 + q * 0.4 }); modal(actx, actx.destination, [[240, 1, 0.12], [610, 0.7, 0.08], [1330, 0.5, 0.05], [2170, 0.3, 0.03]], { gain: 0.35 + q * 0.25 }); },
+  // 나무 배트 '딱!': 약하게 스친 타구는 짧은 '틱', 제대로 맞으면 크게 갈라지는 소리. 세기·높이는 타구 질(q)을 따라갑니다.
+  crack: (q) => {
+    const weak = q < 0.3;
+    if (play(weak ? 'ball/bat-tick' : 'ball/bat-crack', { gain: weak ? 0.8 : 0.7 + 0.5 * q, rate: 0.94 + 0.12 * q })) return;
+    if (!actx || actx.state !== 'running') return;
+    grit(actx, master, { sec: 0.05, freq: 3600, q: 0.5, type: 'highpass', gain: 0.6 + q * 0.4 });
+    modal(actx, master, [[240, 1, 0.12], [610, 0.7, 0.08], [1330, 0.5, 0.05], [2170, 0.3, 0.03]], { gain: 0.35 + q * 0.25 });
+  },
   // 가죽 미트 '퍽'
-  mitt: () => { if (!actx || actx.state !== 'running') return; modal(actx, actx.destination, [[110, 1, 0.1], [190, 0.6, 0.07]], { gain: 0.6, drop: 0.3 }); grit(actx, actx.destination, { sec: 0.05, freq: 600, q: 1, type: 'lowpass', gain: 0.7 }); },
-  whiff: () => noise(0.32, 700, 0.6, 0.35, 0.45),
-  cheer: (big) => noise(big ? 3.6 : 1.8, 1000, 0.35, big ? 0.6 : 0.3, 0.12),
-  // 야구장 오르간 '차지!' 응원 가락
-  organ: () => { if (!actx || actx.state !== 'running') return; [[0, 0.16], [5, 0.16], [9, 0.16], [12, 0.32], [9, 0.16], [12, 0.6]].reduce((at, [s2, d]) => { organ(actx, actx.destination, 392 * Math.pow(2, s2 / 12), d, { when: at }); return at + d + 0.02; }, 0); }
+  mitt: () => {
+    if (play('ball/mitt-pop', { gain: 0.95 })) return;
+    if (!actx || actx.state !== 'running') return;
+    modal(actx, master, [[110, 1, 0.1], [190, 0.6, 0.07]], { gain: 0.6, drop: 0.3 });
+    grit(actx, master, { sec: 0.05, freq: 600, q: 1, type: 'lowpass', gain: 0.7 });
+  },
+  // 헛스윙 '휙': 방망이 휘두르는 바람 소리
+  whiff: () => { if (!play('swing/swoosh-heavy', { gain: 0.7 })) noise(0.32, 700, 0.6, 0.35, 0.45); },
+  // 환호: 큰 건 함성, 작은 건 짧은 '와!'. 관중 바탕도 잠깐 키웁니다.
+  cheer: (big) => {
+    if (play(big ? 'crowd/cheer-big' : 'crowd/cheer-small', { gain: big ? 0.8 : 0.7 })) { swellCrowd(big ? 0.12 : 0.05); return; }
+    noise(big ? 3.6 : 1.8, 1000, 0.35, big ? 0.6 : 0.3, 0.12);
+  },
+  // 경기 끝 박수
+  applause: () => play('crowd/applause-long', { gain: 0.55, when: 0.4 }),
+  // 삼진 등 아쉬운 순간의 '아~'
+  aww: () => play('crowd/aww', { gain: 0.5 }),
+  // 트럼펫 팡파르(시작·홈런·경기 끝). 녹음이 없으면 예전 야구장 오르간 가락.
+  organ: (gain = 0.7) => {
+    if (play('ui/fanfare-win', { gain })) return;
+    if (!actx || actx.state !== 'running') return;
+    [[0, 0.16], [5, 0.16], [9, 0.16], [12, 0.32], [9, 0.16], [12, 0.6]].reduce((at, [s2, d]) => { organ(actx, master, 392 * Math.pow(2, s2 / 12), d, { when: at }); return at + d + 0.02; }, 0);
+  },
+  // 투구 순간 공이 손을 떠나는 소리(와인드업이 끝나는 때에 맞춰 예약)
+  release: (afterMs) => { play('ui/whoosh-ui', { gain: 0.4, rate: 1.1, when: Math.max(0, afterMs) / 1000 }); },
+  // 작은 안내음. 녹음이 없으면 예전 사인파 삐 소리.
+  join: () => { if (!play('ui/pop', { gain: 0.6 })) tone(880, 0.12, 0.15); },
+  click: (rate, fb) => { if (!play('ui/click', { gain: 0.7, rate })) tone(fb, 0.1, 0.12); }
 };
 
 // ---------- 연결 ----------
@@ -198,7 +286,7 @@ socket.on('players', (p) => {
   // 나간 사람의 연습 표시는 지웁니다.
   for (const s of [...tutInfo.keys()]) if (!players.some((x) => x.slot === s)) tutInfo.delete(s);
   for (const pl of players) {
-    if (!before.has(pl.slot)) tone(880, 0.12, 0.15);
+    if (!before.has(pl.slot)) sfx.join();
     // 투타 대결은 시작할 때 순서를 정하므로 중간에 들어온 폰은 다음 경기부터 합니다.
     if (game.phase === 'playing' && game.mode === 'derby') addToOrder(pl.slot);
   }
@@ -225,6 +313,7 @@ function toSlot(slot, event, data) {
 }
 
 function backToLobby() {
+  stopCrowd(0.4);
   game.phase = 'lobby';
   game.sub = 'idle';
   game.pitch = null;
@@ -355,14 +444,14 @@ function applyMode(m) {
   // 경기 끝 화면에서 바꾸면 대기실로 돌아갑니다.
   if (game.phase === 'over') backToLobby();
   game.mode = m;
-  tone(m === 'duel' ? 660 : 520, 0.1, 0.12);
+  sfx.click(m === 'duel' ? 1.15 : 1, m === 'duel' ? 660 : 520);
   renderMode();
 }
 function onSettings(vals, change) {
   if (change && change.key === 'mode') applyMode(vals.mode);
   if (change && change.key === 'difficulty') {
     const lv = { easy: 0, normal: 1, hard: 2 }[vals.difficulty] ?? 1;
-    tone(520 + lv * 140, 0.09, 0.12);
+    sfx.click(1 + lv * 0.18, 520 + lv * 140);
   }
   renderDiff();
   pushState();
@@ -439,7 +528,7 @@ function startGame(fromSlot) {
   }
   const connected = players.filter((p) => p.connected).map((p) => p.slot).concat(bots.map((b) => b.slot));
   if (!connected.length) {
-    callout('폰을 먼저 연결해 주세요', 'QR을 찍고 시작하기를 누르면 자리가 생겨요', 'miss', 2000);
+    callout('폰을 먼저 연결해 주세요', '', 'miss', 2000);
     return;
   }
   audio();
@@ -456,7 +545,8 @@ function startGame(fromSlot) {
   $('over').classList.add('hidden');
   $('hud').classList.remove('hidden');
   $('join').classList.remove('hidden');
-  sfx.organ();
+  sfx.organ(0.5);
+  startCrowd();
   announceBatter();
 }
 
@@ -469,7 +559,7 @@ function announceBatter() {
   view.clearHit();
   $('stats').classList.remove('on');
   $('timing').classList.remove('on');
-  callout(p.name, `타석에 들어섭니다 · ${PITCHES_PER_TURN}구`, 'player', 1700);
+  callout(p.name, `${PITCHES_PER_TURN}구`, 'player', 1700);
   view.drawBoard({ name: p.name, color: p.color, sub: `HR ${game.scores[batter()].hr} · 남은 공 ${game.left}` });
   game.sub = 'idle';
   game.pitch = null;
@@ -513,7 +603,9 @@ function endGame() {
   // 다음 판 전에는 난이도·모드를 다시 바꿀 수 있습니다(다시 하기도 모두 준비해야 시작).
   settings.lock(false);
   board.hide(false);
+  stopCrowd(1);
   sfx.cheer(true);
+  sfx.applause();
   sfx.organ();
   pushState();
 }
@@ -537,7 +629,7 @@ function nextPitch(now) {
     // 타자 폰이 끊겼으면 잠깐 기다렸다가 다음 타자로 넘깁니다.
     if (!game.pitch || game.pitch.waitingSince == null) {
       game.pitch = { waitingSince: now };
-      callout(`${slot}P 연결을 기다려요`, '15초 안에 돌아오지 않으면 다음 타자로 넘어가요', 'miss', 2500);
+      callout(`${slot}P 연결을 기다려요`, '', 'miss', 2500);
     }
     if (now - game.pitch.waitingSince > 15000) {
       game.left = 0;
@@ -550,6 +642,7 @@ function nextPitch(now) {
   const windup = wMin + Math.random() * wJit;
   game.pitch = { ...p, start: now, release: now + windup, cross: now + windup + p.ms, swing: null, resolved: false };
   game.sub = 'pitch';
+  sfx.release(windup);
   view.clearHit();
   $('stats').classList.remove('on');
   $('timing').classList.remove('on');
@@ -663,7 +756,7 @@ function resolvePitch(now) {
     sfx.mitt();
     if (sw) sfx.whiff();
     const text = sw ? '헛스윙' : '스트라이크';
-    const sub = sw ? (sw.err < 0 ? '너무 빨랐어요' : '너무 늦었어요') : '공이 오면 휘둘러요';
+    const sub = sw ? (sw.err < 0 ? '너무 빨랐어요' : '너무 늦었어요') : '';
     callout(text, sub, 'miss', 1300);
     game.scores[slot].marks.push('miss');
     toSlot(slot, 'result', { text, contact: false });
@@ -751,7 +844,7 @@ function startDuel(fromSlot) {
   const real = players.filter((p) => p.connected).map((p) => p.slot);
   const order = real.concat(bots.map((b) => b.slot)).slice(0, 4);
   if (order.length < 2) {
-    callout('투타 대결은 2명부터', '한 명 더 QR을 찍고 들어와 주세요', 'miss', 2200);
+    callout('투타 대결은 2명부터', '', 'miss', 2200);
     if (fromSlot) toSlot(fromSlot, 'result', { text: '2명부터 할 수 있어요' });
     return;
   }
@@ -772,7 +865,8 @@ function startDuel(fromSlot) {
   $('duelHud').classList.remove('hidden');
   $('tracker').classList.remove('hidden');
   view.setZone(true);
-  sfx.organ();
+  sfx.organ(0.5);
+  startCrowd();
   announceHalf();
 }
 
@@ -807,7 +901,7 @@ function duelNext(now) {
   if (!alive(h.bat)) {
     if (!game.pitch || game.pitch.waitingSince == null) {
       game.pitch = { waitingSince: now };
-      callout(`${playerInfo(h.bat).name} 연결을 기다려요`, '10초 안에 돌아오지 않으면 다음 타석으로 넘어가요', 'miss', 2500);
+      callout(`${playerInfo(h.bat).name} 연결을 기다려요`, '', 'miss', 2500);
       setStatus('타자 연결 대기');
     }
     if (now - game.pitch.waitingSince > BATTER_WAIT_MS) endHalf(now, '타자 연결이 끊겨 넘어가요');
@@ -827,7 +921,7 @@ function duelNext(now) {
   const p = playerInfo(h.pit);
   if (isBot(h.pit)) setStatus(`${p.name} 투구 준비`);
   else if (!alive(h.pit)) setStatus(`${p.name} 연결 끊김 · 곧 자동 투구`);
-  else setStatus(`${p.name} 차례 · 폰에서 코스를 정하고 던져요`, true);
+  else setStatus(`${p.name} 투구 차례`, true);
   renderDuel();
   pushState();
 }
@@ -872,7 +966,9 @@ function onThrow(d, local) {
   const kmh = pitchKmh(raw, A);
   const side = Number(d.side) < 0 ? -1 : 1;
   // 노린 곳에서 제구 오차만큼 흔들립니다(쉬울수록 덜 흔들림).
-  const [ax, ay] = aimToPlate(d.aimX, d.aimY);
+  // 쉬움·보통: 노린 곳이 존 밖이면 존 쪽으로 zoneSnap 만큼 당겨 줍니다(폰 조준판의 존 비율 ZX 0.417 · ZY 0.5).
+  const snap = (v, z) => (Math.abs(v) > z ? Math.sign(v) * (z + (Math.abs(v) - z) * (1 - A.zoneSnap)) : v);
+  const [ax, ay] = aimToPlate(snap(clamp(Number(d.aimX) || 0, -1, 1), SNAP_ZX), snap(clamp(Number(d.aimY) || 0, -1, 1), SNAP_ZY));
   const sig = controlSigma(raw, kind) * A.control;
   const endX = clamp(ax + gauss() * sig, -0.9, 0.9);
   const endY = clamp(ay + gauss() * sig, 0.12, 1.7);
@@ -885,6 +981,7 @@ function onThrow(d, local) {
   game.pitch = { duel: true, kind, type, side, kmh, ms, endX, endY, n: wait.n,
     start: now, wind, release: now + wind, cross: now + wind + ms, swing: null, resolved: false };
   game.sub = 'pitch';
+  sfx.release(wind);
   const name = kind === 'slider' && side < 0 ? '역슬라이더' : t.name;
   setStatus(d.auto ? d.auto : '투구!', true);
   toSlot(h.pit, 'result', { text: `${name} ${Math.round(kmh)}km/h` });
@@ -993,7 +1090,7 @@ function duelApply(ev, now, sub, hit) {
   const count = `${d.b}볼 ${d.s}스트라이크 · ${d.o}아웃`;
   let line = sub || count;
   let kind = 'miss';
-  if (r.tag === 'k') line = `${pit.name} 탈삼진 · ${d.o}아웃`;
+  if (r.tag === 'k') { line = `${pit.name} 탈삼진 · ${d.o}아웃`; sfx.aww(); }
   else if (r.tag === 'walk') line = r.runs ? `밀어내기 ${r.runs}점` : '1루로 걸어 나가요';
   else if (r.tag === 'out') line = `${d.o}아웃`;
   else if (r.tag === 'hit') {
@@ -1095,7 +1192,9 @@ function endDuel() {
   // 다음 판 전에는 난이도·모드를 다시 바꿀 수 있습니다(다시 하기도 모두 준비해야 시작).
   settings.lock(false);
   board.hide(false);
+  stopCrowd(1);
   sfx.cheer(true);
+  sfx.applause();
   sfx.organ();
   pushState();
 }
@@ -1364,6 +1463,7 @@ function tick() {
   requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
+audio(); // 대기실에서 녹음을 미리 받도록 컨텍스트를 먼저 만듭니다(소리는 첫 입력 때 켜집니다)
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') startGame();
@@ -1383,9 +1483,11 @@ settings.mount($('overSet'), { compact: true });
 renderMode();
 renderDiff();
 
+const PRELOAD_CHECK = ['ball/bat-crack', 'ball/bat-tick', 'ball/mitt-pop', 'swing/swoosh-heavy', 'crowd/cheer-big', 'crowd/cheer-small', 'crowd/applause-long', 'crowd/aww', 'crowd/murmur-loop', 'ui/fanfare-win', 'ui/pop', 'ui/click', 'ui/whoosh-ui'];
 // 시험용: 콘솔에서 상태를 보고 움직일 수 있게 둡니다.
 window.__derby = {
   game,
+  sfxState: () => ({ state: actx && actx.state, has: samples ? PRELOAD_CHECK.map((n) => [n, samples.has(n)]) : null }),
   flight,
   bots,
   rules: RULES,

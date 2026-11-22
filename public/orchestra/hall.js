@@ -8,7 +8,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { INSTRUMENTS, patternOf } from './parts.js';
+import { INSTRUMENTS, patternOf, T } from './parts.js';
 import { props } from './props.js';
 
 const STAGE_Y = 1.0;
@@ -1278,7 +1278,8 @@ export function createHall(canvas) {
   }
   function updateTag(i, p) {
     const t = tags[i];
-    const key = `${p.name}|${p.inst}|${p.color}`;
+    const label = T(INSTRUMENTS[p.inst].label); // 이름표 글자: 지금 언어로(언어를 바꾸면 페이지를 새로 고침)
+    const key = `${p.name}|${p.inst}|${p.color}|${label}`;
     if (t.key === key) return;
     t.key = key;
     const g = t.cv.getContext('2d');
@@ -1294,8 +1295,10 @@ export function createHall(canvas) {
     g.textAlign = 'center';
     g.fillText(p.name, 45, 62);
     g.fillStyle = '#fff';
-    g.font = '800 30px "Pretendard Variable", Pretendard, sans-serif';
-    g.fillText(INSTRUMENTS[p.inst].label, 165, 61);
+    let fs = 30;
+    g.font = `800 ${fs}px "Pretendard Variable", Pretendard, sans-serif`;
+    while (fs > 16 && g.measureText(label).width > 160) { fs -= 2; g.font = `800 ${fs}px "Pretendard Variable", Pretendard, sans-serif`; } // 영어 악기 이름이 길면 줄여 맞춤
+    g.fillText(label, 165, 61);
     t.tex.needsUpdate = true;
   }
 

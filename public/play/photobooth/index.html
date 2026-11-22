@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#140e16">
 <title>네컷 사진관 · 폰</title>
+<script src="/common/i18n-wait.js"></script>
 <link rel="stylesheet" href="/vendor/pretendard/variable/pretendardvariable-dynamic-subset.css">
 <link rel="stylesheet" href="/vendor/anton/index.css">
 <link rel="stylesheet" href="style.css">
@@ -40,10 +41,10 @@
       <path d="M118 52l14-8M122 70l16 0M118 88l14 8" stroke="#ffd27a" stroke-width="3"/>
     </svg>
     <h1>폰이 네컷 사진기가 돼요</h1>
-    <p>앞 카메라로 셀카를 찍으면
-큰 화면 네컷에 쏙 들어가요.</p>
+    <p>폰으로 셀카 찍고, 네 컷 만들고, 같이 꾸며요.</p>
     <button class="primary" id="btnStart">시작하기</button>
-    <div class="privacy"><i></i>사진은 이 방 큰 화면에만 가고, 10분 뒤 사라져요</div>
+    <div class="privacy"><i></i>사진은 10분 뒤 사라져요</div>
+    <div class="lang-box" id="langBox"></div>
   </section>
 
   <!-- 메시지 -->
@@ -59,9 +60,9 @@
         <div class="cam-off" id="camOff">
           <svg viewBox="0 0 48 48"><rect x="6" y="14" width="36" height="26" rx="5"/><circle cx="24" cy="27" r="7.5"/><path d="M17 14l3-5h8l3 5"/></svg>
           <b id="camOffT">카메라가 꺼져 있어요</b>
-          <span id="camOffB">셀카를 찍으려면 앞 카메라를 켜요</span>
+          <span id="camOffB"></span>
           <button type="button" class="pill-btn" id="btnCam">카메라 켜기</button>
-          <button type="button" class="link-btn" id="btnFile">카메라 없이 폰 카메라 앱으로 찍기</button>
+          <button type="button" class="link-btn" id="btnFile">폰 카메라 앱으로 찍기</button>
         </div>
         <div class="cam-live hidden" id="camLive"><i></i>큰 화면에도 보여요</div>
       </div>
@@ -111,7 +112,7 @@
         <div class="s-live" id="sLive"><i></i>LIVE</div>
         <div class="s-count" id="sCount"><b></b></div>
         <div class="s-flash" id="sFlash"></div>
-        <div class="s-nocam hidden" id="sNoCam"><b>폰 카메라 앱으로 찍어요</b><span>숫자가 끝나면 ‘지금 찍기’를 눌러요</span></div>
+        <div class="s-nocam hidden" id="sNoCam"><b>폰 카메라 앱으로 찍어요</b></div>
       </div>
     </div>
     <div class="s-bottom" id="sBottom">
@@ -132,6 +133,8 @@
 <div class="debug" id="debug"></div>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/common/ready.js"></script>
+<script type="module" src="/photobooth/i18n.js"></script>
+<script type="module" src="/common/i18n-common.js"></script>
 <script type="module" src="controller.js"></script>
 </body>
 </html>

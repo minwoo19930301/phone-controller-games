@@ -11,7 +11,6 @@
 <script type="importmap">
 { "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }
 </script>
-<style>/* 대기실 설명은 한 줄만 */ .lobby-copy .steps, .lobby-copy .spins, .lobby-copy .rules { display: none !important; }</style>
 </head>
 <body>
 <canvas id="cv"></canvas>
@@ -99,43 +98,16 @@
       </div>
       <p class="lede only-derby">폰을 방망이처럼 휘두르세요.</p>
       <p class="lede only-duel">한 명은 던지고, 한 명은 치세요.</p>
-      <ol class="steps only-duel">
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="12" y="10" width="24" height="28" rx="3"/><path d="M12 19h24 M12 29h24 M20 10v28 M28 10v28"/><circle cx="31" cy="15" r="3"/></svg>
-          <div><b>투수: 코스를 정해요</b><span>폰의 존을 끌어서 던질 곳을 정해요. 존 밖은 볼이에요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M10 34C14 18 24 10 38 10"/><circle cx="38" cy="10" r="4"/><path d="M30 36c3-4 8-6 12-5"/></svg>
-          <div><b>투수: 공처럼 던져요</b><span>세게 = 직구, 손목 비틀기 = 슬라이더, 앞으로 꺾기 = 커브, 손목 고정 = 포크볼.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 38C16 22 28 14 42 10"/><circle cx="38" cy="30" r="5"/><path d="M8 38l6-2 M8 38l2-6"/></svg>
-          <div><b>타자: 공이 오면 휘둘러요</b><span>존 밖 공은 참으면 볼, 4볼이면 볼넷이에요.</span></div>
-        </li>
-      </ol>
-      <ol class="steps only-derby">
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="14" y="5" width="20" height="38" rx="4"/><path d="M20 15h8v8h-8z M20 27h3 M25 27h3v3 M20 31h3v3"/></svg>
-          <div><b>QR을 찍어요</b><span>폰 카메라로 찍고 시작하기를 눌러요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="19" y="4" width="11" height="22" rx="3"/><path d="M24.5 26v16 M17 30c-4 3-5 8-4 12 M32 30c4 3 5 8 4 12"/></svg>
-          <div><b>방망이처럼 쥐어요</b><span>두 손으로 폰 아래쪽을 세로로 쥐어요.</span></div>
-        </li>
-        <li>
-          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 38C16 22 28 14 42 10"/><circle cx="38" cy="30" r="5"/><path d="M8 38l6-2 M8 38l2-6"/></svg>
-          <div><b>공이 오면 휘둘러요</b><span>홈플레이트에 닿는 순간 크게.</span></div>
-        </li>
-      </ol>
       <div class="slots" id="slots"></div>
       <div class="set-box" id="setBox"></div>
-      <div class="hint"><kbd>Enter</kbd> 게임 시작(폰이 있으면 모두 준비한 뒤) <span class="dot"></span> <kbd>D</kbd> 난이도 <span class="dot"></span> <kbd>1</kbd> <kbd>2</kbd> 모드 <span class="dot"></span> <kbd>Space</kbd> 키보드 스윙 <span class="dot"></span> <kbd>P</kbd> 키보드 투구(시험용) <span class="dot"></span> 화면을 한 번 누르면 소리가 켜져요</div>
+      <div class="hint"><kbd>Enter</kbd> 시작</div>
+      <div class="sound-chip" id="soundChip">화면을 한 번 눌러 소리 켜기</div>
     </div>
     <div class="qr-card">
       <img id="qr" alt="참가 QR">
       <div class="qr-code"><span>방 코드</span><b id="code">----</b></div>
       <div class="qr-url" id="url"></div>
-      <div class="qr-warn hidden" id="warn">이 주소는 http라서 폰 동작 센서가 꺼져 있어요. https 주소에서 열어 주세요.</div>
+      <div class="qr-warn hidden" id="warn">https 주소에서 열어 주세요</div>
     </div>
   </div>
 </section>
@@ -148,12 +120,12 @@
     <div class="podium" id="podium"></div>
     <div class="over-set" id="overSet"></div>
     <div class="over-tut" id="overTut"></div>
-    <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 시작</span> <span class="dot"></span> <kbd>D</kbd> 난이도 <span class="dot"></span> <kbd>1</kbd> <kbd>2</kbd> 모드 바꾸기</div>
+    <div class="hint"><span>폰에서 모두 <b>다시 하기</b>를 누르면 시작</span></div>
   </div>
 </section>
 
 <section id="replaced" class="screen hidden">
-  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede">이 방은 마지막으로 연 화면에서 이어져요.</p></div>
+  <div class="over"><h1 class="wordmark sm">다른 화면에서 열었어요</h1><p class="lede"></p></div>
 </section>
 
 <script src="/socket.io/socket.io.js"></script>

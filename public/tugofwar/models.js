@@ -1,6 +1,7 @@
 // 줄다리기 모델: 운동회 운동장(흙·분필선·학교·체육관·천막·나무·만국기 풍 깃발·관중), 밧줄, 사람(둥근 몸·머리카락·얼굴·조끼·머리띠).
 // 전부 코드로 만든 도형 + 캔버스 무늬입니다(외부 파일 없음). 사람은 2뼈 IK 로 팔다리를 맞춥니다.
 import * as THREE from 'three';
+import { t } from '/common/i18n.js';
 
 const TAU = Math.PI * 2;
 export const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
@@ -240,7 +241,7 @@ function bannerTexture(text, bg, fg, w = 1024, h = 160) {
     c.font = `800 ${Math.floor(h * 0.56)}px "Pretendard Variable", Pretendard, sans-serif`;
     c.textAlign = 'center';
     c.textBaseline = 'middle';
-    c.fillText(text, w / 2, h / 2 + 4);
+    c.fillText(text, w / 2, h / 2 + 4, w - 40); // 영어는 길어서 폭에 맞춰 줄임
   });
 }
 export function makeSchool() {
@@ -303,7 +304,7 @@ export function makeSchool() {
   clock.position.set(0, 13.2, 6.65);
   g.add(clock);
   // 현수막
-  const banner = new THREE.Mesh(new THREE.PlaneGeometry(15, 2.3), new THREE.MeshStandardMaterial({ map: bannerTexture('가을 대운동회 · 청백 대항전', '#1f4fa8', '#fff6dc', 1536, 236), roughness: 0.9 }));
+  const banner = new THREE.Mesh(new THREE.PlaneGeometry(15, 2.3), new THREE.MeshStandardMaterial({ map: bannerTexture(t('가을 대운동회 · 청백 대항전'), '#1f4fa8', '#fff6dc', 1536, 236), roughness: 0.9 }));
   banner.position.set(0, 9.2, 6.75);
   g.add(banner);
   // 국기 게양대(기둥만, 천은 추상 무늬)
@@ -347,7 +348,7 @@ export function makeGym() {
   }));
   curtain.position.set(0, 3.9, 5.7);
   g.add(curtain);
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.0), new THREE.MeshStandardMaterial({ map: bannerTexture('체육관 무대', '#f4e6bc', '#6b2a1a', 1024, 150), roughness: 0.9 }));
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.0), new THREE.MeshStandardMaterial({ map: bannerTexture(t('체육관 무대'), '#f4e6bc', '#6b2a1a', 1024, 150), roughness: 0.9 }));
   sign.position.set(0, 6.1, 5.75);
   g.add(sign);
   for (const sx of [-5.8, 5.8]) {
@@ -407,9 +408,9 @@ export function makeTent() {
     c.fillStyle = '#fff';
     c.font = '800 40px "Pretendard Variable", Pretendard, sans-serif';
     c.textAlign = 'center';
-    c.fillText('청', 128, 40);
+    c.fillText(t('청'), 128, 40);
     c.fillStyle = '#fff';
-    c.fillText('백', 384, 34);
+    c.fillText(t('백'), 384, 34);
     c.fillStyle = '#fff';
     c.font = '400 150px Anton, Impact, sans-serif';
     c.fillText(String(b), 128, 200);

@@ -7,15 +7,16 @@
 // - 운전 보조: 쉬움·보통은 도로 방향 맞춤·차선 보조가 세고, 벽에 박아도 딱 서지 않고 벽을 따라 미끄러집니다.
 // - CPU 는 난이도에 따라 빠르기와 봐주기가 달라집니다.
 import { createTrack, wrapAngle, HALF_W } from './track.js';
-import { K, ASSIST, clamp, newKart, stepKart, placeKart, collideKarts, botInput } from './physics.js';
+import { K, ASSIST, clamp, newKart, stepKart, placeKart, collideKarts, botInput, cornerBrake } from './physics.js';
 import { createScene } from './scene.js';
 import { createHud } from './hud.js';
 import { sfx, audio } from './sfx.js';
 import { createItems, behindness, ITEM_KINDS } from './items.js';
-import { ITEM_NAMES } from './icons.js';
 import { createSettings, fields } from '/common/settings.js';
 import { createTutorialBoard } from '/common/tutorial-board.js';
 import { sendHaptic } from '/common/haptics.js';
+import { t, mountSwitcher } from '/common/i18n.js';
+import './i18n.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -41,16 +42,21 @@ const CPU_INFO = [
 
 // ---------- 난이도별 값 ----------
 // 추격 보정: max = 크게 뒤처졌을 때 최고 속도 +비율, full = 그만큼 주는 거리(m), lead = 선두 감속, rb = 아이템 보정 세기
+// 보통 = 예전 쉬움 수준, 쉬움 = 그보다 더 넉넉하게
 const RUBBER = {
-  easy: { max: 0.28, full: 110, lead: 0.05, rb: 1 },
-  normal: { max: 0.17, full: 140, lead: 0.035, rb: 0.7 },
+  easy: { max: 0.34, full: 90, lead: 0.06, rb: 1.1 },
+  normal: { max: 0.28, full: 110, lead: 0.05, rb: 1 },
   hard: { max: 0.07, full: 180, lead: 0.015, rb: 0.35 }
 };
 // CPU 빠르기(코너 한계 속도 배율), 아이템 운(뒤처진 정도에 곱함)
-const CPU_SKILL = { easy: [0.74, 0.06], normal: [0.81, 0.08], hard: [0.87, 0.1] };
-const CPU_LUCK = { easy: 0.5, normal: 0.75, hard: 1 };
+const CPU_SKILL = { easy: [0.68, 0.06], normal: [0.74, 0.06], hard: [0.87, 0.1] };
+const CPU_LUCK = { easy: 0.4, normal: 0.5, hard: 1 };
 // 사람이 맞았을 때 도는 시간 배율
-const HIT_SCALE = { easy: 0.7, normal: 0.85, hard: 1 };
+const HIT_SCALE = { easy: 0.5, normal: 0.7, hard: 1 };
+// 사람이 아이템을 받고 가만히 두면 이만큼 뒤에 저절로 씁니다(어려움은 직접만)
+const AUTO_ITEM_MS = { easy: 5000, normal: 8000 };
+// 길을 벗어나거나 역주행·갇힘이 이만큼 이어지면 코스로 되돌립니다(초)
+const RESPAWN_S = { easy: 1.5, normal: 2, hard: 3 };
 
 // 캔버스에 글자를 그리기 전에 글꼴을 기다립니다(최대 2초).
 await Promise.race([
@@ -68,10 +74,10 @@ const hud = createHud($('views'), track);
 const settings = createSettings({
   game: 'kart',
   fields: [
-    fields.difficulty({ hints: { easy: '추격 부스트 크게 · 벽에 덜 막혀요', normal: '추격 부스트 · 핸들·차선 보조', hard: '보조 없이 실력대로' } }),
+    fields.difficulty(),
     fields.choice('mode', '경기 방식', [
-      { value: 'item', label: '아이템전', hint: '상자를 먹고 아이템으로 역전', tone: '#ffd23a' },
-      { value: 'speed', label: '스피드전', hint: '아이템 없이 달리기만', tone: '#8fd8ff' }
+      { value: 'item', label: '아이템전', tone: '#ffd23a' },
+      { value: 'speed', label: '스피드전', tone: '#8fd8ff' }
     ], { default: 'item', hotkey: 'i' })
   ],
   onChange: () => {
@@ -105,6 +111,10 @@ settings.attach(socket);
 settings.mount($('setBox'));
 settings.mount($('overSet'), { compact: true });
 const board = createTutorialBoard({ mount: $('tutBox') });
+mountSwitcher($('langBox'), { reload: true, compact: true });
+// 안내 문장은 <b> 가 들어 있어 글자 조각이 아니라 한 문장으로 번역합니다(data-i18n=off 라 자동 번역에서 빠져 있음).
+$('hintReady').innerHTML = t('폰에서 <b>준비</b>를 누르면 출발해요');
+$('hintAgain').innerHTML = t('폰에서 <b>다시 하기</b>를 누르면 출발해요');
 board.attach(socket);
 
 socket.on('connect', () => {
@@ -149,10 +159,6 @@ socket.on('drive', (d) => onDrive(d));
 socket.on('item', (d) => {
   const k = racerBySlot(d && d.slot);
   if (k && k.kind === 'human' && game.phase === 'playing' && game.sub === 'race') useItem(k);
-});
-socket.on('calibrate', (d) => {
-  const k = racerBySlot(d && d.slot);
-  if (k && game.phase === 'playing') hudToast(k.slot, '핸들 영점을 다시 맞췄어요', 1400);
 });
 
 function connected(slot) {
@@ -208,7 +214,7 @@ function makeRacer(id, info) {
     brain: { lane: (Math.random() - 0.5) * 6, skill: info.kind === 'cpu' ? cpuSkill(game.diff) : 0.86 + Math.random() * 0.1 },
     lapsDone: 0, finished: false, finishT: 0, rank: 0, lapStart: 0, best: Infinity, lapTimes: [],
     wrongShown: false, boostShow: 0, finishLaps: LAPS,
-    item: null, itemRoll: 0, itemPending: null, itemUseAt: 0, rollIcon: 'banana', toldItem: false,
+    item: null, itemRoll: 0, itemPending: null, itemUseAt: 0, rollIcon: 'banana', itemGotAt: 0,
     hitKey: 0, boltKey: 0, bumpCool: 0, hits: 0, itemsUsed: 0
   });
   // 운전 보조: 사람(과 사람 대신 달리는 봇)은 난이도대로, CPU 는 예전 그대로
@@ -394,7 +400,10 @@ function driveOf(k, now) {
   if (isAuto(k, now)) return botInput(k, track, k.brain);
   // 입력이 0.7초 넘게 끊기면(연결 불안정) 손을 뗀 것으로 봅니다. 핸들은 중앙으로.
   if (now - k.inp.t > 700) return { steer: 0, gas: 0, brake: 0 };
-  return k.inp;
+  if (game.diff === 'hard' || game.sub !== 'race') return k.inp;
+  // 쉬움·보통: 액셀은 저절로 밟고(브레이크를 누를 때만 뗌), 코너가 급하면 브레이크도 거들어 줍니다.
+  const brake = k.inp.brake || cornerBrake(k, track, (ASSIST[game.diff] || ASSIST.normal).autoBrake) ? 1 : 0;
+  return { steer: k.inp.steer, gas: brake ? 0 : 1, brake };
 }
 
 // ================================================================
@@ -467,17 +476,13 @@ const items = createItems(track, {
     if (isHuman(k)) {
       send('cue', { type: 'item', state: 'have', kind: k.item }, k.slot);
       sendHaptic(socket, k.slot, 'good', 0.7);
-      if (!k.toldItem) {
-        k.toldItem = true;
-        hudToast(k.slot, `${ITEM_NAMES[k.item]}! 폰 가운데 버튼으로 써요`, 2200);
-      }
+      k.itemGotAt = performance.now();
     }
   },
   onUse(k, kind) {
     k.itemsUsed += 1;
     if (isHuman(k)) send('cue', { type: 'item', state: 'none', used: kind }, k.slot);
     if (game.phase === 'playing' && (isPlayer(k) || kind === 'bolt')) sfx.use(kind);
-    if (kind === 'star' && isPlayer(k)) hudToast(k.slot, '무적 질주! 부딪히면 날려요', 1800);
     if ((kind === 'turbo' || kind === 'nitro') && isPlayer(k)) k.boostShow = performance.now() + (kind === 'turbo' ? 2800 : 1300);
   },
   onHit(v, cause, by) {
@@ -485,15 +490,15 @@ const items = createItems(track, {
     v.hitKey = performance.now();
     const what = { banana: '바나나에 미끄러졌어요', missile: '유도탄에 맞았어요', bolt: '번개! 작아졌어요', star: '무적 카트에 날아갔어요' }[cause] || '꽈당!';
     if (isPlayer(v) && game.phase === 'playing') {
-      hudToast(v.slot, by && by !== v ? `${by.name}: ${what}` : what, 1800);
+      hudToast(v.slot, by && by !== v ? `${t(by.name)}: ${t(what)}` : t(what), 1800);
       sfx.spin();
       if (isHuman(v)) {
         sendHaptic(socket, v.slot, 'strong', 1);
-        send('cue', { type: 'hit', cause, by: by && by !== v ? by.name : '' }, v.slot);
+        send('cue', { type: 'hit', cause, by: by && by !== v ? by.name : '' }, v.slot); // by 는 한국어 이름 그대로 보냅니다(폰이 자기 언어로 번역)
       }
     }
     if (by && by !== v && isPlayer(by) && game.phase === 'playing' && cause !== 'bolt') {
-      hudToast(by.slot, `명중! ${v.name}`, 1300);
+      hudToast(by.slot, t('명중! {name}', { name: v.name }), 1300);
       if (isHuman(by)) sendHaptic(socket, by.slot, cause === 'star' ? 'clash' : 'hit', 0.7);
     }
     // 튕기는 별 모양 불꽃
@@ -503,14 +508,9 @@ const items = createItems(track, {
     const now = performance.now();
     if (game.phase === 'playing') sfx.thunder();
     for (const v of victims) v.boltKey = now;
-    if (isPlayer(user)) {
-      user.boltKey = now;
-      hudToast(user.slot, victims.length ? `번개! 앞 차 ${victims.length}대가 작아졌어요` : '번개! 앞에 아무도 없어요', 1800);
-    }
+    if (isPlayer(user)) user.boltKey = now;
   },
-  onSmash(k, what) {
-    if (isPlayer(k) && game.phase === 'playing') hudToast(k.slot, what === 'banana' ? '무적이라 바나나를 날렸어요' : '무적이라 끄떡없어요', 1200);
-  },
+  onSmash() {},
   onBoom(x, z) {
     for (let i = 0; i < 14; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -521,6 +521,11 @@ const items = createItems(track, {
   }
 });
 
+// 쉬움·보통: 사람이 아이템을 받고 한참 안 쓰면 저절로 씁니다.
+function idleItem(k, now) {
+  const wait = AUTO_ITEM_MS[game.diff];
+  return Boolean(wait && isHuman(k) && racing() && k.itemGotAt && now - k.itemGotAt > wait);
+}
 function useItem(k) {
   if (!game.items || !racing()) return null;
   return items.use(k, game.karts);
@@ -626,7 +631,7 @@ function simulate(dt, now) {
             if (isPlayer(k) && game.phase === 'playing') sfx.tick();
           }
         }
-        if (k.item && (k.kind !== 'human' || isAuto(k, now)) && (isRacing || game.phase !== 'playing')) {
+        if (k.item && (k.kind !== 'human' || isAuto(k, now) || idleItem(k, now)) && (isRacing || game.phase !== 'playing')) {
           k.kappaAhead = track.kappa[((k.idx || 0) + 8) % track.N];
           items.ai(k, now, karts);
         }
@@ -637,6 +642,7 @@ function simulate(dt, now) {
     carEffects(k, dt);
     const ev = evs.get(k);
     const human = isPlayer(k);
+    if (human && game.phase === 'playing' && k.drift > 0.6 && !k.offroad && Math.abs(k.vf) > 14) sfx.skid(k.id, k.drift);
     if (ev.wall) {
       sparks(k, ev.wall);
       if (k.kind !== 'cpu') sfx.thump(ev.wall);
@@ -648,7 +654,7 @@ function simulate(dt, now) {
       const o = k.bumpWith;
       if (o && o.starT > 0 && !(k.starT > 0)) items.spinOut(k, 1.0, 'star', o);
       else if (isHuman(k)) sendHaptic(socket, k.slot, 'hit', clamp(k.bumpImp / 16, 0.3, 1));
-      if (human) sparks(k, k.bumpImp * 0.6);
+      if (human) { sparks(k, k.bumpImp * 0.6); sfx.bump(k.bumpImp); }
     }
     if (ev.boost) {
       k.boostShow = now + 1400;
@@ -659,12 +665,13 @@ function simulate(dt, now) {
       }
     }
     // 길을 완전히 벗어났거나 역주행이 오래 가면 중심선 위로 되돌려 줍니다.
-    if (isRacing && !k.finished && (k.wrongT > 3 || (k.stuckT > 3 && (Math.abs(k.d) > HALF_W - 1 || Math.abs(k.tdiff) > 1.2)))) {
+    const rs = human ? RESPAWN_S[game.diff] || 3 : 3;
+    if (isRacing && !k.finished && (k.wrongT > rs || (k.stuckT > rs && (Math.abs(k.d) > HALF_W - 1 || Math.abs(k.tdiff) > 1.2)))) {
       const back = k.s;
       const keepDist = k.dist;
       placeKart(k, track, back + 3, 0, 8);
       k.dist = keepDist;
-      if (human) hudToast(k.slot, '코스로 되돌려 놨어요', 1500);
+      if (human) hudToast(k.slot, t('코스로 되돌려 놨어요'), 1500);
     }
   }
   if (!isRacing) return;
@@ -697,7 +704,7 @@ function simulate(dt, now) {
         }
       } else if (k.slot && k.kind !== 'cpu') {
         sfx.lap();
-        hudToast(k.slot, k.lapsDone + 1 === LAPS ? '마지막 바퀴!' : `${k.lapsDone + 1}바퀴째`, 1600);
+        hudToast(k.slot, k.lapsDone + 1 === LAPS ? t('마지막 바퀴!') : t('{n}바퀴째', { n: k.lapsDone + 1 }), 1600);
         send('cue', { type: 'lap', lap: k.lapsDone + 1 }, k.slot);
       }
     }
@@ -809,7 +816,7 @@ function pushState() {
     }
   }
   send('game_state', {
-    phase: game.phase, sub: game.sub, laps: LAPS, players,
+    phase: game.phase, sub: game.sub, laps: LAPS, players, diff: game.phase === 'playing' ? game.diff : diff(),
     items: game.phase === 'playing' ? game.items : itemMode(),
     settings: settings.forState({ lite: game.phase === 'playing' })
   });
@@ -859,7 +866,7 @@ function renderOver() {
     box.appendChild(e);
   });
   const lv = { easy: '쉬움', normal: '보통', hard: '어려움' }[game.diff] || '보통';
-  $('overMeta').textContent = `${game.items ? '아이템전' : '스피드전'} · 난이도 ${lv}`;
+  $('overMeta').textContent = t('{mode} · 난이도 {lv}', { mode: game.items ? '아이템전' : '스피드전', lv });
 }
 
 // ================================================================
@@ -907,7 +914,7 @@ function tick() {
       }
       const k = racerById(v.id);
       let count = null;
-      if (!isRacing) count = { text: String(Math.max(1, Math.ceil(r / 1000))), cls: '', sub: game.items ? '아이템전 · 액셀 준비!' : '스피드전 · 액셀 준비!' };
+      if (!isRacing) count = { text: String(Math.max(1, Math.ceil(r / 1000))), cls: '', sub: game.diff === 'hard' ? '액셀 준비!' : '' };
       else if (now < game.goUntil) count = { text: 'GO!', cls: 'go' };
       const wrong = isRacing && !k.finished && k.wrongT > 0.8;
       const elapsed = k.finished ? k.finishT : isRacing ? now - game.raceStart : 0;
@@ -959,6 +966,7 @@ window.addEventListener('keyup', (e) => {
 });
 window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
+if (BOTS > 0) $('devHint').classList.remove('hidden'); // 시험용 Enter 안내는 ?bots 일 때만
 buildDemo();
 renderLobby();
 requestAnimationFrame(tick);
