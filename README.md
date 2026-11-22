@@ -204,6 +204,7 @@ npm test
 
 저장소의 `render.yaml` 로 Blueprint 배포를 합니다. Render 대시보드에서 New → Blueprint → 이 저장소를 고르면 됩니다.
 main 에 푸시하면 자동으로 다시 배포됩니다(Auto-Deploy: On Commit).
+main 이 아닌 브랜치를 올려도 GitHub Actions(`auto-merge`)가 main 에 합친 결과로 테스트를 돌리고, 통과하면 main 에 올린 뒤 그 브랜치를 지웁니다. 합치지 않을 실험 브랜치는 `wip/` 로 시작합니다.
 무료 플랜은 15분 동안 접속이 없으면 잠들어서, 첫 접속에 30초쯤 걸립니다.
 방 정보는 서버 메모리에만 있어서 서버가 다시 뜨면 큰 화면을 새로고침해 새 방을 만듭니다.
 
