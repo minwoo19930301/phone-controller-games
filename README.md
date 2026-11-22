@@ -1,5 +1,11 @@
 # Phone Controller Games
 
+<!-- LIVE-LINK:START -->
+<p align="center">
+  <a href="https://phone-controller-games.pages.dev/"><img alt="바로 가기: phone-controller-games.pages.dev" src="https://img.shields.io/badge/%E2%96%B6%20%EB%B0%94%EB%A1%9C%20%EA%B0%80%EA%B8%B0-phone--controller--games.pages.dev-ff5a5f?style=for-the-badge"></a>
+</p>
+<!-- LIVE-LINK:END -->
+
 스마트폰을 컨트롤러로 쓰는 큰 화면 모션 게임입니다. 앱 설치 없이 폰 브라우저의 동작 센서를 씁니다.
 웹게임 모음(`blue-shirt-arcade`)과 저장소·서버·배포를 분리했습니다.
 
