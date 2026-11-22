@@ -11,8 +11,8 @@
 // 큰 화면과 폰은 각자 자기 언어를 씁니다. 상대 기기가 보낸 한국어 문장도 DOM 에 들어가면 같은 사전으로 번역됩니다.
 // 사전에 없는 한국어는 원문 그대로 보이고 missing() 에 모입니다(검사용).
 
-export const LANGS = ['ko', 'en', 'ja', 'zh'];
-export const LANG_NAMES = { ko: '한국어', en: 'English', ja: '日本語', zh: '中文' };
+export const LANGS = ['ko', 'en', 'ja', 'zh', 'es', 'pt', 'ru', 'ar', 'fr', 'de', 'it', 'tr', 'vi', 'th', 'id', 'hi'];
+export const LANG_NAMES = { ko: '한국어', en: 'English', ja: '日本語', zh: '中文', es: 'Español', pt: 'Português', ru: 'Русский', ar: 'العربية', fr: 'Français', de: 'Deutsch', it: 'Italiano', tr: 'Türkçe', vi: 'Tiếng Việt', th: 'ไทย', id: 'Bahasa Indonesia', hi: 'हिन्दी' };
 const STORE = 'pcg-lang';
 const HANGUL = /[ㄱ-ㆎ가-힣]/;
 const ATTRS = ['placeholder', 'title', 'aria-label', 'alt'];
@@ -20,11 +20,9 @@ const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'CANVAS', 'TEXTAREA', 
 
 function normLang(l) {
   const s = String(l || '').toLowerCase();
-  if (s.startsWith('ko')) return 'ko';
-  if (s.startsWith('ja')) return 'ja';
   if (s.startsWith('zh')) return 'zh';
-  if (s.startsWith('en')) return 'en';
-  return '';
+  const m = /^[a-z]{2,3}/.exec(s);
+  return m ? m[0] : '';
 }
 function detect() {
   try {
@@ -41,6 +39,8 @@ let cur = typeof location === 'undefined' ? 'ko' : detect();
 const exact = { en: new Map(), ja: new Map(), zh: new Map() };
 const patterns = { en: [], ja: [], zh: [] };
 const missed = new Set();
+// 사전이 있는 언어(en·ja·zh)만 사전으로 바꾸고, 사전에 없는 문장과 그 밖의 언어는 브라우저 자동 번역(아래 loadAuto)에 맡깁니다.
+const useDict = () => cur !== 'ko' && Boolean(exact[cur]);
 const cache = new Map(); // 원문 → 번역(또는 null). 언어가 바뀌거나 사전이 늘면 비웁니다
 const listeners = new Set();
 
@@ -74,7 +74,7 @@ export function register(dicts) {
 }
 
 function lookup(k) {
-  if (cur === 'ko') return k;
+  if (!useDict()) return k;
   if (cache.has(k)) return cache.get(k);
   let out = exact[cur].get(k);
   if (out == null) {
@@ -99,7 +99,7 @@ function lookup(k) {
 /** 원문을 지금 언어로. vars 를 주면 {이름} 자리를 채웁니다(값이 한국어면 그 값도 번역). 사전에 없으면 원문 그대로. */
 export function t(ko, vars) {
   let s = String(ko);
-  if (cur !== 'ko') {
+  if (useDict()) {
     const hit = vars ? exact[cur].get(normKey(s)) : lookup(normKey(s));
     if (hit != null) s = hit;
     else if (vars && HANGUL.test(s)) missed.add(normKey(s));
@@ -107,7 +107,7 @@ export function t(ko, vars) {
   if (vars) s = s.replace(/\{(\w+)\}/g, (all, name) => {
     if (!(name in vars)) return all;
     const v = vars[name];
-    return typeof v === 'string' && cur !== 'ko' && HANGUL.test(v) ? (lookup(normKey(v)) ?? v) : String(v);
+    return typeof v === 'string' && useDict() && HANGUL.test(v) ? (lookup(normKey(v)) ?? v) : String(v);
   });
   return s;
 }
@@ -127,7 +127,7 @@ function skipEl(el) {
   return false;
 }
 function convert(src) {
-  if (cur === 'ko') return src;
+  if (!useDict()) return src;
   const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(src);
   const hit = lookup(normKey(m[2]));
   return hit == null ? src : m[1] + hit + m[3];
@@ -194,10 +194,41 @@ function onMutations(list) {
   }
 }
 
+// 브라우저 자동 번역(Google 번역 위젯). 쿠키 googtrans=/ko/<언어> 를 두면 들어오는 순간 그 언어로 옮겨 줍니다.
+// 화면 글자만 번역됩니다(캔버스에 그린 글자는 그대로). 위젯이 안 불러와져도 게임은 한국어·사전 번역으로 그대로 돌아갑니다.
+const GT_CODE = { zh: 'zh-CN', he: 'iw', jv: 'jw', fil: 'tl' };
+let autoOn = false;
+function setAutoCookie(code) {
+  try {
+    if (!code) { document.cookie = 'googtrans=;path=/;expires=Thu, 01 Jan 1970 00:00:00 GMT'; return; }
+    document.cookie = 'googtrans=/ko/' + (GT_CODE[code] || code) + ';path=/';
+  } catch (e) {}
+}
+function loadAuto(code) {
+  if (autoOn || typeof document === 'undefined' || !document.head) return;
+  autoOn = true;
+  setAutoCookie(code);
+  const st = document.createElement('style');
+  st.textContent = 'iframe.skiptranslate,.goog-te-banner-frame,#goog-gt-tt,.goog-te-balloon-frame,.VIpgJd-ZVi9od-ORHb-OEVmcd,.VIpgJd-ZVi9od-aZ2wEe-wOHMyf{display:none!important}html,body{top:0!important}.goog-text-highlight{background:none!important;box-shadow:none!important}font{vertical-align:inherit!important}';
+  document.head.appendChild(st);
+  const holder = document.createElement('div');
+  holder.id = 'pcg-gt';
+  holder.style.display = 'none';
+  (document.body || document.documentElement).appendChild(holder);
+  window.googleTranslateElementInit = function () {
+    try { new window.google.translate.TranslateElement({ pageLanguage: 'ko', autoDisplay: false }, 'pcg-gt'); } catch (e) {}
+  };
+  const sc = document.createElement('script');
+  sc.async = true;
+  sc.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+  document.head.appendChild(sc);
+}
+
 /** 번역을 시작합니다(문서가 준비되면 자동으로 한 번 불립니다). */
 export function boot() {
   if (typeof document === 'undefined') return cur;
-  document.documentElement.lang = cur === 'zh' ? 'zh-Hans' : cur;
+  // lang 은 원문 언어(ko)로 둡니다: 자동 번역이 한국어 → 대상 언어로 옮기고, 브라우저 자체 번역 제안도 이 값을 봅니다.
+  if (cur !== 'ko') loadAuto(cur);
   if (!booted) {
     booted = true;
     observer = new MutationObserver(onMutations);
@@ -215,6 +246,7 @@ export function setLang(code, { reload = false } = {}) {
   cur = n;
   try { localStorage.setItem(STORE, n); } catch (e) {}
   cache.clear();
+  if (typeof document !== 'undefined') { setAutoCookie(n === 'ko' ? '' : n); reload = true; }
   if (reload) {
     try { const u = new URL(location.href); u.searchParams.delete('lang'); location.replace(u.href); return cur; } catch (e) {}
     location.reload();
@@ -244,7 +276,7 @@ export function mountSwitcher(target, { reload = false, compact = false } = {}) 
   box.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg>';
   const sel = document.createElement('select');
   sel.setAttribute('aria-label', 'Language');
-  for (const l of LANGS) { const o = document.createElement('option'); o.value = l; o.textContent = LANG_NAMES[l]; sel.appendChild(o); }
+  for (const l of LANGS.includes(cur) ? LANGS : [...LANGS, cur]) { const o = document.createElement('option'); o.value = l; o.textContent = LANG_NAMES[l] || l; sel.appendChild(o); }
   sel.value = cur;
   sel.addEventListener('change', () => setLang(sel.value, { reload }));
   listeners.add(() => { sel.value = cur; });
