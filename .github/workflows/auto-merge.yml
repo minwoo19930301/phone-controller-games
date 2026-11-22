@@ -1,0 +1,56 @@
+# main 이 아닌 브랜치를 저장소 주인이 올리면, main 에 합친 결과로 테스트를 돌리고
+# 통과하면 main 에 올린 뒤 그 브랜치를 지웁니다. main 푸시가 곧 Render 20대 배포입니다.
+# 합치지 않을 실험 브랜치는 wip/ 로 시작하면 건드리지 않습니다.
+name: auto-merge
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - 'wip/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-merge-main
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: github.actor == github.repository_owner && github.event.deleted == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 브랜치를 main 에 합치기
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$GITHUB_SHA"
+          git merge --no-edit -m "Merge branch '$GITHUB_REF_NAME'" "$GITHUB_SHA"
+
+      - run: npm ci
+
+      - run: npm test
+
+      - name: main 에 올리기
+        run: |
+          for i in 1 2 3; do
+            git push origin HEAD:main && exit 0
+            git fetch origin main
+            git reset --hard origin/main
+            git merge --no-edit -m "Merge branch '$GITHUB_REF_NAME'" "$GITHUB_SHA" || exit 1
+          done
+          exit 1
+
+      - name: 합친 브랜치 지우기
+        run: git push origin --delete "$GITHUB_REF_NAME"
