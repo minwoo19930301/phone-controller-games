@@ -16,6 +16,7 @@
         "description": "Pick a motion game for your group, learn its rules, see who's in the room, and run a tournament — all from this page.",
         "sample_queries": [
             "We have 4 players and want something active — what should we play?",
+            "Who's in the room right now, and can we start the game?",
             "Take us to bowling.",
             "Set up a single-elimination table tennis tournament for 4 players.",
             "Show me the global leaderboard."

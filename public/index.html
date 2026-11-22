@@ -53,7 +53,60 @@
   footer { margin-top: 32px; color: var(--dim); font-size: 14px; }
   .topline { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
   .topline h1.title { margin-bottom: 36px; }
+  /* Assistant mount (agentify). Dark palette to match the lobby. White text sits on
+     --ns-primary and --ns-accent, so both keep 4.5:1 contrast with white. */
+  .assistant { margin-top: 48px; }
+  .assistant h2 { font-size: 24px; margin: 0 0 8px; }
+  .assistant p { color: #c9d3e1; margin: 0 0 8px; }
+  .assistant-note { font-size: 13px; color: var(--dim); }
+  #assistant-status { font-size: 14px; color: var(--dim); }
+  #agent-app {
+    --ns-font: system-ui, sans-serif;
+    --ns-bg: #0d1526;
+    --ns-fg: #f5f3ec;
+    --ns-primary: #1d4ed8;
+    --ns-accent: #1d4ed8;
+    --ns-border: #2a3340;
+    --ns-panelbg: #0d1526;
+    --ns-msgbg: #16213a;
+    --ns-muted: #9fb0c6;
+  }
+  .assistant-panels { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 16px; margin-top: 16px; }
+  #agent-app.ns-composed-app [data-ns-slot="chat"] { height: 720px; }
+  #agent-app .ns-chat { background: var(--ns-bg); }
+  #agent-app input[type="checkbox"], #agent-app input[type="radio"] { width: auto; }
+  #agent-app .ns-header { flex-wrap: wrap; }
+  #agent-app .ns-settings-body label { margin: 4px 0; font-weight: 400; }
+  #agent-app .ns-w-label { font-family: inherit; }
+  #agent-app .ns-widget label { margin: 0; }
+  #agent-app .ns-w-radio label, #agent-app .ns-w-multi label, #agent-app .ns-w-toggle { font-weight: 400; }
+  #agent-app .ns-w-toggle { font-size: 13px; }
+  #agent-app button { margin: 0; }
+  #agent-app .ns-w-choice { color: var(--ns-fg); }
+  #agent-app .ns-devtoggle:not(.on):hover, #agent-app .ns-modal-close:hover { background: transparent; }
+  #agent-app .ns-w-choice:disabled:hover { background: #1a2742; }
+  #agent-app .ns-consent { background: #fffbeb; color: #1f2328; }
+  #agent-app .ns-msgs:has(.ns-consent-actions) > .ns-turn-status { display: none; }
+  #agent-app .ns-msg { overflow-wrap: break-word; }
+  #agent-app .ns-consent-actions { flex-wrap: wrap; }
+  #agent-app .ns-consent-actions button { white-space: nowrap; }
+  body > dialog h2 { margin: 0 0 12px; font: 700 1.25em system-ui, sans-serif; }
+  body > dialog button { margin-right: 8px; }
+  .assistant-review { max-width: 640px; width: 85%; max-height: 85vh; overflow: auto; border: 1px solid #888; border-radius: 12px; padding: 24px; font: 16px system-ui, sans-serif; }
+  .assistant-review dl { display: grid; grid-template-columns: fit-content(40%) 1fr; gap: 4px 16px; margin: 12px 0; }
+  .assistant-review dt { font-weight: 600; }
+  .assistant-review dd { margin: 0; overflow-wrap: anywhere; }
+  .assistant-review details { margin: 12px 0; }
+  .assistant-review pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .assistant-review .assistant-decline { background: transparent; color: inherit; border: 1px solid currentColor; }
+  @media (max-width: 760px) {
+    .assistant-panels { grid-template-columns: 1fr; }
+    .assistant-review dl { grid-template-columns: 1fr; gap: 0; }
+    .assistant-review dd { margin-bottom: 8px; }
+  }
 </style>
+<script type="module" src="/lobby.js"></script>
+<script type="module" src="/site.js"></script>
 </head>
 <body>
 <main>
@@ -154,6 +207,20 @@
       <div class="ko">줄다리기</div>
     </a>
   </div>
+  <section id="assistant" class="assistant" aria-labelledby="assistant-heading">
+    <h2 id="assistant-heading">게임 도우미에게 물어보기</h2>
+    <p>몇 명이서 어떤 게임을 할지, 룰이 뭔지, 토너먼트를 어떻게 여는지 물어보세요.</p>
+    <p class="assistant-note">메시지와 이 페이지의 데이터는 아래 설정에서 고른 LLM 제공자에게 전송됩니다. 되돌릴 수 없는 일은 실행 전에 확인을 받습니다.</p>
+    <p id="assistant-status" role="status">도우미 연결 중… 이 메시지가 계속 보이면 도우미를 불러오지 못한 것입니다. 페이지는 그대로 쓸 수 있어요.</p>
+    <div id="agent-app">
+      <div data-ns-slot="header"></div>
+      <div class="assistant-panels">
+        <div data-ns-slot="chat"></div>
+        <div data-ns-slot="agents"></div>
+      </div>
+      <div data-ns-slot="settings"></div>
+    </div>
+  </section>
 </main>
 <script type="module">
   import { mountSwitcher } from '/common/i18n.js';

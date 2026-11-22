@@ -1,0 +1,10 @@
+{
+  "networks": [
+    {
+      "name": "phone_games"
+    }
+  ],
+  "actions": {
+    "version": 1
+  }
+}

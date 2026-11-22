@@ -1,0 +1,7 @@
+{
+  "available": false,
+  "front_man": "party_host",
+  "network": "phone_games",
+  "protocol": "nsdeploy-agent-mcp/v1",
+  "reason": "The public MCP facade (POST /mcp) is not shipped yet; it lands with the server-side phase of this agentify work."
+}

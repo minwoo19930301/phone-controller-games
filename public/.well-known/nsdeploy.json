@@ -1,0 +1,18 @@
+{
+  "exports": [
+    {
+      "aliases": [
+        "phone_games",
+        "party_host"
+      ],
+      "front_man": "party_host",
+      "network": "phone_games",
+      "url": "phone_games"
+    }
+  ],
+  "imports": [],
+  "link_updates": {
+    "mode": "browser-local"
+  },
+  "protocol": "nsdeploy-link/v1"
+}
