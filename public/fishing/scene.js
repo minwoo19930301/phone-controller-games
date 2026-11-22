@@ -1078,7 +1078,8 @@ export function createScene(cvEl) {
 
   // ---------- 물고기와 바닥 그림자 ----------
   const fishVis = new Map(); // fish id -> { g, sp }
-  const fishPool = { lmb: [], smb: [], blg: [] };
+  const FISH_KINDS = ['lmb', 'smb', 'blg', 'crp', 'brm', 'lch'];
+  const fishPool = Object.fromEntries(FISH_KINDS.map((k) => [k, []]));
   function fishFor(f) {
     let v = fishVis.get(f.id);
     if (v) return v;
@@ -1303,10 +1304,12 @@ export function createScene(cvEl) {
   }
   // 들어오고 나갈 때마다 장비를 새로 만들고 지우면(예전 방식) 지울 때 셰이더 프로그램도 같이 내려가서,
   // 다음 사람이 들어올 때 반사용 프로그램을 다시 컴파일합니다. 느린 PC·TV 에서는 그때마다 화면이 멈칫했습니다.
-  // 그래서 자리 4개 분을 처음에 다 만들어 두고(반사용까지 미리 컴파일) 보이기/숨기기만 합니다.
+  // 그래서 자리 8개 분을 처음에 다 만들어 두고(반사용까지 미리 컴파일) 보이기/숨기기만 합니다.
   const POOL = [
     { slot: 1, color: '#ff5a5f', name: '1P' }, { slot: 2, color: '#3ab4ff', name: '2P' },
-    { slot: 3, color: '#ffc93c', name: '3P' }, { slot: 4, color: '#5ee07a', name: '4P' }
+    { slot: 3, color: '#ffc93c', name: '3P' }, { slot: 4, color: '#5ee07a', name: '4P' },
+    { slot: 5, color: '#c77dff', name: '5P' }, { slot: 6, color: '#ff8fd1', name: '6P' },
+    { slot: 7, color: '#3ee6d6', name: '7P' }, { slot: 8, color: '#ff9b3d', name: '8P' }
   ];
   function makeRig(p) {
     const rod = makeRod(p.color);
@@ -1440,7 +1443,7 @@ export function createScene(cvEl) {
     show.add(disk);
   }
   const showFish = {};
-  for (const sp of ['lmb', 'smb', 'blg']) {
+  for (const sp of FISH_KINDS) {
     showFish[sp] = makeFish(sp);
     show.add(showFish[sp]);
   }
@@ -1849,7 +1852,7 @@ export function createScene(cvEl) {
   // 수면 반사는 다른 출력(렌더 타깃: 톤매핑 없음·선형 색)으로 그려서 프로그램이 따로 있습니다.
   // 예전에는 화면용만 미리 만들어, 처음 들어온 사람의 낚싯대·찌가 반사에 비칠 때 그 자리에서 컴파일했습니다.
   {
-    for (const sp of ['lmb', 'smb', 'blg']) {
+    for (const sp of FISH_KINDS) {
       const g = under(makeFish(sp));
       g.traverse((m) => { if (m.isMesh) m.layers.set(L_UNDER); });
       g.visible = false;

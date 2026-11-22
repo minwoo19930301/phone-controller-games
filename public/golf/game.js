@@ -7,7 +7,7 @@ import { analyzeSwing, summarize, renderPanel } from './analysis.js';
 import { displayMayReceiveFollow, displayShowsFollow } from './follow-through.mjs';
 import { nextFarthest, nextTeeOrder, skipHole, rankedScores } from './turn-order.mjs';
 import { createSettings, fields } from '/common/settings.js';
-import { levelOf, shapePower, shapeAngle, shapePutterSpeed, nominalSwing, WIND_MAX } from './assist.mjs';
+import { levelOf, shapePower, shapeAngle, shapePutterSpeed, nominalSwing, limitPower, WIND_MAX } from './assist.mjs';
 import { mountSoundGate } from './sound-gate.js';
 import { createGolfSfx } from './real-sfx.js';
 
@@ -176,13 +176,17 @@ socket.on('pose', (d) => {
   game.activity = performance.now(); // 스윙 화면에서 폰이 움직이고 있으면 자리를 비운 것이 아닙니다
   view.pose(d.s, d.fc);
 });
-let lastAnalysis=null,analysisPanel=null;
-$('showAnalysis').addEventListener('click',()=>{if(!lastAnalysis)return;$('analysisDialog').showModal();if(analysisPanel)analysisPanel.dispose();analysisPanel=renderPanel($('analysisPanel'),lastAnalysis,[],{player:playerInfo(game.lastSlot||game.order[game.turn])});});
+let lastAnalysis=null,analysisPanel=null,analysisShot=-1;
+// 스윙 분석은 공이 멈추면 바로 띄우고, 다음 사람 차례가 되면 닫습니다(버튼으로 다시 볼 수 있음).
+function openAnalysis(){if(!lastAnalysis)return;const dlg=$('analysisDialog');if(!dlg.open)dlg.showModal();if(analysisPanel)analysisPanel.dispose();analysisPanel=renderPanel($('analysisPanel'),lastAnalysis,[],{player:playerInfo(game.lastSlot||game.order[game.turn])});}
+function closeAnalysis(){const dlg=$('analysisDialog');if(dlg.open)dlg.close();}
+const ANALYSIS_MS = 9000; // 분석을 띄웠을 때 다음 차례까지 기다리는 시간
+$('showAnalysis').addEventListener('click',openAnalysis);
 $('closeAnalysis').addEventListener('click',()=>$('analysisDialog').close());
 $('analysisDialog').addEventListener('close',()=>{if(analysisPanel)analysisPanel.dispose();analysisPanel=null;});
 socket.on('swing_data', (d) => {
   if(!isTurn(d.slot) || !d.samples?.length) return;
-  try {const analysis=analyzeSwing(d,{club:game.club,impact:game.flight?.shot});lastAnalysis=analysis;$('showAnalysis').hidden=false;socket.emit('d2c',{event:'analysis',slot:d.slot,data:{summary:summarize(analysis),score:analysis.score,tips:analysis.tips}});}
+  try {const analysis=analyzeSwing(d,{club:game.club,impact:game.flight?.shot});lastAnalysis=analysis;analysisShot=game.shot;$('showAnalysis').hidden=false;if(game.sub==='result'){openAnalysis();game.waitUntil=Math.max(game.waitUntil,performance.now()+ANALYSIS_MS-2000);}socket.emit('d2c',{event:'analysis',slot:d.slot,data:{summary:summarize(analysis),score:analysis.score,tips:analysis.tips}});}
   catch(e){console.warn('스윙 분석을 표시하지 못했습니다',e)}
 });
 socket.on('impact', (d) => {
@@ -293,6 +297,7 @@ function beginTurn() {
   document.documentElement.style.setProperty('--c', p.color);
   game.sub = 'aim';
   game.aim = 0;
+  closeAnalysis();
   const score=game.scores[slot];
   game.club = recommendClub(hole.distToPin(...score.pos), {onGreen:hole.inGreen(...score.pos),tee:score.strokes===0}).toLowerCase();
   game.flight = null;
@@ -545,7 +550,7 @@ function assistShot(d, club) {
   const auto = Boolean(d.auto); // 폰의 '탭으로 치기': 보통 세기로 똑바로
   const nominal = putter ? idealPuttSwing() : nominalSwing(CLUBS[club]);
   let speed = auto ? nominal : Math.max(0, Number(d.speed) || 0);
-  if (!auto) speed = putter ? shapePutterSpeed(speed, nominal, level) : shapePower(speed, nominal, level);
+  if (!auto) speed = putter ? shapePutterSpeed(speed, nominal, level) : limitPower(shapePower(speed, nominal, level), nominal, Number(d.back) || 0);
   const face = auto ? 0 : Number(d.face) || 0;
   const path = auto ? 0 : Number(d.path) || 0;
   // 시뮬레이터는 0.8·0.2·0.16 계수를 쓰므로 배율만 미리 곱해 넘기고, 화면에 보이는 값은 원래 값으로 되돌립니다.
@@ -664,6 +669,7 @@ function finishShot(now) {
   }
   game.sub = 'result';
   game.waitUntil = now + 4200;
+  if (lastAnalysis && analysisShot === game.shot) { openAnalysis(); game.waitUntil = now + ANALYSIS_MS; }
   renderBoard();
   pushState();
 }

@@ -1260,7 +1260,7 @@ import { t as T, mountSwitcher } from '/common/i18n.js'; // 이 파일에는 지
     }
     message('방을 찾을 수 없어요', '큰 화면의 QR을 다시 찍어 주세요.');
   });
-  socket.on('room_full', () => message('4명이 꽉 찼어요', '빈자리가 생기면 다시 찍어 주세요.'));
+  socket.on('room_full', () => message('8명이 꽉 찼어요', '빈자리가 생기면 다시 찍어 주세요.'));
   socket.on('replaced', () => message('다른 탭에서 열었어요', '마지막으로 연 화면에서 조작해요.'));
   socket.on('room_closed', () => message('방이 닫혔어요', '큰 화면의 새 QR을 찍어 주세요.'));
 
@@ -1358,6 +1358,14 @@ import { t as T, mountSwitcher } from '/common/i18n.js'; // 이 파일에는 지
       buzz([40]);
       setStatus('아직이에요!', '', '');
       showCard('hold', 'NOT YET', r.text || '아직이에요!', '', r.sub || '', 2200);
+      return;
+    }
+    if (r.kind === 'junk') {
+      // 꽝: 장화·깡통·거북이(점수 없음)
+      tone(520, 0.12, 0.18, 'triangle', 380);
+      buzz([40, 60, 40]);
+      setStatus(T('꽝! {item}', { item: T(r.item || '') }), '', '');
+      showCard('hold', '꽝!', r.item || '', '', r.text || '', 2600);
       return;
     }
     if (r.fish) {

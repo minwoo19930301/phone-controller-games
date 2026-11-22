@@ -9,8 +9,8 @@ import {
 
 export const POP = 12; // 늘 살아 있는 물고기 수(쉽게 바꿀 수 있게 한곳에)
 export const SPOOK_R = 1.5; // 찌가 떨어진 자리에서 이 안의 물고기는 놀라 달아납니다
-export const NOTICE_R = { blg: 4, smb: 5.5, lmb: 6 }; // 찌를 알아채는 거리(배스는 ±1m 개체 차)
-const CURIOUS = { blg: 0.72, smb: 0.6, lmb: 0.55 }; // 알아챘을 때 다가올 확률(큰 놈은 더 낮음)
+export const NOTICE_R = { blg: 4, smb: 5.5, lmb: 6, crp: 5, brm: 5.5, lch: 3.5 }; // 찌를 알아채는 거리(배스는 ±1m 개체 차)
+const CURIOUS = { blg: 0.72, smb: 0.6, lmb: 0.55, crp: 0.5, brm: 0.5, lch: 0.7 }; // 알아챘을 때 다가올 확률(큰 놈은 더 낮음)
 
 const TAU = Math.PI * 2;
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
@@ -89,17 +89,19 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
         const d = R(radius * 0.4, radius);
         x = near.x + Math.sin(a) * d;
         z = near.z + Math.cos(a) * d;
-      } else if (f.big > 0.3 && rand() < 0.65) {
-        if (rand() < 0.6) {
-          const c = pick(COVER);
+      } else if (f.big > 0.3) {
+        // 큰 놈은 멀리 던져야 닿는 곳(16m 넘어)에 삽니다. 먼 쪽 덤불이 있으면 그 둘레도 좋아합니다.
+        const farCover = COVER.filter((c) => c.z > 14);
+        if (farCover.length && rand() < 0.4) {
+          const c = pick(farCover);
           const a = R(0, TAU);
           x = c.x + Math.sin(a) * R(0.5, c.r);
           z = c.z + Math.cos(a) * R(0.5, c.r);
         } else {
           x = R(AREA.x0 + 1, AREA.x1 - 1);
-          z = R(14, 26);
+          z = R(16, AREA.z1 - 1.5);
         }
-      } else if (f.sp === 'blg') {
+      } else if (f.sp === 'blg' || f.sp === 'lch') {
         x = R(AREA.x0 + 1, AREA.x1 - 1);
         z = AREA.z0 + 0.8 + 10 * Math.pow(rand(), 1.2);
       } else {
@@ -124,7 +126,7 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
     return n;
   }
   function chooseSpecies() {
-    const cnt = { lmb: 0, smb: 0, blg: 0 };
+    const cnt = Object.fromEntries(Object.keys(MIX).map((k) => [k, 0]));
     for (const f of fish) if (f.mode !== 'leave' && f.mode !== 'release' && f.mode !== 'landed') cnt[f.sp] += 1;
     let best = 'lmb';
     let bestD = -1e9;
@@ -209,7 +211,11 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
       }
       return lead;
     }
-    const w = weight != null ? weight : rollWeight(sp, rand, bigCount() < 2);
+    let w = weight != null ? weight : rollWeight(sp, rand, bigCount() < 3);
+    if (weight == null && sp !== 'lch' && w < BIG_KG && bigCount() < 3 && rand() < 0.33) {
+      const S = SPECIES[sp];
+      w = Math.round(Math.max(BIG_KG, S.max * (0.62 + 0.38 * rand())) * 100) / 100;
+    }
     const f = make(sp, w);
     place(f, initial, at);
     fish.push(f);
@@ -789,6 +795,11 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
     f.exitZ = e.z;
   }
   // 놓아주기: (x, z) 에 떨어뜨리면 깊이 내려가며 헤엄쳐 나갑니다.
+  function take(f) {
+    releaseClaim(f);
+    const i = fish.indexOf(f);
+    if (i >= 0) fish.splice(i, 1);
+  }
   function release(f, x, z) {
     startLeave(f, 'release');
     f.x = x;
@@ -907,7 +918,7 @@ export function createPond({ rand = Math.random, inView = defaultInView, count =
   }
 
   return {
-    fish, update, byId, steal, hook, drive, land, release, lose, scare, startle, guide, setAssist, forgetSlot, forceBite, mouth, setTarget,
+    fish, update, byId, steal, hook, drive, land, release, take, lose, scare, startle, guide, setAssist, forgetSlot, forceBite, mouth, setTarget,
     get assist() { return A; },
     spawn: (species, weight, at) => spawn(!!at, species, weight, at),
     aliveCount, get target() { return target; }, get time() { return t; }

@@ -48,6 +48,7 @@ const GAMES = {
   fishing: {
     title: '배스 낚시',
     play: '/play/fishing/',
+    max: 8,
     gate: false,
     fromController: ['pose', 'cast', 'hookset', 'reel', 'calibrate', 'start_game'],
     fromDisplay: ['game_state', 'bite', 'tension', 'result', 'cue'],

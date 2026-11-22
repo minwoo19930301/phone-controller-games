@@ -3,8 +3,7 @@ import { createSwingCapture, synthSwing, feedSwing } from './swing-capture.js';
 import { resolveSwingSpeed } from './swing-speed.mjs';
 import { phoneMaySendFollow } from '/golf/follow-through.mjs';
 import { requestMotionPermission } from '/common/motion.js';
-import { createSamples } from '/common/samples.js';
-import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS } from '/golf/assist.mjs';
+import { levelOf, swingDetect, HINT_AFTER_MS } from '/golf/assist.mjs';
 // 골프 컨트롤러. 폰의 방향을 계속 큰 화면으로 흘려보내고, 임팩트는 폰에서 직접 잡습니다.
 // 좌표는 어드레스 때 정한 기준축으로 보냅니다: r = 목표 오른쪽(공 쪽), u = 위, f = 목표 쪽.
 (() => {
@@ -30,7 +29,7 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
     (volatile ? socket.volatile : socket).emit('c2d', { event, data });
     return true;
   }
-  // 스윙 분석(1800줄)은 '분석 보기'를 눌렀을 때만 불러옵니다.
+  // 스윙 분석 모듈은 시작할 때 미리 받아 두고, 큰 화면이 분석을 보내면 바로 보여 줍니다.
   let lastSwing=null, analysisPanel=null, analysisData=null, analysisMod=null;
   const loadAnalysis = () => analysisMod || (analysisMod = import('/golf/analysis.js'));
   const capture=createSwingCapture({send:(event,data)=>send(event,data),club:()=>club,onDone:packet=>{lastSwing=packet}});
@@ -46,8 +45,8 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
   let sensorOk = false;
   let tapOnly = false; // 동작 센서가 없거나 거절돼서 버튼으로만 치는 폰
   let recClub = '7i'; // 이번 차례에 큰 화면이 골라 둔 클럽
-  let showPad = false; // 방향 패드를 펼쳤는지(쉬움·보통은 접혀 있음)
-  let clubMode = 0; // 0 숨김 · 1 추천 주변 3개 · 2 전부
+  let showPad = true; // 방향 패드는 늘 보입니다(11/22 예전 화면으로 되돌림)
+  let clubMode = 2; // 클럽도 늘 전부 보입니다
   let hintTimer = null;
   let swingStartAt = 0;
   let burst = null;
@@ -198,7 +197,8 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
     swing.stage = 'done';
     capture.impact(performance.now());
     setTimeout(()=>capture.finish(),1800);
-    sendImpact({ speed: Math.round(speed), face: +face.toFixed(1), path: +path.toFixed(1), miss: +miss.toFixed(1), club, aim });
+    // back: 백스윙 크기(도). 큰 화면이 짧은 스냅 스윙의 세기를 줄이는 데 씁니다.
+    sendImpact({ speed: Math.round(speed), face: +face.toFixed(1), path: +path.toFixed(1), miss: +miss.toFixed(1), back: Math.round(-swing.top), club, aim });
   }
   // 임팩트를 큰 화면에 보내고 결과 화면으로 넘어갑니다(스윙·돌발 회전·탭으로 치기 모두 같은 길).
   function sendImpact(data) {
@@ -274,7 +274,6 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
     sensorOk = true;
     lastOri = deviceVectors(e.alpha || 0, e.beta || 0, e.gamma || 0);
     last = lastOri;
-    if (mode === 'hold') holdStep(lastOri, performance.now());
     onSample(lastOri, performance.now());
   }
   function onMotion(e) {
@@ -297,24 +296,18 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
 
   // ---------- 소리 ----------
   let actx = null;
-  let sam = null;
   function audio() {
     if (!actx) {
       const AC = window.AudioContext || window.webkitAudioContext;
-      if (AC) {
-        actx = new AC();
-        sam = createSamples(actx);
-        sam.preload(['ui/click']); // 폰은 파일 1개만 미리 받습니다
-      }
+      if (AC) actx = new AC();
     }
     if (actx && actx.state === 'suspended') actx.resume().catch(() => {});
     return actx;
   }
-  // 어드레스·임팩트 알림: 실제 마우스 클릭 녹음(못 받았으면 아래 사인파 '팅')
+  // 어드레스·임팩트 알림: 짧은 '팅'(클릭 녹음은 공 치는 소리와 겹쳐 어색해서 뺐습니다)
   function ting() {
     const a = audio();
     if (!a) return;
-    if (a.state === 'running' && sam && sam.play('ui/click', { gain: 1 })) return;
     const o = a.createOscillator();
     const g = a.createGain();
     o.frequency.value = 2400;
@@ -361,8 +354,7 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
     return CLUBS.filter((c) => (state.mode === 'near' ? ['5i', '7i', '9i', 'pw'].includes(c.id) : c.id !== 'pt'));
   }
   function visibleClubs() {
-    if (level() === 'hard') return state.mode === 'near' ? clubPool() : CLUBS; // 어려움은 예전처럼 전부 직접 고릅니다
-    if (club === 'pt' || clubMode === 0) return []; // 퍼팅은 퍼터로 정해져 있습니다
+    return state.mode === 'near' ? clubPool() : CLUBS; // 예전처럼 모든 난이도에서 전부 직접 고릅니다
     const pool = clubPool();
     if (clubMode === 2) return pool;
     const at = Math.max(0, pool.findIndex((c) => c.id === recClub));
@@ -402,32 +394,37 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
     const c = CLUBS.find((x) => x.id === club);
     $('aimClub').textContent = club === 'pt' ? '퍼터' : c ? c.sub : '';
     $('aimDist').textContent = state.pin ? `${state.pin}m` : '';
-    $('btnPadToggle').classList.toggle('hidden', !easy || showPad);
-    $('btnClubToggle').classList.toggle('hidden', !easy || clubMode !== 0 || club === 'pt');
+    $('btnPadToggle').classList.add('hidden');
+    $('btnClubToggle').classList.add('hidden');
+    void easy;
   }
   $('btnPadToggle').addEventListener('click', () => { showPad = true; drawAimTools(); });
   $('btnClubToggle').addEventListener('click', () => { clubMode = 1; drawClubs(); drawAimTools(); });
 
   // ---------- 어드레스 ----------
-  // 어드레스: 누르고 폰이 잠깐 가만히 있으면(300ms) 그 자세가 기준이 됩니다. 1.5초 안에 안 멈춰도 그 자세로 잡습니다.
-  let hold = { ref: null, since: 0 };
+  // 어드레스: 3초 동안 그립을 잡고 멈춰 있으면 그 자세가 기준이 됩니다(11/22 예전 방식으로 되돌림.
+  // 누르자마자 잡던 방식은 쥐기 전 자세가 기준이 돼서 손과 채가 따로 놀았습니다).
   function startHold() {
     keepAwake();
-    clearTimeout(holdTimer);
+    clearInterval(holdTimer);
     resetSwing();
     mode = 'hold';
-    hold = { ref: null, since: 0 };
     show('vHold');
-    holdTimer = setTimeout(finishHold, FALLBACK_MS);
-  }
-  function holdStep(v, t) {
-    if (!hold.ref || angle(hold.ref.top, v.top) / RD > STILL_DEG) {
-      hold.ref = v;
-      hold.since = t;
-    } else if (t - hold.since >= STILL_MS) finishHold();
+    let n = 3;
+    $('holdN').textContent = n;
+    holdTimer = setInterval(() => {
+      n -= 1;
+      if (n > 0) {
+        $('holdN').textContent = n;
+        if (navigator.vibrate) navigator.vibrate(15);
+        return;
+      }
+      clearInterval(holdTimer);
+      finishHold();
+    }, 1000);
   }
   function finishHold() {
-    clearTimeout(holdTimer);
+    clearInterval(holdTimer);
     if (mode !== 'hold' || !last) return;
     calibrate(last);
     lastSwing=null;$('analysisSummary').replaceChildren();
@@ -465,7 +462,7 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
   $('btnTap').addEventListener('click', tapShot);
   // 조준 화면으로 돌아갑니다(큰 화면도 조준 단계로)
   $('btnBack').addEventListener('click', () => {
-    clearTimeout(holdTimer); clearTimeout(hintTimer);
+    clearInterval(holdTimer); clearTimeout(hintTimer);
     resetSwing(); capture.cancel(); lastSwing = null; $('analysisSummary').replaceChildren();
     send('cancel', {});
     mode = 'wait';
@@ -544,10 +541,10 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
       clearInterval(holdTimer);
       mode = 'wait';
       $('waitT').textContent = state.phase === 'over' ? '경기 끝' : '대기실';
-      $('waitB').textContent = state.phase === 'over' ? '큰 화면에서 순위를 확인하세요.' : '';
+      $('waitB').textContent = state.phase === 'over' ? '큰 화면에서 순위를 확인하세요.' : '모두 준비를 누르면 시작해요.';
       $('btnGo').classList.remove('hidden');
       $('btnGo').style.display = '';
-      $('btnGo').textContent = state.phase === 'over' ? '다시 하기' : '게임 시작';
+      $('btnGo').textContent = state.phase === 'over' ? '다시 하기' : '준비';
       show('vWait');
       return;
     }
@@ -569,8 +566,8 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
       aim = 0;
       club = state.club || '7i';
       recClub = club;
-      showPad = level() === 'hard';
-      clubMode = 0;
+      showPad = true;
+      clubMode = 2;
       resetSwing();
     }
     mode = 'aim';
@@ -582,21 +579,22 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
     if (navigator.vibrate) navigator.vibrate([20, 60, 20]);
   }
 
-  // 스윙 분석은 보고 싶을 때만: 버튼을 누르면 그때 분석 모듈을 불러와 보여 줍니다.
+  // 스윙 분석: 큰 화면이 보내 주면 바로 보여 줍니다.
   socket.on('analysis', (a) => {
     analysisData = a;
-    if (mode === 'result') $('btnAnalysis').classList.remove('hidden');
+    showAnalysis();
   });
-  $('btnAnalysis').addEventListener('click', async () => {
-    if (!analysisData || !lastSwing) return;
+  $('btnAnalysis').addEventListener('click', showAnalysis);
+  async function showAnalysis() {
+    if (!analysisData) return;
     const { renderSummary, renderPanel, analyzeSwing } = await loadAnalysis();
     renderSummary($('analysisSummary'), analysisData.summary, { onDetails: () => {
       if (analysisPanel) analysisPanel.dispose();
       mode = 'analysis'; show('vAnalysis');
-      analysisPanel = renderPanel($('analysisDetail'), analyzeSwing(lastSwing, { club: lastSwing.club }), [], { compact: true });
+      if (lastSwing) analysisPanel = renderPanel($('analysisDetail'), analyzeSwing(lastSwing, { club: lastSwing.club }), [], { compact: true });
     } });
     $('btnAnalysis').classList.add('hidden');
-  });
+  }
   $('closeAnalysis').addEventListener('click',()=>{if(analysisPanel)analysisPanel.dispose();analysisPanel=null;mode='wait';render()});
 
   socket.on('connect', () => socket.emit('join', { role: 'controller', room: ROOM, token }));
@@ -632,7 +630,6 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
   });
   socket.on('result', (r) => {
     mode = 'result';
-    if (analysisData) $('btnAnalysis').classList.remove('hidden');
     $('resT').textContent = r.title;
     $('resChips').innerHTML = (r.chips || []).map(([k, v]) => `<span class="chip">${k}<b>${v}</b></span>`).join('');
     $('resB').textContent = r.note || '';
@@ -644,6 +641,7 @@ import { levelOf, swingDetect, STILL_DEG, STILL_MS, FALLBACK_MS, HINT_AFTER_MS }
     // 화면 꺼짐 방지와 권한 요청은 탭 안에서 await 전에 바로 불러야 iPhone 에서 통합니다.
     keepAwake();
     audio();
+    loadAnalysis().catch(() => {}); // 분석 모듈을 미리 받아 둡니다
     const perm = await requestMotionPermission();
     window.addEventListener('deviceorientation', onOrientation);
     window.addEventListener('devicemotion', onMotion);

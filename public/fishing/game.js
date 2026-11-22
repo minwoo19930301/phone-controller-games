@@ -1,4 +1,4 @@
-// 배스 낚시 큰 화면(1인칭 · 늘 열린 호수). 폰 1~4대가 같은 물에서 동시에, 동작으로 낚시합니다.
+// 배스 낚시 큰 화면(1인칭 · 늘 열린 호수). 폰 1~8대가 같은 물에서 동시에, 동작으로 낚시합니다.
 // 대기실·시간 제한 없이 QR 을 찍으면 바로 자리가 생기고, 나가면 15초 뒤 자리가 비워집니다.
 // 서버는 방과 이벤트만 중계하고 판정은 모두 여기서 합니다.
 import { createScene } from './scene.js';
@@ -6,8 +6,9 @@ import { sfx, audio, setAmbience, watchAudio } from './sfx.js';
 import { createPond, POP } from './fishai.js';
 import {
   LINE_PER_TURN, AIM_MAX, ASSIST, CAST_MIN, CAST_MAX, RETRIEVE_DONE, BAIT_DEPTH, AREA, EYE, NEAR_POWER, TUTORIAL_ASSIST,
-  castTarget, aimFor, newFight, stepFight, jumpThrow, botReel, lakeQ, bedDepth, laneFracs, assistFor
+  castTarget, aimFor, newFight, stepFight, jumpThrow, botReel, lakeQ, bedDepth, laneFracs, assistFor, farReel
 } from './logic.js';
+import { JUNK, pickJunk, makeJunk } from './junk.js';
 import { createSettings, fields, DIFF_LABEL } from '/common/settings.js';
 import { createTutorialBoard } from '/common/tutorial-board.js';
 import { t as T, lang, mountSwitcher } from '/common/i18n.js'; // 말풍선·칩 글자는 DOM 에 넣기 전에 t() 로 바꿉니다
@@ -16,8 +17,17 @@ const SLOT_INFO = {
   1: { name: '1P', color: '#ff5a5f' },
   2: { name: '2P', color: '#3ab4ff' },
   3: { name: '3P', color: '#ffc93c' },
-  4: { name: '4P', color: '#5ee07a' }
+  4: { name: '4P', color: '#5ee07a' },
+  5: { name: '5P', color: '#c77dff' },
+  6: { name: '6P', color: '#ff8fd1' },
+  7: { name: '7P', color: '#3ee6d6' },
+  8: { name: '8P', color: '#ff9b3d' }
 };
+const MAX_ANGLERS = 8;
+// 꽝: 가까이(이 거리 안) 던진 찌를 감아 올리면 가끔 물건이 딸려 옵니다.
+const JUNK_NEAR = 9;
+const JUNK_CHANCE = 0.18;
+const JUNK_TEST = new URLSearchParams(location.search).has('junk');
 const TENSION_MS = 125; // 장력은 약 8Hz 로 보냅니다
 const POSE_FRESH_MS = 400;
 const REEL_IN_MS = 600; // 찌가 나가 있을 때 다시 던지면 먼저 감아 들이는 시간
@@ -27,7 +37,7 @@ const HEARTBEAT_MS = 5000;
 const $ = (id) => document.getElementById(id);
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const params = new URLSearchParams(location.search);
-const BOTS = clamp(parseInt(params.get('bots'), 10) || 0, 0, 4);
+const BOTS = clamp(parseInt(params.get('bots'), 10) || 0, 0, 8);
 const DEBUG = params.has('debug');
 const FISH_N = clamp(parseInt(params.get('fish'), 10) || POP, 1, 30);
 const RD = Math.PI / 180;
@@ -198,12 +208,14 @@ function syncRoster() {
   }
   // 봇 채우기
   let bots = [...game.players.values()].filter((a) => a.bot).length;
-  for (let s = 1; s <= 4 && bots < BOTS; s++) {
+  for (let s = 1; s <= MAX_ANGLERS && bots < BOTS; s++) {
     if (game.players.has(s) || phones.has(s)) continue;
     game.players.set(s, newAngler({ slot: s, ...SLOT_INFO[s], bot: true }));
     bots += 1;
   }
   view.setPlayers(anglers().map((a) => ({ slot: a.slot, color: a.color, name: a.name })));
+  // 사람이 많을수록 물고기도 늘립니다(4명까지 기본, 그 위로 한 명당 2마리)
+  pond.setTarget(clamp(FISH_N + Math.max(0, anglers().length - 4) * 2, FISH_N, FISH_N + 8));
   renderBoard();
   renderSeats();
 }
@@ -212,7 +224,8 @@ function syncRoster() {
 function dropAngler(a) {
   a.lure.active = false;
   // 들고 있던 물고기는 물에 놓아주고, 걸려 있던 물고기는 풀려 달아납니다.
-  if (a.fish && a.state === 'landed') pond.release(a.fish, a.fish.x, Math.max(a.fish.z + 1.2, AREA.z0));
+  if (a.fish && a.state === 'landed') pond.take(a.fish);
+  if (a.landed && a.landed.obj) { view.scene.remove(a.landed.obj); a.landed.obj.userData.dispose(); }
   else if (a.fish && a.state === 'fight') pond.lose(a.fish, a.fx, a.fz);
   if (a.biteFish && a.state === 'bite') pond.steal(a.biteFish);
   a.fish = null;
@@ -340,6 +353,7 @@ function onCast(slot, d) {
   const tgt = castTarget(nt[0], nt[1], power, aim);
   const out = a.state === 'wait';
   const tip = tipOf(a);
+  a.junk = null;
   a.cast = {
     t0: now, pre: out ? REEL_IN_MS : 0, from: out ? [a.lure.x, 0.02, a.lure.z] : tip.slice(),
     to: [tgt.x, tgt.z], dist: tgt.dist, power, aim, dur: 560 + tgt.dist * 30
@@ -372,7 +386,10 @@ function onReel(slot, d) {
   a.reel.omega = omega;
   a.reel.at = now;
   // 감은 만큼 찌가 끌려옵니다. 메시지는 띄엄띄엄 오므로 매 프레임 조금씩 나눠 옮깁니다.
-  if (a.state === 'wait' && turns > 0) a.pullPending += turns * LINE_PER_TURN * (assistOf(a).reelDist || 1);
+  if (a.state === 'wait' && turns > 0) {
+    const nt = nominalTip(a);
+    a.pullPending += turns * LINE_PER_TURN * (assistOf(a).reelDist || 1) * farReel(Math.hypot(a.lure.x - nt[0], a.lure.z - nt[1]));
+  }
 }
 
 function onHookset(slot, d, arrival) {
@@ -451,6 +468,10 @@ function pullLure(a, meters) {
     a.lure.active = false;
     a.nibFish = null;
     a.pullPending = 0;
+    if (a.junk) {
+      landJunk(a);
+      return;
+    }
     setState(a, 'ready');
     sendTo(a, 'cue', { kind: 'back' });
     view.ripple(a.lure.x, a.lure.z, 0.4, 0.4);
@@ -491,6 +512,8 @@ function landLure(a) {
   a.reel.idleSince = performance.now();
   a.pullPending = 0;
   sendTo(a, 'cue', { kind: 'landed', dist: Math.round(c.dist) });
+  // ?junk=1 (시험용): 거리·봇 상관없이 늘 꽝이 걸립니다
+  a.junk = JUNK_TEST || (!a.bot && c.dist < JUNK_NEAR && Math.random() < JUNK_CHANCE) ? pickJunk() : null;
   setState(a, 'wait');
 }
 
@@ -533,6 +556,7 @@ function hookFish(a, speed, lateMs) {
   const hookQ = clamp((speed - 150) / 550, 0.3, 1);
   pond.hook(fish, a.slot);
   a.fish = fish;
+  a.junk = null;
   a.guideFish = null;
   a.fight = newFight({ species: fish.sp, power: fish.power, weight: fish.w }, dist, lat, hookQ, Math.random, assistOf(a));
   a.fx = fish.x;
@@ -681,6 +705,12 @@ function updateAngler(a, now, dt) {
     if (now - c.t0 >= c.pre + c.dur) landLure(a);
   } else if (a.state === 'wait') {
     const L = a.lure;
+    // ?junk=1 시험: 봇은 감지 않으니 1.5초 뒤 바로 꽝을 끌어 올려 보여 줍니다
+    if (JUNK_TEST && a.bot && a.junk && now - a.stateAt > 1500) {
+      L.active = false;
+      landJunk(a);
+      return;
+    }
     L.moving = a.reel.omega > 0.4;
     if (a.pullPending > 1e-4) {
       const take = Math.min(a.pullPending, Math.max(0.6 * dt, a.pullPending * Math.min(1, dt * 9)));
@@ -816,7 +846,62 @@ function hangPoint(a, out) {
   return out;
 }
 const hangV = { x: 0, y: 0, z: 0 };
+// 꽝이 딸려 올라왔을 때: 물건을 줄 끝에 매달아 보여 주고(점수 없음), 거북이는 물에 놓아 줍니다.
+function landJunk(a) {
+  const kind = a.junk;
+  const info = JUNK[kind];
+  a.junk = null;
+  const obj = makeJunk(kind);
+  view.scene.add(obj);
+  const from = [a.lure.x, 0, a.lure.z];
+  obj.position.set(from[0], from[1], from[2]);
+  a.landed = { t0: performance.now(), junk: kind, obj, from };
+  setState(a, 'landed');
+  view.splash(from[0], from[2], 14, 0.5);
+  sfx.plop(0.5);
+  sendTo(a, 'result', { kind: 'junk', junk: kind, item: info.name, text: info.sub });
+  toast(a, T('꽝! {item}', { item: T(info.name) }), 'miss', 2200);
+}
+const JUNK_SHOW_MS = 2000;
+function junkStep(a, now) {
+  const L = a.landed;
+  const t = (now - L.t0) / 1000;
+  const hp = hangPoint(a, hangV);
+  const o = L.obj;
+  if (now - L.t0 < JUNK_SHOW_MS) {
+    const u = clamp(t / 0.7, 0, 1);
+    const e = u * u * (3 - 2 * u);
+    o.position.set(L.from[0] + (hp.x - L.from[0]) * e, L.from[1] + (hp.y - L.from[1]) * e + Math.sin(u * Math.PI) * 0.5, L.from[2] + (hp.z - L.from[2]) * e);
+    o.rotation.set(0, Math.PI + Math.sin(t * 2.2) * 0.5, Math.sin(t * 3.1) * 0.12);
+    return;
+  }
+  const u = clamp((now - L.t0 - JUNK_SHOW_MS) / 420, 0, 1);
+  if (JUNK[L.junk].keep) {
+    // 버릴 물건은 발밑으로 치웁니다
+    o.position.set(hp.x, hp.y - u * u * 1.4, hp.z - u * u * 0.5);
+  } else {
+    // 거북이는 앞쪽 물로 살살 놓아 줍니다
+    const tz = Math.max(hp.z + 1.4, AREA.z0 - 0.2);
+    o.position.set(hp.x, hp.y * (1 - u * u) - 0.1 * u, hp.z + (tz - hp.z) * u);
+  }
+  if (u >= 1) {
+    if (!JUNK[L.junk].keep) {
+      view.splash(o.position.x, o.position.z, 18, 0.6);
+      view.ripple(o.position.x, o.position.z, 1.2, 0.8);
+      sfx.release();
+    }
+    view.scene.remove(o);
+    o.userData.dispose();
+    a.landed = null;
+    setState(a, 'ready');
+  }
+}
+
 function landedStep(a, now) {
+  if (a.landed && a.landed.junk) {
+    junkStep(a, now);
+    return;
+  }
   const L = a.landed;
   const fish = L.fish;
   const t = (now - L.t0) / 1000;
@@ -842,20 +927,16 @@ function landedStep(a, now) {
     fish.curl = Math.sin(t * 13) * 0.32 * flap;
     if (u < 1 && Math.random() < 0.3) view.splash(x, z, 1, 0.2, Math.max(0.03, y - 0.2));
   } else if (!L.dropped) {
-    // 놓아주기: 앞쪽 물로 툭 떨어뜨립니다.
-    const u = clamp((now - L.t0 - LAND_SHOW_MS) / 380, 0, 1);
-    const tx = hp.x;
-    const tz = Math.max(hp.z + 1.4, AREA.z0 - 0.2);
-    const x = hp.x + (tx - hp.x) * u;
-    const z = hp.z + (tz - hp.z) * u;
-    const y = (hp.y - vlen * 0.5) * (1 - u * u) + Math.sin(u * Math.PI) * 0.25 - 0.1 * u;
-    pond.drive(fish, x, y, z, -Math.PI / 2 + u * 1.2, (Math.PI / 2) * (1 - u) - 0.4 * u, Math.sin(now / 50) * 0.3, 1);
+    // 가져가기(11/23): 놓아주지 않고 발밑 살림통으로 내려 담습니다. 호수에서는 빠지고 새 물고기가 들어옵니다.
+    const u = clamp((now - L.t0 - LAND_SHOW_MS) / 420, 0, 1);
+    const e = u * u;
+    const x = hp.x;
+    const y = hp.y - vlen * 0.5 - e * 1.4;
+    const z = hp.z - e * 0.5;
+    pond.drive(fish, x, y, z, -Math.PI / 2, (Math.PI / 2) * (1 - u * 0.3), Math.sin(now / 60) * 0.25 * (1 - u), 1 - u * 0.6);
     if (u >= 1) {
       L.dropped = true;
-      pond.release(fish, x, z);
-      view.splash(x, z, 24, 0.75);
-      view.ripple(x, z, 1.5, 1);
-      sfx.release();
+      pond.take(fish);
       a.landed = null;
       a.fish = null;
       setState(a, 'ready');
@@ -1283,7 +1364,7 @@ function updateHud(now) {
     const lane = view.laneOf(a.slot);
     const xFrac = lane ? (lane.ndc + 1) / 2 : fr[i];
     const st = c.querySelector('.st');
-    let text = T(STATE_TEXT[a.state] || '');
+    let text = T(a.state === 'landed' && a.landed && a.landed.junk ? '꽝!' : STATE_TEXT[a.state] || '');
     let cls = `chip s-${a.state}`;
     if (a.state === 'wait') {
       if (now - a.nibAt < 900) {
@@ -1354,15 +1435,15 @@ function renderSeats() {
   const box = $('seats');
   box.innerHTML = '';
   const taken = new Set([...game.players.keys()]);
-  for (let s = 1; s <= 4; s++) {
+  for (let s = 1; s <= MAX_ANGLERS; s++) {
     const i = document.createElement('i');
     i.style.setProperty('--c', SLOT_INFO[s].color);
     if (taken.has(s)) i.className = game.players.get(s).bot ? 'on bot' : 'on';
     box.appendChild(i);
   }
   const phones = serverPlayers.length;
-  $('full').classList.toggle('hidden', phones < 4);
-  $('qrSub').classList.toggle('hidden', phones >= 4);
+  $('full').classList.toggle('hidden', phones < MAX_ANGLERS);
+  $('qrSub').classList.toggle('hidden', phones >= MAX_ANGLERS);
 }
 
 // ---------- 조과 카드 ----------

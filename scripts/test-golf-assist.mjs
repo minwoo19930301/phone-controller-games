@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  levelOf, shapePower, shapeAngle, nominalSwing, swingDetect, strokeDetect, putt,
+  levelOf, shapePower, shapeAngle, nominalSwing, swingDetect, strokeDetect, putt, limitPower,
   shapePutterSpeed, shapePutterFace, assistAim, FACE_SCALE, WIND_MAX
 } from '../public/golf/assist.mjs';
 
@@ -37,11 +37,23 @@ test('easy lifts a gentle swing and calms wrist error; normal sits in between', 
   assert.ok(Math.abs(shapeAngle(30, 'normal')) < Math.abs(shapeAngle(30, 'hard')));
 });
 
-test('easy and normal detect smaller swings than hard', () => {
+test('full-swing detection is the same on every level (lower thresholds caught waggles)', () => {
   const [e, n, h] = ['easy', 'normal', 'hard'].map((l) => swingDetect(l, false));
-  assert.ok(e.back > n.back && n.back > h.back);
-  assert.ok(e.rate < n.rate && n.rate < h.rate);
+  assert.deepEqual(e, h);
+  assert.deepEqual(n, h);
+  assert.equal(e.burst, 0);
   assert.ok(strokeDetect('easy').minPeak < strokeDetect('hard').minPeak);
+});
+
+test('a wrist snap with a short backswing does not fly full distance', () => {
+  const sw = nominalSwing({ headKmh: 105, lengthM: 0.89 }); // 샌드웨지 정도
+  const snap = limitPower(sw * 2.5, sw, 55); // 회전은 2.5배로 튀었지만 백스윙 55도
+  assert.ok(snap <= sw * 0.5 + 1e-9, `snap ${snap / sw}`);
+  const full = limitPower(sw * 2.5, sw, 170); // 큰 백스윙이어도 보통 세기의 1.1배까지
+  assert.ok(full <= sw * 1.1 + 1e-9 && full > sw);
+  assert.equal(limitPower(sw * 0.8, sw, 170), sw * 0.8, 'a normal full swing is untouched');
+  assert.equal(limitPower(sw * 0.8, sw, 0), sw * 0.8, 'no backswing info, no backswing cap');
+  assert.ok(limitPower(sw * 0.9, sw, 105) < sw * 0.9, 'a half swing is capped at about 0.8');
 });
 
 test('putting: magnet pulls toward the ideal speed, hard does not', () => {

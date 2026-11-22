@@ -13,7 +13,7 @@ export const FACE_DEAD = { easy: 3, normal: 2, hard: 0 };
 export const FACE_MAX = { easy: 10, normal: 15, hard: 25 };
 // 샷 세기 하한 비율: 약한 스윙도 이 비율만큼은 나갑니다(hard 는 보정 없음).
 export const POWER_FLOOR = { easy: 0.55, normal: 0.35, hard: 0 };
-export const POWER_CAP = 1.3; // 이 비율보다 세게 휘둘러도 더 늘어나지 않습니다(easy·normal)
+export const POWER_CAP = 1.15; // 이 비율보다 세게 휘둘러도 더 늘어나지 않습니다(easy·normal)
 // 바람 세기 상한(m/s)
 export const WIND_MAX = { easy: 1.5, normal: 3, hard: 4.5 };
 
@@ -32,6 +32,24 @@ export function shapePower(raw, nominal, level) {
   return nominal * (f + (1 - f) * ratio);
 }
 
+// 백스윙 크기(도)에 따른 세기 상한(모든 난이도). 웨지를 손목만 탁 꺾어 치면 회전 속도는 높게 나와도
+// 백스윙이 작으니 멀리 가지 않게 합니다. short 이하 백스윙은 보통 세기의 lo 배까지, full 이상은 hi 배까지.
+export const BACKSWING = { short: 60, full: 150, lo: 0.5, hi: 1.1 };
+// 보통 세기보다 센 부분은 이만큼만 반영합니다(스냅으로 회전이 튀어도 덜 나가게).
+export const OVER_GAIN = 0.3;
+
+/** 세기 보정(모든 난이도): 보통 세기를 넘는 부분은 줄이고, 백스윙(back, 도)이 작을수록 상한을 낮춥니다. back 이 없으면 백스윙 상한은 건너뜁니다. */
+export function limitPower(speed, nominal, back) {
+  if (!(nominal > 0) || !(speed > 0)) return speed;
+  let r = speed / nominal;
+  if (r > 1) r = Math.min(BACKSWING.hi, 1 + (r - 1) * OVER_GAIN);
+  if (back > 0) {
+    const u = Math.max(0, Math.min(1, (back - BACKSWING.short) / (BACKSWING.full - BACKSWING.short)));
+    r = Math.min(r, BACKSWING.lo + (BACKSWING.hi - BACKSWING.lo) * u);
+  }
+  return nominal * r;
+}
+
 /** 페이스·궤도(도) 한 값: 작은 값은 0, 큰 값은 상한으로 자르고 배율을 곱합니다. */
 export function shapeAngle(deg, level) {
   const l = levelOf(level);
@@ -45,9 +63,10 @@ export function shapeAngle(deg, level) {
 // back: 이 각도(도)보다 더 뒤로 들면 백스윙, rate/over: 내려오는 속도(도/초)와 그 지점 위로 올라온 각,
 // resetD/resetRate: 이만큼 제자리로 돌아오면 처음부터, fidgetMs: 백스윙 상태로 이만큼 머물면 처음부터,
 // burst: 방향이 안 잡혀도 회전 속도가 이 이상 튀면 한 번 친 것으로 봅니다(0 이면 끔).
+// 11/22: 문턱을 낮췄더니 흔들기만 해도 스윙으로 잡혀 더 어려워졌다는 피드백이 있어 모든 난이도를 예전 값으로 되돌렸습니다.
 export const SWING_DETECT = {
-  easy: { back: -20, rate: 90, over: 8, resetD: 8, resetRate: 90, fidgetMs: 5000, burst: 350 },
-  normal: { back: -35, rate: 150, over: 12, resetD: 12, resetRate: 150, fidgetMs: 4000, burst: 450 },
+  easy: { back: -60, rate: 250, over: 25, resetD: 20, resetRate: 250, fidgetMs: 0, burst: 0 },
+  normal: { back: -60, rate: 250, over: 25, resetD: 20, resetRate: 250, fidgetMs: 0, burst: 0 },
   hard: { back: -60, rate: 250, over: 25, resetD: 20, resetRate: 250, fidgetMs: 0, burst: 0 }
 };
 export const PUTTER_DETECT = {

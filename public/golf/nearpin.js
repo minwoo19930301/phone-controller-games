@@ -6,7 +6,7 @@ import { analyzeSwing, summarize, renderPanel } from './analysis.js';
 import { displayMayReceiveFollow, displayShowsFollow } from './follow-through.mjs';
 import { clubById, recommendClub } from './clubs.js';
 import { createSettings, fields } from '/common/settings.js';
-import { levelOf, shapePower, shapeAngle, nominalSwing, WIND_MAX } from './assist.mjs';
+import { levelOf, shapePower, shapeAngle, nominalSwing, limitPower, WIND_MAX } from './assist.mjs';
 import { mountSoundGate } from './sound-gate.js';
 import { createGolfSfx } from './real-sfx.js';
 
@@ -528,7 +528,7 @@ function assistShot(d, club) {
   const auto = Boolean(d.auto); // 폰의 '탭으로 치기': 보통 세기로 똑바로
   const nominal = nominalSwing(clubById(club), true);
   let speed = auto ? nominal : Math.max(0, Number(d.speed) || 0);
-  if (!auto) speed = shapePower(speed, nominal, lv);
+  if (!auto) speed = limitPower(shapePower(speed, nominal, lv), nominal, Number(d.back) || 0);
   const face = auto ? 0 : Number(d.face) || 0;
   const path = auto ? 0 : Number(d.path) || 0;
   return { shown: { face, path }, speed, face: shapeAngle(face, lv), path: shapeAngle(path, lv) };

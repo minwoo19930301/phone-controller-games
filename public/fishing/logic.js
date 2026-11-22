@@ -105,6 +105,11 @@ export function coverAt(x, z) {
 }
 
 // 사람 수에 따른 낚싯대 자리(화면 가로 비율). 혼자면 오른손잡이처럼 가운데 오른쪽.
+// 멀리 나간 줄은 빨리 감깁니다: 10m 까지는 그대로, 그 뒤로 늘어 22m 에서 2배, 28m 이상 2.5배.
+export function farReel(dist) {
+  return 1 + clamp((Number(dist) - 10) / 12, 0, 1.5);
+}
+
 export function laneFracs(n) {
   if (n <= 1) return [0.62];
   return Array.from({ length: n }, (_, i) => (i + 1) / (n + 1));
@@ -142,17 +147,21 @@ export function aimFor(tipX, tipZ, x, z) {
 
 // ---------- 물고기 ----------
 export const SPECIES = {
-  lmb: { id: 'lmb', name: '큰입배스', en: 'LARGEMOUTH BASS', min: 0.35, max: 4.8, jump: 0.5, k: (w) => 0.3 + 0.19 * w, len: (w) => 0.22 + 0.165 * Math.cbrt(w) * 1.25 },
+  lmb: { id: 'lmb', name: '큰입배스', en: 'LARGEMOUTH BASS', min: 0.35, max: 5.6, jump: 0.5, k: (w) => 0.3 + 0.19 * w, len: (w) => 0.22 + 0.165 * Math.cbrt(w) * 1.25 },
   smb: { id: 'smb', name: '작은입배스', en: 'SMALLMOUTH BASS', min: 0.3, max: 2.6, jump: 0.65, k: (w) => 0.34 + 0.27 * w, len: (w) => 0.2 + 0.18 * Math.cbrt(w) * 1.2 },
+  crp: { id: 'crp', name: '잉어', en: 'CARP', min: 1.2, max: 9, jump: 0.12, k: (w) => 0.36 + 0.15 * w, len: (w) => 0.25 + 0.2 * Math.cbrt(w) * 1.2 },
+  brm: { id: 'brm', name: '참돔', en: 'RED SEA BREAM', min: 0.8, max: 5, jump: 0.18, k: (w) => 0.4 + 0.22 * w, len: (w) => 0.2 + 0.17 * Math.cbrt(w) * 1.2 },
+  lch: { id: 'lch', name: '미꾸라지', en: 'LOACH', min: 0.02, max: 0.09, jump: 0, k: (w) => 0.15 + 1.5 * w, len: (w) => 0.1 + 0.9 * w },
   blg: { id: 'blg', name: '블루길', en: 'BLUEGILL', min: 0.08, max: 0.6, jump: 0.04, k: (w) => 0.2 + 0.5 * w, len: (w) => 0.1 + 0.2 * Math.cbrt(w) }
 };
 export const BIG_KG = 3; // 이보다 무거우면 '큰 놈'(동시에 두 마리까지)
-export const MIX = { lmb: 0.45, smb: 0.2, blg: 0.35 };
+// 섞이는 비율(합 1). 잉어·참돔은 드물고 먼 물에, 미꾸라지는 가까운 바닥에 삽니다.
+export const MIX = { lmb: 0.36, smb: 0.16, blg: 0.24, crp: 0.1, brm: 0.06, lch: 0.08 };
 
 // 무게 뽑기. 큰입배스의 3kg 이상은 드뭅니다(약 15%).
 export function rollWeight(species, rand = Math.random, allowBig = true) {
   const sp = SPECIES[species] || SPECIES.lmb;
-  const ex = species === 'lmb' ? 2.8 : species === 'smb' ? 2.0 : 1.4;
+  const ex = species === 'lmb' ? 2.8 : species === 'smb' ? 2.0 : species === 'crp' || species === 'brm' ? 2.2 : 1.4;
   for (let i = 0; i < 8; i++) {
     const w = Math.round((sp.min + (sp.max - sp.min) * Math.pow(rand(), ex)) * 100) / 100;
     if (allowBig || w < BIG_KG) return w;
@@ -165,7 +174,7 @@ export function fishInfo(species, weight) {
 }
 // 큰 정도(0~1): 경계심, 깊이, 미끼를 무는 망설임에 씁니다.
 export function bigness(species, weight) {
-  if (species === 'blg') return 0;
+  if (species === 'blg' || species === 'lch') return 0;
   return clamp((weight - 1.2) / 3, 0, 1);
 }
 
@@ -279,7 +288,7 @@ export function stepFight(f, dt, input, rand = Math.random) {
   // 쉬움·보통: 물고기가 달리지 않고 줄이 팽팽하지 않으면 손을 쉬어도 천천히 감깁니다.
   if (A.autoReel && f.T < 0.7 && f.mode !== 'run') omega = Math.max(omega, A.autoReel);
   const tilt = clamp(Number(input.tilt) || 0, -1, 1);
-  const vReel = omega * LINE_PER_TURN * (A.reelDist || 1);
+  const vReel = omega * LINE_PER_TURN * (A.reelDist || 1) * farReel(f.D);
 
   let F;
   let vRun = 0;

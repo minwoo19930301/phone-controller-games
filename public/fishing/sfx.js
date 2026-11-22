@@ -217,8 +217,9 @@ setInterval(() => {
 
 export const sfx = {
   // 통기타 한 줄 뜯기(어울리는 녹음이 없어 합성 유지)
-  join: () => { if (!live()) return; pluck(actx, master, 392); pluck(actx, master, 587, { when: 0.1 }); },
-  leave: () => { if (!live()) return; pluck(actx, master, 494); pluck(actx, master, 330, { when: 0.12 }); },
+  // 들어오고 나갈 때의 소리는 높게 찢어지는 소리로 들린다는 피드백이 있어 뺐습니다(11/23).
+  join: () => {},
+  leave: () => {},
   // 던지기: 휙 + 릴에서 줄 풀리는 소리가 한 녹음에 같이 있음. 세게 던질수록 크고 약간 높게
   whoosh: (p = 0.6) => {
     if (P('swing/cast', { gain: G.cast * (0.55 + 0.45 * p), rate: 0.94 + 0.14 * p })) return;
