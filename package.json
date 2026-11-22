@@ -1,7 +1,8 @@
 {
   "name": "phone-controller-games",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "license": "Apache-2.0",
   "description": "스마트폰을 컨트롤러로 쓰는 큰 화면 모션 게임 (첫 종목: 홈런 더비)",
   "main": "server.js",
   "type": "commonjs",
