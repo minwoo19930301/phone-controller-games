@@ -2,11 +2,23 @@
 (function (root) {
   'use strict';
 
+  // 무료 서버는 요청을 받으면 깨어나 15분 동안 그 워크스페이스의 무료 시간을 씁니다.
+  // 서버가 많을 때 고를 때마다 전부 깨우지 않도록, 그중 몇 대만 무작위로 골라 방 수를 묻습니다.
+  const PROBE_COUNT = 3;
+  function pickProbes(servers, count, random) {
+    if (servers.length <= count) return servers;
+    const pool = servers.slice();
+    const picked = [];
+    while (picked.length < count) picked.push(pool.splice(Math.floor(random() * pool.length), 1)[0]);
+    return picked;
+  }
+
   async function chooseServer(servers, options = {}) {
     const fetcher = options.fetcher || fetch;
     const random = options.random || Math.random;
     const timeout = options.timeout || 3000;
-    const results = await Promise.all(servers.map(async (server) => {
+    const probes = pickProbes(servers, options.probe || PROBE_COUNT, random);
+    const results = await Promise.all(probes.map(async (server) => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeout);
       try {
@@ -22,7 +34,8 @@
       }
     }));
     const available = results.filter(Boolean);
-    if (!available.length) return { server: servers[0], fallback: true };
+    // 아무도 제때 답하지 않으면 방금 깨우기 시작한 첫 후보로 갑니다(목록이 짧으면 설정의 첫 서버).
+    if (!available.length) return { server: probes[0], fallback: true };
     const fewest = Math.min(...available.map((entry) => entry.rooms));
     const tied = available.filter((entry) => entry.rooms === fewest);
     return { server: tied[Math.floor(random() * tied.length)].server, fallback: false };
@@ -79,7 +92,7 @@
       overlay.hidden = false;
       overlay.style.display = 'grid';
       confirm.focus();
-      // Start checking both servers while the notice is visible. The lookup
+      // Start checking the sampled servers while the notice is visible. The lookup
       // ends before the two-second automatic transition, even for sleeping servers.
       const selection = chooseServer(servers, { timeout: 1800 });
       const notice = new Promise((resolve) => {

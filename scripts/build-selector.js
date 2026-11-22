@@ -4,7 +4,13 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 const output = path.join(root, 'dist-selector');
-const defaultServers = 'https://phone-controller-games.onrender.com,https://phone-controller-games-2.onrender.com,https://phone-controller-games-replica.onrender.com';
+// 무료 Render 서버 10대(워크스페이스 셋에 나눠 둠). 선택창은 고를 때마다 이 중 3대만 골라 방 수를 묻습니다.
+const defaultServers = [
+  'https://phone-controller-games.onrender.com',
+  'https://phone-controller-games-2.onrender.com',
+  'https://phone-controller-games-replica.onrender.com',
+  ...[3, 4, 5, 6, 7, 8, 9].map((n) => `https://phone-controller-games-${n}.onrender.com`),
+].join(',');
 const configured = process.env.RENDER_GAME_SERVERS || defaultServers;
 const servers = [...new Set(configured.split(',').map((s) => {
   const value = s.trim();

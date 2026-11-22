@@ -36,6 +36,28 @@ test('single server remains usable and bad HTTP responses are ignored', async ()
   assert.deepEqual(await chooseServer([servers[0]], { fetcher: async () => ({ ok: false }) }), { server: servers[0], fallback: true });
 });
 
+test('with many servers only a random few are asked, and the fallback is one of them', async () => {
+  const many = Array.from({ length: 10 }, (_, i) => `https://s${i}.example`);
+  const asked = [];
+  // s7 is the least loaded overall, but only the sampled servers may be chosen.
+  const load = (url) => (url.includes('s7') ? 0 : Number(url.match(/s(\d)/)[1]) + 1);
+  const result = await chooseServer(many, { random: () => 0, fetcher: async (url) => { asked.push(url); return response(load(url)); } });
+  assert.equal(asked.length, 3);
+  assert.deepEqual(asked.map((u) => u.replace('/api/load', '')), [many[0], many[1], many[2]]);
+  assert.deepEqual(result, { server: many[0], fallback: false });
+  const spread = new Set();
+  let seed = 1;
+  const random = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let i = 0; i < 60; i++) spread.add((await chooseServer(many, { random, fetcher: async () => response(0) })).server);
+  assert.ok(spread.size >= 8, `expected rooms to spread over most servers, got ${spread.size}`);
+  const sleeping = (url, { signal }) => new Promise((resolve, reject) => { asked.push(url); signal.addEventListener('abort', () => reject(Error('timeout'))); });
+  asked.length = 0;
+  const fallback = await chooseServer(many, { random: () => 0.5, fetcher: sleeping, timeout: 10 });
+  assert.equal(fallback.fallback, true);
+  assert.equal(asked.length, 3);
+  assert.equal(`${fallback.server}/api/load`, asked[0]);
+});
+
 function makePage(fetcher) {
   let click, navigated;
   let nextTimer = 0;

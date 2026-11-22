@@ -211,9 +211,18 @@ Pages 프로젝트는 직접 업로드 방식이라 Git 푸시만으로 자동 �
 선택창 변경 후 `npm run build:selector`를 실행한 다음 `wrangler pages deploy
 dist-selector --project-name phone-controller-games --branch main`으로 배포합니다.
 기존 Workers 주소도 갱신할 때는 `wrangler deploy`를 실행합니다.
-기본 설정은 `phone-controller-games`, `phone-controller-games-2`,
-`phone-controller-games-replica` 무료 Render 서버 세 대입니다. 추가 워크스페이스에
-서버 하나를 만들 때는 `render-replica.yaml` Blueprint를 사용할 수 있습니다.
+기본 설정은 무료 Render 서버 10대입니다. `phone-controller-games`, `phone-controller-games-2`,
+`phone-controller-games-replica`, 그리고 `phone-controller-games-3` ~ `-9` 입니다.
+`render.yaml` Blueprint가 관리하는 것은 앞의 두 대뿐이고, 나머지는 다른 워크스페이스에
+같은 설정(Node 22, `npm ci --omit=dev`, `npm start`, `/healthz`, main 자동 배포)으로 따로 만든
+서비스입니다. 추가 워크스페이스에 서버 하나를 만들 때는 `render-replica.yaml` Blueprint를
+사용할 수 있습니다.
+
+Render 무료 플랜은 워크스페이스마다 한 달 750시간의 무료 인스턴스 시간을 그 안의 무료
+서비스가 나눠 쓰고, 다 쓰면 그 워크스페이스의 무료 서비스가 다음 달까지 모두 멈춥니다.
+잠든 서버도 요청을 받으면 깨어나 15분 동안 시간을 쓰므로, 선택창은 게임을 고를 때마다
+10대 전부가 아니라 무작위로 고른 3대에만 방 수를 묻습니다(`scripts/selector-router.js`의
+`PROBE_COUNT`).
 
 서버 목록을 변경하려면 빌드 환경 변수 `RENDER_GAME_SERVERS`에 HTTPS 서버 주소를
 쉼표로 구분해 지정하고 선택창을 다시 빌드·배포합니다.
@@ -221,10 +230,10 @@ dist-selector --project-name phone-controller-games --branch main`으로 배포�
 주소에는 경로나 쿼리를 넣지 않습니다. 설정을 바꾼 뒤에는 새 빌드가 필요합니다.
 
 모든 Render 서버에 이 버전의 `/api/load`를 먼저 배포해야 합니다. 사용자가 게임을 고르면
-브라우저에서 각 서버의 익명 활성 화면 수를 동시에 조회해 가장 적은 서버를 선택합니다.
+브라우저에서 무작위로 고른 서버 3대의 익명 활성 화면 수를 동시에 조회해 가장 적은 서버를 선택합니다.
 동률이면 무작위로 선택하고, 1.8초 안에 응답하지 않거나 잘못 응답한 서버는 제외합니다.
 서버가 켜지는 데 시간이 걸릴 수 있다는 안내는 확인을 누르거나 2초가 지나면 닫힙니다.
-모두 응답하지 않으면 목록의 첫 번째 서버로 이동합니다. 서버가 잠들어 있다면
+고른 서버가 모두 응답하지 않으면 그중 첫 번째(이미 깨우기 시작한 서버)로 이동합니다. 서버가 잠들어 있다면
 기동을 기다려야 하며 장애 중이면 연결이 실패할 수 있습니다. 조회는 절전 서버를 깨울 수
 있고, 기존 서버에 새 endpoint가 아직 없다면 폴백으로 연결됩니다. 서버들이 동시에 선택되면
 같은 시점의 방 수를 보고 같은 서버를 고를 수 있습니다.
