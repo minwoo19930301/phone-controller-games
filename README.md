@@ -1,257 +1,155 @@
 # Phone Controller Games
 
+<p align="center">
+  <img src="public/previews/hero-premise.png" alt="Big Screen TV/PC + Phone Motion Controller Premise" width="100%">
+</p>
+
 <!-- LIVE-LINK:START -->
 <p align="center">
-  <a href="https://phone-controller-games.pages.dev/"><img alt="바로 가기: phone-controller-games.pages.dev" src="https://img.shields.io/badge/%E2%96%B6%20%EB%B0%94%EB%A1%9C%20%EA%B0%80%EA%B8%B0-phone--controller--games.pages.dev-ff5a5f?style=for-the-badge"></a>
+  <a href="https://phone-controller-games.pages.dev/"><img alt="Play Now: phone-controller-games.pages.dev" src="https://img.shields.io/badge/%E2%96%B6%20Play%20Now-phone--controller--games.pages.dev-ff5a5f?style=for-the-badge"></a>
 </p>
 <!-- LIVE-LINK:END -->
 
-스마트폰을 컨트롤러로 쓰는 큰 화면 모션 게임입니다. 앱 설치 없이 폰 브라우저의 동작 센서를 씁니다.
-웹게임 모음(`blue-shirt-arcade`)과 저장소·서버·배포를 분리했습니다.
+**Turn any smartphone into a wireless motion & touch controller for big-screen 3D multiplayer games.**  
+No app install required — open the game on a TV or laptop, scan the QR code with your phone browser, and play together.
 
-## 바로 하기
+---
 
-**👉 https://phone-controller-games.onrender.com**
+## How It Works
 
-1. TV·노트북 같은 큰 화면에서 위 주소를 열고 종목을 고릅니다.
-2. 폰 카메라로 화면의 QR을 찍으면 바로 컨트롤러가 됩니다. 앱 설치는 필요 없습니다.
-3. 한 방에는 최대 4명(좀비 건과 줄다리기는 8명)까지 같이 할 수 있습니다. 큰 화면을 각각 열면 같은 게임도 별도 방으로 플레이합니다.
+1. **Open on a Big Screen** — Visit [**phone-controller-games.pages.dev**](https://phone-controller-games.pages.dev/) on your TV, monitor, or laptop and pick a game.
+2. **Scan the QR Code** — Point your phone camera at the screen QR code to join the room instantly in your mobile browser.
+3. **Play with Motion & Touch** — Your phone streams gyroscope/accelerometer & touch input at ~60Hz while the big screen renders the 3D action for **1–4 players** (up to **8 players** in Fishing, Zombie Gun, and Tug of War).
 
-경기 중에도 큰 화면의 참가 QR을 찍어 빈자리에 들어올 수 있습니다. 게임에 따라 현재 경기에 바로 들어가거나 진행 중인 랠리·촬영이 끝난 뒤 합류합니다. 카트, 리듬과 골프 등에서는 중도 참가를 결과에 구분해 표시합니다.
+> **Note:** Game servers run on free Render instances and sleep when idle; first load may take ~30–60 seconds to wake up.
 
-> 무료 서버라 한동안 아무도 안 쓰면 잠듭니다. 첫 접속에 1분 가까이 걸릴 수 있습니다.
+---
 
-종목은 `/`에서 고릅니다. **골프**에서는 3홀 코스, 니어핀, 퍼팅 챌린지를 즐길 수 있습니다.
+## Games (16 Titles)
 
-## 골프
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="public/previews/golf.gif" alt="Golf" width="100%"><br>
+      <strong>Golf</strong> (<code>/golf/</code>) • 1–4P<br>
+      3-hole courses, Near-Pin, and Putting Challenge. Hold your phone like a club, press Address, and swing.
+    </td>
+    <td width="50%" valign="top">
+      <img src="public/previews/baseball.gif" alt="Home Run Derby & Duel" width="100%"><br>
+      <strong>Baseball: Home Run Derby & Duel</strong> (<code>/baseball/</code>) • 1–4P<br>
+      Swing for the fences or face off 1v1 pitcher vs. batter (fastball, slider, curve, forkball).
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="public/previews/pingpong.gif" alt="Ping Pong" width="100%"><br>
+      <strong>Ping Pong</strong> (<code>/pingpong/</code>) • 1–4P<br>
+      Split-screen first-person table tennis with slow-mo timing rings, drives, cuts, and side spin.
+    </td>
+    <td width="50%" valign="top">
+      <img src="public/previews/tennis.gif" alt="Tennis" width="100%"><br>
+      <strong>Tennis</strong> (<code>/tennis/</code>) • 1–4P<br>
+      Singles or 2v2 doubles. Auto-positioning lets you focus on forehand/backhand topspin and slices.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="public/previews/bowling.gif" alt="Bowl Night" width="100%"><br>
+      <strong>Bowl Night</strong> (<code>/bowling/</code>) • 1–4P<br>
+      Ten-pin bowling with custom pin physics, wrist-twist hook curves, and 5/10-frame modes.
+    </td>
+    <td width="50%" valign="top">
+      <img src="public/previews/archery.gif" alt="Archery" width="100%"><br>
+      <strong>Archery</strong> (<code>/archery/</code>) • 1–4P<br>
+      Aim with your phone gyro, pull back the bowstring on-screen, and compensate for wind & heartbeat sway.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="public/previews/saber.gif" alt="Beam Blade" width="100%"><br>
+      <strong>Beam Blade</strong> (<code>/saber/</code>) • 1–4P<br>
+      Deflect and reflect incoming drone blaster bolts with a 1:1 gyro-tracked lightsaber and phone audio.
+    </td>
+    <td width="50%" valign="top">
+      <img src="public/previews/gun.gif" alt="Zombie Gun Arcade" width="100%"><br>
+      <strong>Zombie Gun Arcade</strong> (<code>/gun/</code>) • 1–8P<br>
+      Point-and-shoot gyro light-gun co-op against waves of zombies; shake or tap to reload.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="public/previews/fishing.gif" alt="Bass Fishing" width="100%"><br>
+      <strong>Bass Fishing</strong> (<code>/fishing/</code>) • 1–8P<br>
+      Drop-in lake fishing with no lobby timer — cast, wait for the bite haptic, hookset, and reel in.
+    </td>
+    <td width="50%" valign="top">
+      <img src="public/previews/kart.gif" alt="Kart Race" width="100%"><br>
+      <strong>Kart Race</strong> (<code>/kart/</code>) • 1–4P<br>
+      Tilt your phone like a steering wheel to drift around the track and fire items.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="public/previews/airhockey.gif" alt="Air Hockey" width="100%"><br>
+      <strong>Air Hockey</strong> (<code>/airhockey/</code>) • 1–4P<br>
+      Drag your phone screen as a low-latency touch mallet in 1v1 or 2v2 arcade matches.
+    </td>
+    <td width="50%" valign="top">
+      <img src="public/previews/tugofwar.gif" alt="Tug of War" width="100%"><br>
+      <strong>Tug of War</strong> (<code>/tugofwar/</code>) • 1–8P<br>
+      Team rhythm-pulling battle — yank in sync with the chant for team combo bonuses.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="public/previews/rhythm.gif" alt="Rhythm Step" width="100%"><br>
+      <strong>Rhythm Step</strong> (<code>/rhythm/</code>) • 1–4P<br>
+      Motion & tap rhythm action synced to BPM tracks with real-time judgment feedback.
+    </td>
+    <td width="50%" valign="top">
+      <img src="public/previews/orchestra.gif" alt="Orchestra" width="100%"><br>
+      <strong>Orchestra</strong> (<code>/orchestra/</code>) • 1–4P<br>
+      Perform different instruments together in a 3D concert hall following the conductor's tempo.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="public/previews/putting.gif" alt="Putting Challenge" width="100%"><br>
+      <strong>Putting Challenge</strong> (<code>/putting/</code>) • 1–4P<br>
+      Dedicated 3-hole sloped green putting mode with pendulum stroke speed sensing.
+    </td>
+    <td width="50%" valign="top">
+      <img src="public/previews/photobooth.gif" alt="Photo Booth" width="100%"><br>
+      <strong>Photo Booth</strong> (<code>/photobooth/</code>) • 1–4P<br>
+      4-cut party photo booth controlled from phones with live drawing, stickers, and instant download.
+    </td>
+  </tr>
+</table>
 
-`/golf/`에서 5개 코스와 난이도를 골라 티샷부터 퍼팅까지 3홀을 진행합니다. 골프 대기실에서 니어핀과 퍼팅 챌린지 모드로 이동할 수도 있습니다. 예전 퍼팅 주소(`/putting/`)는 골프 대기실로 연결됩니다.
+---
 
-### 니어핀 모드
+## Architecture
 
-파3(핀까지 146m) 한 홀에서 3라운드 동안 핀에 가장 가깝게 붙인 사람이 이깁니다.
+- **Relay Server (`server.js`)**: Lightweight Node.js + WebSocket server managing 4-letter room codes, 15s reconnect grace windows, QR join URLs, and volatile motion event relaying (all game physics & judgment run client-side).
+- **Big Screen & Phone Views (`public/<game>/` & `public/play/<game>/`)**: Built with bundled `three` (3D rendering) and local fonts — zero external CDN dependencies.
+- **Latency Compensation**: Both screens and phones measure RTT every 1.5s so swing/hit timestamps are normalized (`arrival - phoneRTT/2 - screenRTT/2 - sensorDelay`) without clock sync.
 
-1. 내 차례가 되면 폰 화면을 좌우로 밀어 방향(±25°)을 맞추고 클럽(5I·7I·9I·PW)을 고릅니다.
-2. 폰 아래쪽을 그립처럼 쥡니다. 폰 윗부분이 공을, 화면이 목표를 보게 하고 **어드레스**를 누릅니다. 3초 뒤 그 자세가 기준이 됩니다.
-3. 실제로 치듯 휘두릅니다. 폰 방향이 그대로 클럽 방향이 되어, 휘두른 궤적대로 클럽이 움직입니다.
+---
 
-- 폰은 `deviceorientation` 방향을 계속(약 60Hz) 보내고, 서버는 밀리면 버리는(volatile) 방식으로 중계합니다.
-- 임팩트는 폰이 직접 잡습니다. 백스윙 → 다운스윙 뒤 어드레스 방향에 가장 가까워진 순간입니다.
-  그때의 회전 속도가 클럽 스피드, 화면 방향이 페이스(열림/닫힘), 클럽 끝이 움직이는 방향이 스윙 궤도(인-아웃/아웃-인)가 됩니다.
-- 공은 공기 저항, 백스핀 양력, 페이스와 궤도 차이로 생기는 휨, 바람을 받아 날아가고, 표면(그린·프린지·페어웨이·러프·벙커·물)에 따라 튀고 구릅니다.
-- 센서가 없는 PC에서는 폰 화면의 **시험 스윙** 버튼이 정해진 궤적으로 스윙을 흉내 냅니다.
-- 폰 주소 끝에 `&debug` 를 붙이면 임팩트 값이 화면 아래에 보입니다.
-
-실폰 검증 전이라 바뀔 수 있는 값: 클럽 스피드 환산(`회전 속도 × 1.55m`), 임팩트 판정 각도(45°), 폰 방향 → 세계 좌표 변환.
-
-## 탁구
-
-1인칭 탁구입니다. 몸과 손은 보이지 않고 탁구채만 보입니다. 1~4명이 하고, 2명 이상이면 화면이 나뉩니다.
-
-- 들어온 순서대로 1P 대 2P 가 A 테이블, 3P 대 4P 가 B 테이블에서 칩니다. 혼자 남으면 CPU 와 칩니다.
-- 2명은 좌우 반반, 3·4명은 2×2 로 나뉩니다. 3명일 때 남는 칸은 경기장 전체 화면과 두 테이블 점수입니다.
-- 공이 내 쪽으로 오면 치기 직전에 슬로우가 걸리고, 공 둘레 링이 줄어듭니다. 링이 공에 닿을 때 휘두르면 됩니다. 폰은 그때 진동하고 "지금!"을 띄웁니다.
-- 탁구채 위치는 자동으로 맞춰집니다. 사람은 타이밍과 스윙만 하면 됩니다. 세기로 깊이, 타이밍으로 좌우가 정해집니다.
-- 쓸어 올리면 드라이브(톱스핀), 깎아 내리면 커트(백스핀), 손목을 비틀면 사이드 스핀이 걸립니다.
-- 7점 선승, 2점 차, 서브는 2점마다 바뀝니다.
-
-시험: 큰 화면 `?bots=N&autostart` 로 봇을 붙여 화면 분할을 볼 수 있고, Space·T·B 키가 스윙·드라이브·커트입니다.
-실폰 검증 전이라 바뀔 수 있는 값: 스윙 문턱(300°/s), 사이드 스핀 판정(가속이 작은 비틀기), 백스윙 거르기(0.1m/s).
-
-## 투타 대결 (야구)
-
-야구 대기실에서 `2` 를 누르거나 폰에서 **투타 대결**을 고릅니다. 2~4명이 합니다.
-
-- 한 명은 폰으로 던지고 한 명은 칩니다. 3아웃이나 6타석이면 공수 교대, 한 사람당 두 이닝씩 쳐서 득점으로 겨룹니다.
-- 투수는 폰 화면의 존을 끌어서 코스를 정하고, 폰을 세로로 쥐고 공처럼 던집니다.
-- 구질은 던지는 손목 동작으로 정해집니다. 세게 = 직구, 손목 비틀기 = 슬라이더, 앞으로 꺾기 = 커브, 손목 고정 = 포크볼.
-- 안 휘두른 공은 존 안이면 스트라이크, 밖이면 볼입니다. 타구는 비거리·발사각·야수 거리로 안타·2루타·3루타·홈런·아웃이 정해집니다.
-- 센서가 안 되는 폰은 구질 버튼 4개로 던집니다. 폰 주소 끝에 `&debug` 를 붙이면 던질 때마다 측정값과 판정이 보입니다. 구질 문턱은 실폰으로 맞춰야 합니다.
-
-## 광선검 (BEAM BLADE)
-
-폰을 칼자루처럼 세워 쥐면 화면의 광선검이 폰 방향을 그대로 따라갑니다. 1~4명, 사람마다 화면이 나뉩니다.
-
-- 드론이 쏘는 광탄을 칼날로 막으면 10점, 휘둘러 드론 쪽으로 튕겨 보내면 격추 보너스 40점입니다.
-- 광탄이 몸에 닿기 직전 그 사람 칸만 느려지고 폰이 진동합니다.
-- 폰 스피커에서 칼 웅웅 소리가 나고, 휘두르는 속도에 따라 높아집니다. iPhone은 무음 스위치를 끄면 들립니다.
-- 90초 동안 버티며 웨이브가 18초마다 세집니다. 체력이 다 떨어지면 쓰러집니다.
-
-## 배스 낚시
-
-1인칭으로 선착장 끝에 서서 맑은 호수를 내려다봅니다. 물속에 물고기 12마리가 보이고, 1~4명이 같은 물에서 동시에 낚시합니다.
-대기실·타이머가 없습니다. 오른쪽 위 QR은 늘 떠 있어서 언제든 찍고 바로 합류합니다.
-
-1. 폰이 가리키는 방향이 물 위에 점선으로 보입니다. 노리는 물고기 쪽으로 겨누고 휙 던지면 캐스팅입니다.
-2. 물고기가 다가와 톡톡 건드릴 때는 참고, 찌가 쑥 들어가면(폰 진동) 위로 확 들어 챔질합니다. 일찍 채면 도망갑니다.
-3. 폰 화면의 릴을 돌려 감습니다. 살짝 감으면 미끼가 툭 움직여 물고기를 꾑니다.
-
-## 테니스
-
-폰이 라켓입니다. 선수는 알아서 공까지 달려가고, 공이 오면 슬로우와 링이 뜹니다. 1:1 단식, 3~4명이면 2:2 복식입니다.
-
-- 포핸드·백핸드는 폰 방향으로 자동으로 갈립니다.
-- 아래에서 위로 쓸어 올리면 탑스핀, 위에서 깎아 내리면 슬라이스, 앞으로 곧게 치면 플랫입니다.
-- 폰은 공이 오면 '준비'를, 타점 직전에 '지금!'을 띄웁니다. 2게임 선승, 15·30·40·듀스입니다.
-
-## 에어하키
-
-폰 화면이 말렛 손잡이입니다. 폰 화면을 끌면 테이블의 말렛이 따라 움직입니다. 1:1, 3~4명이면 2:2이고 7점 선승입니다.
-
-### 퍼팅 챌린지 모드
-
-경사진 그린 3홀에서 가장 적은 타수로 넣는 사람이 이깁니다.
-
-1. 폰 화면을 밀어 방향을 맞춥니다. 큰 화면 왼쪽 아래에 거리·높낮이·옆 경사·그린 빠르기가 나옵니다.
-2. 폰을 퍼터처럼 아래로 쥐고 **어드레스**를 누릅니다.
-3. 시계추처럼 뒤로 뺐다가 밀면, 미는 속도가 공 속도가 됩니다.
-
-## 볼링 (BOWL NIGHT)
-
-`/bowling/` · 1~4명이 차례로 굴립니다. 기본 5프레임, 설정에서 10프레임으로 바꿀 수 있습니다.
-
-- 폰 화면을 좌우로 밀어 서는 자리를 정한 뒤, 폰을 공처럼 쥐고 뒤로 뺐다가 앞으로 휘둘러 굴립니다. 손목을 비틀면 훅이 걸립니다.
-- 점수는 실제 텐핀 규칙(스트라이크·스페어·마지막 프레임 보너스)을 따릅니다. 쉬움은 방향 보정과 안내선, 범퍼 옵션이 있습니다.
-- 핀은 직접 만든 가벼운 물리(`public/bowling/physics.mjs`)로 쓰러집니다. 포켓에 맞으면 스트라이크, 한가운데 직구는 스플릿이 잘 납니다.
-- 시험: 큰 화면 `?bots=N&autostart&fast=4`, 폰 `&debug`(센서 없이 슬라이더로 시험 투구). `node --test scripts/test-bowling-scoring.mjs scripts/test-bowling-physics.mjs`
-
-## 양궁
-
-`/archery/` · 1~4명이 한 발씩 돌아가며 쏩니다. 3엔드(엔드마다 3발) 기본, 5엔드 선택.
-
-- 폰을 활처럼 세워 쥐면 폰 방향이 조준경이 됩니다. 화면의 시위를 아래로 끌어 당겼다가 손을 떼면 발사입니다.
-- 끝까지 당긴 채 오래 버티면 팔이 떨리고 폰에 심박 진동이 옵니다. 심박 직후 숨 고르기 순간이 가장 안정적입니다.
-- 엔드마다 바람이 바뀝니다. 풍향계와 깃발을 보고 오조준합니다. 쉬움 30m(예상 낙점 표시) / 보통 50m / 어려움 70m(돌풍).
-- 총점으로 겨루고, 같으면 X 개수 → 10점 개수 순입니다.
-- 시험: 큰 화면 `?bots=N&autostart&speed=N`, 센서 없는 PC 는 조준 판과 시위를 끌어서 쏩니다. `node --test scripts/test-archery.mjs`
-
-## 줄다리기
-
-`/tugofwar/` · 1~8명이 청팀·백팀으로 나뉘어 3판 2선승으로 겨룹니다. 빈자리는 CPU 가 채워서 혼자서도 할 수 있습니다.
-
-- 폰을 두 손으로 쥐고 "하나, 둘, 영차!" 구령의 **영차** 박에 가슴 쪽으로 확 당깁니다.
-- 박에 맞을수록(PERFECT/GOOD) 힘이 세고, 같은 편이 같은 순간에 당기면 **한 몸** 보너스가 붙습니다. 박자를 무시하고 마구 당기면 체력만 빠집니다.
-- 판이 끝나기 10초 전부터는 두 배 빠른 막판 스퍼트입니다. 선에 몰린 팀은 "버티기" 신호에 폰을 가만히 두면 상대 힘을 반으로 줄입니다.
-- 시험: 큰 화면 `?bots=N&autostart`(`&fast=8&dur=20` 로 빨리 감기), 폰은 센서가 없으면 "당겨!" 버튼. `node --test scripts/test-tugofwar.mjs`
-
-### 공통 시험 방법
-
-큰 화면 주소에 `?bots=N` 을 붙이면 폰 없이 봇이 자리를 채웁니다. 종목마다 키보드 시험 키가 대기실 아래에 적혀 있습니다.
-폰 주소에 `&debug` 를 붙이면 센서 판정값이 보입니다. 동작 판정 문턱값은 모두 실폰 검증 전입니다.
-
-## 홈런 더비
-
-1. PC나 TV에서 `/` 를 엽니다. 홈런 더비 대기실과 참가 QR이 뜹니다.
-2. 폰으로 QR을 찍고 **시작하기**를 누릅니다. iPhone은 동작 접근을 허용합니다.
-3. 1~4명이 들어오면 폰의 **게임 시작** 또는 PC의 Enter로 시작합니다.
-4. 폰을 두 손으로 세로로 쥐고, 공이 홈플레이트에 오는 순간 휘두릅니다.
-
-- 한 사람당 10구씩 차례로 칩니다. 홈런 수, 같으면 최장 비거리로 순위를 정합니다.
-- 빨리 치면 당겨서 좌측, 늦으면 밀어서 우측으로 갑니다. ±35ms 안이면 정타입니다.
-- 스윙 세기(회전 속도와 가속도)가 타구 속도가 됩니다.
-- 맞으면 폰에서 타구음이 나고 진동합니다. iPhone은 진동을 지원하지 않아 소리와 화면 깜빡임만 납니다.
-- 스윙마다 화면 아래에 타이밍(빠름/늦음 ms)을 보여 줍니다.
-
-### 지연 보정
-
-폰과 큰 화면은 각자 서버까지 왕복 시간을 1.5초마다 잽니다. 스윙이 도착하면 화면은
-`도착 시각 − 폰 왕복/2 − 화면 왕복/2 − 센서 측정 시간` 을 실제로 휘두른 순간으로 보고 판정합니다. 시계를 맞출 필요가 없습니다.
-
-## 구조
-
-| 파일 | 하는 일 |
-| --- | --- |
-| `server.js` | 방 코드(4글자) 만들기, 방마다 4자리, 15초 재접속 자리 유지, 폰↔화면 이벤트 중계, 참가 QR |
-| `public/play/` | 야구 폰 컨트롤러. 타자 스윙 감지, 투수 조준·구질 판정 |
-| `public/baseball/` | 야구 큰 화면. `scene.js` 3D 경기장, `game.js` 홈런 더비·투타 대결 진행, `duel.js` 볼카운트·주자·타구 판정 |
-| `public/golf/` | 골프 큰 화면. `course.js` 지형·표면, `scene.js` 하늘·코스·골퍼·아이언, `game.js` 차례·타구·점수 |
-| `public/play/golf/` | 골프 폰 컨트롤러. 방향 스트리밍, 터치 조준, 임팩트 감지 |
-| `public/pingpong/`, `public/play/pingpong/` | 탁구. 화면 분할(setScissor), 슬로우·타이밍 판정, 슈팅법 리턴, 스핀 물리 |
-| `public/saber/`, `public/play/saber/` | 광선검. 칼날 캡슐 충돌, 광탄 반사·격추, 폰 웅웅 소리 |
-| `public/fishing/`, `public/play/fishing/` | 배스 낚시. 호수·수면, 입질·파이팅 계산(`logic.js`), 물고기 모델 |
-| `public/tennis/`, `public/play/tennis/` | 테니스. 선수 자동 이동, 포·백핸드, 탑스핀·슬라이스, 단식·복식 |
-| `public/airhockey/`, `public/play/airhockey/` | 에어하키. 퍽 물리, 터치 말렛 |
-| `public/putting/`, `public/play/putting/` | 골프의 퍼팅 챌린지 모드. 경사 그린 3홀과 진자 스트로크 |
-| `public/orchestra/`, `public/play/orchestra/` | 오케스트라. `hall.js` 공연장·단원·카메라, `props.js` 악기·의자·보면대 모형(재질별로 합친 메시를 복제), `parts.js` 악기별 악보 |
-| `public/golf/tee-props.js` | 골프 경기 화면의 티 소품(골프백·카트·홀 안내판·티 꽂이). 경기 화면 코스 품질은 `?q=low|medium|high` 로 고정 가능 |
-| `public/bowling/`, `public/play/bowling/` | 볼링. `scoring.mjs` 점수, `physics.mjs` 공·핀 물리, 레인 반사 |
-| `public/archery/`, `public/play/archery/` | 양궁. `scoring.mjs` 과녁 점수, `ballistics.mjs` 화살 탄도·바람, 1인칭 활과 과녁 확대 창 |
-| `public/tugofwar/`, `public/play/tugofwar/` | 줄다리기. `sim.mjs` 구령·판정·힘·체력 계산, 운동회 장면 |
-| `scripts/test-rooms.js` | 폰 없이 방·자리·중계 규칙 검사 |
-
-종목을 더할 때는 `server.js` 의 `GAMES` 에 오가는 이벤트 이름을 한 줄 추가하고 `public/<종목>/` 을 만듭니다.
-서버는 판정을 하지 않고 중계만 합니다.
-
-3D 엔진(three)과 글꼴(Pretendard, Anton)은 npm 패키지에서 바로 내보냅니다. 외부 CDN을 쓰지 않습니다.
-
-## 로컬 실행
+## Local Development & Testing
 
 ```bash
 npm install
-npm start
+npm start        # Starts server at http://localhost:3000
+npm test         # Runs room, relay, and game physics tests
 ```
 
-`http://localhost:3000` 을 엽니다. 폰 동작 센서는 https 주소에서만 켜지므로, 로컬에서는 폰 화면의
-**테스트 스윙** 버튼이나 큰 화면의 Space 키로 시험합니다.
+- **Test without phones**: Append `?bots=N&autostart` to any big-screen URL to spawn bots and use keyboard controls.
+- **Test without gyro sensors**: Mobile motion APIs require HTTPS (`DeviceOrientationEvent`); on desktop/HTTP, append `&debug` to phone URLs or use the built-in test-swing / touch fallback buttons.
 
-```bash
-npm test
-```
+---
 
-## Render 배포
+## Deployment
 
-배포 주소: https://phone-controller-games.onrender.com
-
-저장소의 `render.yaml` 로 Blueprint 배포를 합니다. Render 대시보드에서 New → Blueprint → 이 저장소를 고르면 됩니다.
-main 에 푸시하면 자동으로 다시 배포됩니다(Auto-Deploy: On Commit).
-main 이 아닌 브랜치를 올려도 GitHub Actions(`auto-merge`)가 main 에 합친 결과로 테스트를 돌리고, 통과하면 main 에 올린 뒤 그 브랜치를 지웁니다. 합치지 않을 실험 브랜치는 `wip/` 로 시작합니다.
-무료 플랜은 15분 동안 접속이 없으면 잠들어서, 첫 접속에 30초쯤 걸립니다.
-방 정보는 서버 메모리에만 있어서 서버가 다시 뜨면 큰 화면을 새로고침해 새 방을 만듭니다.
-
-## Cloudflare 게임 선택창
-
-`npm run build:selector`는 선택 화면과 미리보기, 글꼴만 정적 파일로 만듭니다.
-선택창은 Cloudflare Pages의 https://phone-controller-games.pages.dev/ 에 배포합니다.
-기존 Workers 주소도 같은 파일로 배포해 이전 링크를 유지합니다. 게임 화면과 실시간
-서버는 Render에서 계속 실행됩니다.
-Pages 프로젝트는 직접 업로드 방식이라 Git 푸시만으로 자동 갱신되지 않습니다.
-선택창 변경 후 `npm run build:selector`를 실행한 다음 `wrangler pages deploy
-dist-selector --project-name phone-controller-games --branch main`으로 배포합니다.
-기존 Workers 주소도 갱신할 때는 `wrangler deploy`를 실행합니다.
-기본 설정은 무료 Render 서버 20대입니다. `phone-controller-games`, `phone-controller-games-2`,
-`phone-controller-games-replica`, 그리고 `phone-controller-games-3` ~ `-19` 입니다.
-`render.yaml` Blueprint가 관리하는 것은 앞의 두 대뿐이고, 나머지는 다른 워크스페이스에
-같은 설정(Node 22, `npm ci --omit=dev`, `npm start`, `/healthz`, main 자동 배포)으로 따로 만든
-서비스입니다. 추가 워크스페이스에 서버 하나를 만들 때는 `render-replica.yaml` Blueprint를
-사용할 수 있습니다.
-
-Render 무료 플랜은 워크스페이스마다 한 달 750시간의 무료 인스턴스 시간을 그 안의 무료
-서비스가 나눠 쓰고, 다 쓰면 그 워크스페이스의 무료 서비스가 다음 달까지 모두 멈춥니다.
-잠든 서버도 요청을 받으면 깨어나 15분 동안 시간을 쓰므로, 선택창은 게임을 고를 때마다
-20대 전부가 아니라 무작위로 고른 3대에만 방 수를 묻습니다(`scripts/selector-router.js`의
-`PROBE_COUNT`).
-
-서버 목록을 변경하려면 빌드 환경 변수 `RENDER_GAME_SERVERS`에 HTTPS 서버 주소를
-쉼표로 구분해 지정하고 선택창을 다시 빌드·배포합니다.
-예: `https://phone-controller-games.onrender.com,https://another-server.onrender.com`
-주소에는 경로나 쿼리를 넣지 않습니다. 설정을 바꾼 뒤에는 새 빌드가 필요합니다.
-
-모든 Render 서버에 이 버전의 `/api/load`를 먼저 배포해야 합니다. 사용자가 게임을 고르면
-브라우저에서 무작위로 고른 서버 3대의 익명 활성 화면 수를 동시에 조회해 가장 적은 서버를 선택합니다.
-동률이면 무작위로 선택하고, 1.8초 안에 응답하지 않거나 잘못 응답한 서버는 제외합니다.
-서버가 켜지는 데 시간이 걸릴 수 있다는 안내는 확인을 누르거나 2초가 지나면 닫힙니다.
-고른 서버가 모두 응답하지 않으면 그중 첫 번째(이미 깨우기 시작한 서버)로 이동합니다. 서버가 잠들어 있다면
-기동을 기다려야 하며 장애 중이면 연결이 실패할 수 있습니다. 조회는 절전 서버를 깨울 수
-있고, 기존 서버에 새 endpoint가 아직 없다면 폴백으로 연결됩니다. 서버들이 동시에 선택되면
-같은 시점의 방 수를 보고 같은 서버를 고를 수 있습니다.
-
-방 수는 CPU, 메모리, 네트워크 사용률이나 각 게임의 부하를 측정하지 않는 근사치입니다.
-자동 장애 복구나 이미 시작된 게임의 서버 이전은 지원하지 않습니다.
-게임을 열면 그 화면과 QR 참가자 모두 해당 서버에 머물러 같은 방에 연결됩니다.
-방 코드는 서버별로만 유효하므로 다른 서버의 같은 코드로 입장할 수 없습니다.
-무료 서버는 절전 후 처음 열 때 약 1분이 걸릴 수 있습니다. 서버 재시작이나 재배포 시
-메모리에 있는 진행 중인 방과 임시 저장된 사진·녹화가 사라질 수 있습니다.
-
-선택창만 로컬에서 빌드하려면 `npm ci` 후 `npm run build:selector`를 실행합니다.
-결과물은 `dist-selector/`에 생성되며 Render의 기존 선택 화면에는 영향을 주지 않습니다.
-JavaScript를 사용하지 않거나 링크를 새 탭으로 직접 열면 첫 번째 서버로 연결됩니다.
+- **Game Selector (Cloudflare Pages)**: `npm run build:selector` builds `dist-selector/` for [**phone-controller-games.pages.dev**](https://phone-controller-games.pages.dev/) and probes Render instances via `/api/load` to route players to the least busy server.
+- **Game Servers (Render)**: Configured via `render.yaml` / `render-replica.yaml` (Node 22, auto-deploy on `main`).
